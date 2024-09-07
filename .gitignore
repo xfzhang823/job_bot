@@ -1,0 +1,51 @@
+# Document, data, and other folders
+data/
+documents/
+sandbox/
+
+# Specific files to exclude
+verification.py
+
+# Byte-compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+
+# Python packages
+*.egg
+*.egg-info
+
+# Test and coverage reports
+.coverage
+.tox
+.htmlcov
+.coverage.xml
+
+# Virtual environment
+env/
+venv/
+virtualenv/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
+
+# Node modules (if using Node.js)
+node_modules/
+
+# Other
+*.tmp
+*.bak
+*.swp
