@@ -1,19 +1,21 @@
 # main.py
 
 import os
-from pipeline import run_pipeline
+from pipelines.edit_resume_pipeline import run_pipeline
 
 
 def main():
     # Define input data sources
     job_description_url = "https://www.google.com/about/careers/applications/jobs/results/113657145978692294-ai-market-intelligence-principal/?src=Online/LinkedIn/linkedin_us&utm_source=linkedin&utm_medium=jobposting&utm_campaign=contract&utm_medium=jobboard&utm_source=linkedin"
     # Define paths using os.path.join for cross-platform compatibility
-    description_text_holder = os.path.join("data", "jobposting_text_holder.txt")
-    job_descriptions_json_path = os.path.join("data", "jobpostings.json")
+    description_text_holder = os.path.join("..", "data", "jobposting_text_holder.txt")
+    job_descriptions_json_path = os.path.join("..", "data", "jobpostings.json")
     resume_json_path = os.path.join(
-        "data", "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
+        "..", "data", "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
     )
-    requirments_json_path = os.path.join("data", "extracted_job_requirements.json")
+    requirments_json_path = os.path.join(
+        "..", "data", "extracted_job_requirements.json"
+    )
 
     # Run the pipeline
     run_pipeline(
