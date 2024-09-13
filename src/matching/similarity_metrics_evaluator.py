@@ -1,5 +1,7 @@
 # metrics_evaluator.py
 
+from utils.field_mapping_utils import rename_df_columns
+
 # Conventional metric criteria suggested by GPT
 STANDARD_METRIC_CRITERIA = {
     # "BERTScore Precision"
@@ -58,15 +60,15 @@ METRIC_CRITERIA = {
     # "Word Mover's Distance"
     "word_movers_distance": {
         "range": (0, float("inf")),
-        "high_threshold": 3,  # High score is considered "Low" for this metric
-        "low_threshold": 8,  # Low score is considered "High" for this metric
+        "high_threshold": 4,  # High score is considered "Low" for this metric
+        "low_threshold": 7,  # Low score is considered "High" for this metric
         "reverse": True,  # Indicates smaller scores are better
     },
     # "DeBERTa Entailment Score"
     "deberta_entailment_score": {
         "range": (0, 1),
-        "high_threshold": 0.75,
-        "low_threshold": 0.25,
+        "high_threshold": 0.70,
+        "low_threshold": 0.20,
     },
     # # "Jaccard Similarity"
     # "jaccard_similarity": {
@@ -131,7 +133,7 @@ def categorize_scores(scores):
     return categorized_scores
 
 
-def categorize_scores_of_row(row):
+def categorize_scores_for_row(row):
     # List of metric names and corresponding categories
     metrics = [
         "bert_score_precision",
@@ -148,6 +150,14 @@ def categorize_scores_of_row(row):
         row[category_col] = evaluate_score(metric, row[metric])
 
     return row
+
+
+def categorize_scores_for_df(df):
+    df = rename_df_columns(df)  # Uses default COLUMN_NAMES_TO_VARS_MAPPING from utils
+
+    # Apply high, mid, low categories to similarity metrics
+    df = df.apply(categorize_scores_for_row, axis=1)
+    return df
 
 
 if __name__ == "__main__":
