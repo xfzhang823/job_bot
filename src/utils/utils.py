@@ -37,6 +37,28 @@ def check_json_file(filepath):
     return False
 
 
+# Utils tool to list to dict format
+def ensure_dict_format(data, prefix="item"):
+    """
+    Ensure that the input data is in dictionary format.
+    If it is a list, convert it to a dictionary with enumerated keys.
+
+    Args:
+        data (dict or list): Input data to ensure it is a dictionary.
+        prefix (str): Prefix for keys if the data is a list.
+
+    Returns:
+        dict: Data converted to a dictionary format.
+    """
+    if isinstance(data, dict):
+        return data
+    elif isinstance(data, list):
+        # Convert list to dictionary with keys like 'item_0', 'item_1', etc.
+        return {f"{prefix}_{i}": item for i, item in enumerate(data)}
+    else:
+        raise TypeError("Input data must be a list or dictionary.")
+
+
 # Function to convert text to JSON with OpenAI
 def convert_to_json_wt_gpt(input_text, model_id="gpt-3.5-turbo", primary_key=None):
     """
@@ -45,6 +67,7 @@ def convert_to_json_wt_gpt(input_text, model_id="gpt-3.5-turbo", primary_key=Non
     Args:
         input_text (str): The cleaned text to convert to JSON.
         model_id (str): The model ID to use for OpenAI (default is gpt-3.5-turbo).
+        primary_key (str): The URL of the page that uniquely identifies each job posting.
 
     Returns:
         dict: The extracted JSON content as a dictionary.

@@ -1,44 +1,27 @@
-import json
-import pandas as pd
+""" Temp for testing """
 
-from preprocessing.json_parser import (
-    fetch_branches,
-    fetch_subtrees,
-    fetch_subtrees_under_subtrees,
-    flatten_dict_and_list,
-)
-from utils.utils import pretty_print_json as pprint_json
-from preprocessing.resume_parser import ResumeParser
-from preprocessing.job_requirements_parser import JobRequirementsParser
-from matching.text_similarity_finder import TextSimilarity
-from matching.resume_matching import get_resps_reqs_similarity_metrices
-from IPython.display import display
+import os
+from pipelines.resume_job_comparison_pipeline import run_pipeline
 
 
 def main():
+    """just for texting b/c I have to test from src dir"""
+
     resume_json_path = (
         r"C:\github\job_bot\data\Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
     )
 
     reqs_json_path = r"C:\github\job_bot\data\extracted_job_requirements.json"
 
-    # Parse resume
-    resume_parser = ResumeParser(resume_json_path)
-    resps_flat = resume_parser.extract_and_flatten_responsibilities()
+    # CSV output file
+    dir_path = r"C:\github\job_bot\data"
+    csv_output_f_path = os.path.join(dir_path, "output_seg_by_seg_sim_matrix_v2.csv")
 
-    # Parse job requirements, flatten, and concactenate into a single string
-    job_reqs_parser = JobRequirementsParser(reqs_json_path)
-    job_reqs_str = job_reqs_parser.extract_flatten_concat_reqs()
-
-    # Calcualte and display similarity metrices
-    similarity_df = get_resps_reqs_similarity_metrices(resps_flat, job_reqs_str)
-
-    pd.set_option("display.max_colwidth", None)
-    pd.set_option("display.max_rows", None)
-
-    print("Similarity Metrics Dataframe:")
-    display(similarity_df)
-    similarity_df.to_clipboard()
+    run_pipeline(
+        requirements_json_file=reqs_json_path,
+        resume_json_file=resume_json_path,
+        csv_file=csv_output_f_path,
+    )
 
     # # Print merged result
     # print(json.dumps(merged_data, indent=4))

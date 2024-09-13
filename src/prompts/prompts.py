@@ -95,3 +95,14 @@ EXTRACT_JOB_REQUIREMENTS_PROMPT = (
     "Trim leading and trailing spaces and newline characters from all values. "
     "Do not include any explanations or extraneous text in the output."
 )
+
+EDIT_RESPONSIBILITY_PROMPT = {
+    "task_1": "Optimize the candidate text to increase semantic precision and similarity with the reference text.",
+    "task_2": "Reduce the semantic distance between the candidate text and reference text.",
+    "task_3": "Enhance entailment relationships, where the candidate text serves as the premise and the reference text serves as the hypothesis.",
+    "task_4": "For the entailment task, the candidate text serves as the premise and the reference text serves as the hypothesis, reversing their typical roles.",
+    "instructions": "Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.",
+    "candidate text": "{{content_1}}",
+    "reference text": "{{content_2}}",
+    "return_format": {"optimized_text": "Edited version of candidate text"},
+}
