@@ -1,56 +1,60 @@
+"""
+File: resume_editing.py
+Author: Xiao-Fei Zhang
+Last updated: 2024 Sep 12
+"""
+
+import logging
+from dotenv import load_dotenv
+import os
+import json
+import openai
+from prompts.prompts import EDIT_RESPONSIBILITY_PROMPT
+
+# Load the API key from the environment at the module level
+load_dotenv()  # Load environment variables from .env file
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+
 # Function to convert text to JSON with OpenAI
-def convert_to_json_wt_gpt(input_text, model_id="gpt-3.5-turbo", primary_key=None):
+def edit_resp_to_match_req_wt_gpt(resp_id, resp_sent, req_sent, model_id="gpt-4-turbo"):
     """
-    Extracts JSON content from an LLM response using OpenAI API.
+    Edit a bullet responsibility text from the resume to better match a requirement in
+    a job description, leveraging an LLM response using the OpenAI API.
 
     Args:
-        input_text (str): The cleaned text to convert to JSON.
-        model_id (str): The model ID to use for OpenAI (default is gpt-3.5-turbo).
+        resp_id (str): Identifier for the responsibility bullet text.
+        resp_sent (str): The candidate text to be optimized.
+        req_sent (str): The reference text from the job description.
+        model_id (str): OpenAI model to use (default is 'gpt-4').
 
     Returns:
-        dict: The extracted JSON content as a dictionary.
+        dict: A dictionary containing 'resp_id' and 'optimized_text'.
     """
 
-    # Load the API key from the environment
-    load_dotenv()  # Load environment variables from .env file
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    openai.api_key = openai_api_key
-
     # Define the JSON schema and instructions clearly in the prompt
-    prompt = CONVERT_JOB_POSTING_TO_JSON_PROMPT.format(content=input_text)
+    prompt = EDIT_RESPONSIBILITY_PROMPT.format(conten_1=resp_sent, content_2=req_sent)
 
     # Call the OpenAI API
     response = openai.chat.completions.create(
-        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.7
+        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.6
     )
 
     # Extract the content from the response
-    response_text = response.choices[0].message.content
+    edited_resp = response.choices[0].message.content
 
     # Debugging: Print the raw response to see what OpenAI returned
-    logging.info(f"Raw LLM Response: {response_text}")
+    logging.info(f"Raw LLM Response: {edited_resp}")
 
     try:
-        # Convert the extracted text to JSON
-        job_posting_dict = json.loads(response_text)  # Proper JSON parsing
+        # Parse the JSON response
+        response_dict = json.loads(edited_resp)
 
-        # Nest job data under the URL as the primary key
-        if primary_key:
-            # Add the URL to the job posting data as a field for redundancy
-            job_posting_dict["url"] = primary_key
-            job_posting_dict = {primary_key: job_posting_dict}
+        # Include resp_id in the result
+        result = {"resp_id": resp_id}
+        result.update(response_dict)
+        return result
 
-        logging.info("JSON content successfully extracted and parsed.")
-        return job_posting_dict
     except json.JSONDecodeError as e:
-        print("Error decoding JSON:", e)
         logging.error(f"JSON decoding failed: {e}")
         raise Exception("JSON decoding failed. Please check the response format.")
-    except KeyError as e:
-        logging.error(f"Missing key in response: {e}")
-        raise Exception(
-            "Error extracting JSON content. Please check the response format."
-        )
-    except ValueError as e:
-        logging.error(f"Unexpected ValueError: {e}")
-        raise Exception("Error occurred while processing the JSON content.")
