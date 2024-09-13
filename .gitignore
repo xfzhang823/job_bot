@@ -2,9 +2,11 @@
 data/
 documents/
 sandbox/
+input_output/
 
 # Specific files to exclude
 verification.py
+src/temp_tools.ipynb
 
 # Byte-compiled Python files
 __pycache__/

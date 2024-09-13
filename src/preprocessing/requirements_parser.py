@@ -80,7 +80,7 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
-    def extract_other_categories(self):
+    def extract_other(self):
         """
         Extract other categories of job requirements from the job requirements.
 
@@ -88,12 +88,68 @@ class JobRequirementsParser:
             dict: The extracted requirements of other categories.
         """
         if self.job_reqs_dict:
-            other_categories = fetch_subtrees(self.job_reqs_dict, "other_categories")
+            other_categories = fetch_subtrees(self.job_reqs_dict, "other")
             logging.info("Fetched 'other categories' job requirements.")
             return other_categories
         else:
             logging.error("Invalid job requirements data.")
             return None
+
+    def extract_flatten_reqs(self):
+        """
+        Extract and flatten more relevant job requirements into a dictionary.
+        Each requirement is keyed by a unique identifier.
+
+        Returns:
+            dict: A dictionary of flattened job requirements with unique keys.
+
+        Relevant requirement categories include:
+        - pie_in_sky
+        - down_to_earth
+        - other
+        """
+        # Extract requirements with error handling
+        try:
+            pie_in_sky_reqs = self.extract_pie_in_the_sky()  # List of dicts
+            down_to_earth_reqs = self.extract_down_to_earth()  # List of dicts
+            other_reqs = self.extract_other()  # Corrected method call (List of dicts)
+        except Exception as e:
+            logging.error(f"Error extracting requirements: {e}")
+            return []
+
+        # Debugging: Check the output of each extraction function
+        print(f"Extracted 'pie_in_the_sky' requirements: {pie_in_sky_reqs}")
+        print(f"Number of 'pie_in_the_sky' requirements: {len(pie_in_sky_reqs)}")
+
+        print(f"Extracted 'down_to_earth' requirements: {down_to_earth_reqs}")
+        print(f"Number of 'down_to_earth' requirements: {len(down_to_earth_reqs)}")
+
+        print(f"Extracted 'other' requirements: {other_reqs}")
+        print(f"Number of 'other' requirements: {len(other_reqs)}")
+
+        # Check if any of the extracted lists are None or empty
+        if not pie_in_sky_reqs:
+            logging.warning("No 'pie_in_sky' requirements found.")
+            pie_in_sky_reqs = []
+        if not down_to_earth_reqs:
+            logging.warning("No 'down_to_earth' requirements found.")
+            down_to_earth_reqs = []
+        if not other_reqs:
+            logging.warning("No 'other' requirements found.")
+            other_reqs = []
+
+        # Combine all requirements into a single list
+        combined_reqs = pie_in_sky_reqs + down_to_earth_reqs + other_reqs
+
+        # Use the existing flatten_dict_and_list function to flatten the combined list
+        flattened_reqs_dict = flatten_dict_and_list(combined_reqs)
+
+        logging.info("Extracted and flattened job requirements.")
+        print(
+            f"Total number of flattened job requirements: {len(flattened_reqs_dict)}"
+        )  # Debugging: Check total count
+        print(f"Flattened job requirements: {flattened_reqs_dict}")
+        return flattened_reqs_dict
 
     def extract_flatten_concat_reqs(self):
         """
@@ -103,22 +159,22 @@ class JobRequirementsParser:
         Returns:
             str: Concatenated string of all job requirements.
 
-        Relevant requirement categories inlcude: pie_in_sky and down_to_earth
+        Relevant requirement categories include:
+        - pie_in_sky
+        - down_to_earth
+        - other
         """
-        # Extract requirements
-        pie_in_sky_reqs = self.extract_pie_in_the_sky()  # List of dicts
-        down_to_earth_reqs = self.extract_down_to_earth()  # List of dicts
 
-        # Flatten the nested lists and combine them into a single list
-        merged_flat_list = [
-            item
-            for req_dict in pie_in_sky_reqs + down_to_earth_reqs  # Combine both lists
-            for key, sublist in req_dict.items()  # Iterate through each dictionary
-            for item in sublist  # Iterate through each sublist (actual requirements)
-        ]
+        # Use the first function to get the flattened dictionary of requirements
+        merged_flat_dict = self.extract_flatten_reqs()
 
-        # Convert list to a single string with newline separation
-        job_reqs_str = "\n".join(merged_flat_list)
+        # Check if the dictionary is empty to avoid concatenating an empty string
+        if not merged_flat_dict:
+            logging.warning("No job requirements found to concatenate.")
+            return ""
+
+        # Convert dictionary values to a single string with newline separation
+        job_reqs_str = "\n".join(merged_flat_dict.values())
 
         logging.info("Extracted, flattened, and concatenated job requirements.")
         return job_reqs_str
