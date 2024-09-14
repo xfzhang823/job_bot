@@ -1,8 +1,8 @@
 """ TBA """
 
 import logging
-from utils.utils import read_from_json_file
-from preprocessing.json_parser import fetch_subtrees, flatten_dict_and_list
+from utils.generic_utils import read_from_json_file
+from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
 
 
 class JobRequirementsParser:

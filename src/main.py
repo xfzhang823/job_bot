@@ -3,12 +3,13 @@
 import os
 import logging
 from pipelines.preprocessing_pipeline import run_pipeline as run_preprocessing_pipeline
-from pipelines.resume_job_comparison_pipeline import (
+from pipelines.resume_eval_pipeline import (
     run_pipeline as run_resume_comparison_pipeline,
 )
 
 
 def run_pipeline_1():
+    """Pipeline for preprocessing job posting webpage"""
     # Run pipeline 1: preprocessing
     # Define input data sources
     job_description_url = "https://www.google.com/about/careers/applications/jobs/results/113657145978692294-ai-market-intelligence-principal/?src=Online/LinkedIn/linkedin_us&utm_source=linkedin&utm_medium=jobposting&utm_campaign=contract&utm_medium=jobboard&utm_source=linkedin"
@@ -33,7 +34,7 @@ def run_pipeline_1():
 
 
 def run_pipeline_2():
-    """just for texting b/c I have to test from src dir"""
+    """Pipeline for resume evaluation"""
     logging.info("Running pipeline 2: Matching Resume")
 
     resume_json_path = (
@@ -51,6 +52,14 @@ def run_pipeline_2():
         resume_json_file=resume_json_path,
         csv_file=csv_output_f_path,
     )
+
+
+def run_pipeline_3():
+    pass
+
+
+def run_pipeline_4():
+    pass
 
 
 def main():

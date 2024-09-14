@@ -8,6 +8,9 @@ input_output/
 verification.py
 src/temp_tools.ipynb
 
+# API Keys
+.env
+
 # Byte-compiled Python files
 __pycache__/
 *.pyc

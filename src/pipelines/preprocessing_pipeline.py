@@ -10,50 +10,22 @@ import json
 import logging
 from dotenv import load_dotenv
 import openai
-from utils.utils import (
+from utils.generic_utils import (
     pretty_print_json,
     load_or_create_json,
+    add_to_json_file,
+)
+from utils.llm_data_utils import (
     read_and_clean_webpage_wt_llama3,
     convert_to_json_wt_gpt,
-    add_to_json_file,
-    read_from_json_file,
 )
-from matching.text_similarity_finder import TextSimilarity
-from prompts.prompts import EXTRACT_JOB_REQUIREMENTS_PROMPT
+from evaluation_optimization.text_similarity_finder import TextSimilarity
+from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
 
 
 # Load API keys
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
-
-
-def analyze_resume_against_requirements(
-    resume_json, requirements, model_id="gpt-4-turbo"
-):
-    """
-    Analyzes the resume JSON against the job requirements and suggests modifications.
-
-    Args:
-        resume_json (dict): The JSON object containing the resume details.
-        requirements (dict): The extracted requirements from the job description.
-        model_id (str): The model ID for OpenAI (default is gpt-3.5-turbo).
-
-    Returns:
-        str: JSON-formatted suggestions for resume modifications.
-    """
-    prompt = (
-        f"Analyze the following resume JSON and identify sections that match the key job requirements. "
-        f"Suggest modifications to better align the resume with the job description.\n\n"
-        f"Resume JSON:\n{resume_json}\n\n"
-        f"Key Requirements JSON:\n{requirements}\n\n"
-        "Provide your suggestions in JSON format, with modifications highlighted."
-    )
-
-    response = openai.chat.completions.create(
-        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.3
-    )
-
-    return response.choices[0].message.content
 
 
 def extract_job_requirements_with_gpt(job_description, model_id="gpt-3.5-turbo"):
@@ -89,33 +61,6 @@ def extract_job_requirements_with_gpt(job_description, model_id="gpt-3.5-turbo")
         return None
 
 
-def modify_resume_section(section_json, requirements, model_id="gpt-3.5-turbo"):
-    """
-    Modifies a specific section of the resume to better align with job requirements.
-
-    Args:
-        section_json (dict): The JSON object containing the resume section details.
-        requirements (dict): The extracted requirements from the job description.
-        model_id (str): The model ID for OpenAI (default is gpt-3.5-turbo).
-
-    Returns:
-        dict: Modified resume section.
-    """
-    prompt = (
-        f"Modify the following resume section in JSON format to better align with the job requirements. "
-        f"Make it more concise and impactful while highlighting relevant skills and experiences:\n\n"
-        f"Current Section JSON:\n{section_json}\n\n"
-        f"Job Requirements JSON:\n{requirements}\n\n"
-        "Return the modified section in JSON format."
-    )
-
-    response = openai.chat.completions.create(
-        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.7
-    )
-
-    return json.loads(response["choices"][0]["message"]["content"])
-
-
 def run_pipeline(
     job_description_url,
     job_descriptions_json_file,
@@ -143,13 +88,17 @@ def run_pipeline(
     requirements_json = {}
     resume_json = {}
 
-    # Step 1: Load or create job descriptions JSON file
-    job_descriptions, is_existing = load_or_create_json(job_descriptions_json_file)
+    # Step 1: Check if job posting json file exists or not, and
+    # check if the url already exists or not
+    job_descriptions, is_existing = load_or_create_json(
+        job_descriptions_json_file, job_description_url
+    )
 
     # Check if the current job description already exists by unique ID (URL)
-    if job_description_url in job_descriptions:
+    if is_existing:
         logging.info(
-            f"Job description for URL '{job_description_url}' already exists. Skipping fetching step."
+            f"Job description for URL:\n '{job_description_url}' \n"
+            f"already exists. Skipping the rest of the preprocessing steps."
         )
         job_description_json = job_descriptions[job_description_url]
     else:
