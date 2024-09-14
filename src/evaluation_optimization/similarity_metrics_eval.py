@@ -133,15 +133,17 @@ def categorize_scores(scores):
     return categorized_scores
 
 
-def categorize_scores_for_row(row):
-    # List of metric names and corresponding categories
-    metrics = [
-        "bert_score_precision",
-        "soft_similarity",
-        "word_movers_distance",
-        "deberta_entailment_score",
-    ]
+def categorize_scores_for_row(row, metrics):
+    """
+    Categorize scores for a single row based on provided metrics.
 
+    Args:
+        row (pd.Series): A single row from the DataFrame.
+        metrics (list): A list of metric names to categorize.
+
+    Returns:
+        pd.Series: The row with new category columns added.
+    """
     # Loop over each metric and apply the evaluate_score function
     for metric in metrics:
         # Create a new column name for the category
@@ -152,7 +154,25 @@ def categorize_scores_for_row(row):
     return row
 
 
-def categorize_scores_for_df(df):
+def categorize_scores_for_df(df, metrics=None):
+    """
+    Apply category assignments to the entire DataFrame based on provided metrics.
+
+    Args:
+        - df (pd.DataFrame): The DataFrame to process.
+        - metrics (list): A list of metric names to categorize.
+        default to None (use default column names)
+
+    Returns:
+        pd.DataFrame: The DataFrame with new category columns added.
+    """
+    if metrics is None:
+        metrics = [
+            "bert_score_precision",
+            "soft_similarity",
+            "word_movers_distance",
+            "deberta_entailment_score",
+        ]
     df = rename_df_columns(df)  # Uses default COLUMN_NAMES_TO_VARS_MAPPING from utils
 
     # Apply high, mid, low categories to similarity metrics

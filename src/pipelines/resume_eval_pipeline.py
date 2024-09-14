@@ -1,59 +1,32 @@
 import os
-import json
 import pandas as pd
 import logging
-from preprocessing.json_parser import (
-    fetch_branches,
-    fetch_subtrees,
-    fetch_subtrees_under_subtrees,
-    flatten_dict_and_list,
-)
-from utils.utils import pretty_print_json as pprint_json
-from utils.field_mapping_utils import translate_column_names
-from preprocessing.resume_parser import ResumeParser
-from preprocessing.requirements_parser import JobRequirementsParser
-from matching.text_similarity_finder import TextSimilarity
-from matching.resume_matching import (
-    calculate_resp_similarity_metrices,
+from preprocessing.resume_preprocessor import ResumeParser
+from preprocessing.requirements_preprocessor import JobRequirementsParser
+from evaluation_optimization.text_similarity_finder import TextSimilarity
+from evaluation_optimization.resume_matching import (
     calculate_segment_resp_similarity_metrices,
-    calculate_resps_reqs_bscore_precisions,
-    calculate_segment_resp_bscore_precisions,
 )
-from matching.similarity_metrics_evaluator import categorize_scores_of_row
+from evaluation_optimization.similarity_metrics_eval import categorize_scores_for_df
 from IPython.display import display
 
 
-def add_score_categoies(df):
-    df = translate_column_names(
-        df
-    )  # Uses default COLUMN_NAMES_TO_VARS_MAPPING from utils
-
-    # Apply high, mid, low categories to similarity metrics
-    df = df.apply(categorize_scores_of_row, axis=1)
-    return df
-
-
 def run_pipeline(requirements_json_file, resume_json_file, csv_file):
-    """just for texting b/c I have to test from src dir"""
-
-    # Set file paths
-    resume_json_path = resume_json_file
-    reqs_json_path = requirements_json_file
-    csv_path = csv_file
+    """run pipeline"""
 
     # Check if resps comparison csv file exists
     if os.path.exists(csv_file):
         df = pd.read_csv(csv_file)
     else:
         # Step 1: Parse and flatten responsibilities from resume (as a dict)
-        resume_parser = ResumeParser(resume_json_path)
+        resume_parser = ResumeParser(resume_json_file)
         resps_flat = (
             resume_parser.extract_and_flatten_responsibilities()
         )  # this is a dict
 
         # Step 2: Parse and flatten job requirements (as a dict) or
         # parse/flatten/conncactenate into a single string
-        job_reqs_parser = JobRequirementsParser(reqs_json_path)
+        job_reqs_parser = JobRequirementsParser(requirements_json_file)
         reqs_flat = job_reqs_parser.extract_flatten_reqs()  # this is a dict
         reqs_flat_str = (
             job_reqs_parser.extract_flatten_concat_reqs()
@@ -75,23 +48,22 @@ def run_pipeline(requirements_json_file, resume_json_file, csv_file):
 
         # Step 5. Add score category values (high, mid, low)
         # Translate DataFrame columns to match expected column names**
-        similarity_df = add_score_categoies(similarity_df)
-
-        # Display
-        print("Similarity Metrics Dataframe:")
-        # display(bscore_p_df)
-        display(similarity_df.head(30))
+        similarity_df = categorize_scores_for_df(similarity_df)
 
         # Clean and save to csv
         # df_cleaned = bscore_p_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-        df_cleaned = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-        df_cleaned.to_csv(csv_path, index=False)
-        logging.info(f"Similarity metrics saved to location {csv_path}.")
+        df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+        df.to_csv(csv_file, index=False)
+        logging.info(f"Similarity metrics saved to location {csv_file}.")
 
         # Load the dataframe
-        df = pd.read_excel(csv_file)
+        df = pd.read_csv(csv_file)
 
-    # Step 6. Filter out
+    # Display the top rows of the dataframe for verification
+    print("Similarity Metrics Dataframe:")
+    display(df.head(30))
+
+    # Step 6. Filter responsibilities to keep only the more relevant bullets
 
     # Load csv_file
 

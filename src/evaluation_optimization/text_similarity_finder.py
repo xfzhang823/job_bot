@@ -1,7 +1,7 @@
 """
 File: text_similarity_finder
 Author: XF Zhang
-Last updated on:
+Last updated on: 2024 Sep 11
 
 text_similarity_finder module provides `TextSimilarity` classes that compute text similarity 
 using methods from models including:
@@ -122,7 +122,7 @@ class TextSimilarity:
     but not B to A).
 
     Usage:
-        To use the module,
+        To use the class,
         - create an instance of the `TextSimilarity` class &
         - call its methods with appropriate text inputs.
     """

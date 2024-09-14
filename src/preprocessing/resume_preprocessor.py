@@ -2,14 +2,9 @@
 
 import re
 import logging
-from utils.utils import pretty_print_json
-from preprocessing.json_parser import (
-    fetch_subtrees,
-    fetch_branches,
-    fetch_subtrees_under_subtrees,
-    flatten_dict_and_list,
-)
-from utils.utils import read_from_json_file
+from utils.generic_utils import pretty_print_json
+from utils.dict_utils import fetch_subtrees
+from utils.generic_utils import read_from_json_file
 
 import logging
 
