@@ -3,11 +3,12 @@
 import os
 import json
 import logging
+from pathlib import Path
 import re
 from dotenv import load_dotenv
 import ollama
 import openai
-from webpage_reader import read_webpages
+from utils.search_uitls import fetch_and_summarize_company_news
 from prompts.prompt_templates import (
     CLEAN_JOB_PAGE_PROMPT,
     CONVERT_JOB_POSTING_TO_JSON_PROMPT,
@@ -55,6 +56,33 @@ def ensure_dict_format(data, prefix="item"):
         return {f"{prefix}_{i}": item for i, item in enumerate(data)}
     else:
         raise TypeError("Input data must be a list or dictionary.")
+
+
+def find_project_root(starting_path=None, marker=".git"):
+    """
+    Recursively find the root directory of the project by looking for a specific marker.
+
+    Args:
+        starting_path (str or Path): The starting path to begin the search. Defaults to the current script's directory.
+        marker (str): The marker to look for (e.g., '.git', 'setup.py', 'README.md').
+
+    Returns:
+        Path: The Path object pointing to the root directory of the project, or None if not found.
+    """
+    # Start from the directory of the current file if not specified
+    if starting_path is None:
+        starting_path = Path(__file__).resolve().parent
+
+    # Convert starting_path to a Path object if it's not already
+    starting_path = Path(starting_path)
+
+    # Traverse up the directory tree
+    for parent in starting_path.parents:
+        # Check if the marker exists in the current directory
+        if (parent / marker).exists():
+            return parent
+
+    return None  # Return None if the marker is not found
 
 
 def load_or_create_json(filepath, key=None):

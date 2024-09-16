@@ -9,114 +9,192 @@ from dotenv import load_dotenv
 import os
 import json
 import openai
-from jsonschema import validate, ValidationError
-from src.prompts.prompt_templates import EDIT_RESPONSIBILITY_PROMPT
-from src.utils.generic_utils import get_openai_api_key
+import jsonschema
+import uuid
+import logging_config
+from prompts.prompt_templates import (
+    SEMANTIC_ALIGNMENT_PROMPT,
+    STRUCTURE_TRANSFER_PROMPT,
+)
+from utils.llm_data_utils import get_openai_api_key
+from utils.validation_utils import validate_json_response
+from utils.llm_data_utils import call_openai_api
+from base_models import JSONResponse
+
+# logging
+logger = logging.getLogger(__name__)
 
 # Get openai api key
 openai.api_key = get_openai_api_key()
 
+# Define the JSON schema somewhere accessible
+LLM_RES_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "optimized_text": {"type": "string"},
+    },
+    "required": ["optimized_text"],
+}
 
-def validate_response(response_dict):
+
+def edit_text_for_semantic_entailment(
+    client,
+    candidate_text,
+    reference_text,
+    text_id=None,
+    model_id="gpt-4-turbo",
+    temperature=0.6,
+    max_tokens=1056,
+):
     """
-    Validate the JSON response against the expected schema.
+
+    Edits and optimizes text using OpenAI API based on a given requirement.
 
     Args:
-        response_dict (dict): The JSON response to validate.
-
-    Raises:
-        Exception: If validation fails.
-    """
-    # Define the expected JSON schema
-    schema = {
-        "type": "object",
-        "properties": {"optimized_text": {"type": "string"}},
-        "required": ["optimized_text"],
-    }
-    try:
-        validate(instance=response_dict, schema=schema)
-    except ValidationError as e:
-        logging.error(f"JSON schema validation failed: {e}")
-        raise Exception("JSON schema validation failed.")
-
-
-# Function to convert text to JSON with OpenAI
-def edit_resp_to_match_req_wt_gpt(resp_id, resp_sent, req_sent, model_id="gpt-4-turbo"):
-    """
-    Edit a bullet responsibility text from the resume to better match a requirement in
-    a job description, leveraging an LLM response using the OpenAI API.
-
-    Args:
-        resp_id (str): Identifier for the responsibility bullet text.
-        resp_sent (str): The candidate text to be optimized.
-        req_sent (str): The reference text from the job description.
-        model_id (str): OpenAI model to use (default is 'gpt-4').
-
-        resp is short for responsibility
-        req is short for (job) requirement
+        - client: OpenAI API client instance.
+        - text_id (int): (Optional) Identifier for the responsibility text.
+        Default to None (unique ids to be generated with UUID function)
+        - candidate_text (str): Original text to be transformed by the model
+        (i.e., the riginal responsibility text to be revised.)
+        - reference_text (str): Text that the candidate text is being compared to
+        (i.e., requirement text to optimize against.)
+        - model_id (str): Model ID to use for the OpenAI API call
+        (gpt-3.5-turbo, gpt-4-turbo, etc.)
+        - max_tokens: default set to 1056
 
     Returns:
-        dict: A dictionary containing 'resp_id' and 'optimized_text'.
+        dict: Contains 'resp_id' and 'optimized_text' after revision.
     """
+    # Generate a unique text_id using UUID
+    if text_id is None:
+        text_id = str(uuid.uuid4())
 
-    # Define the JSON schema and instructions clearly in the prompt
-    # Format the prompt with the provided texts
+    # Format the prompt using a predefined template
     try:
-        prompt = EDIT_RESPONSIBILITY_PROMPT.format(
-            content_1=resp_sent, content_2=req_sent
+        prompt = SEMANTIC_ALIGNMENT_PROMPT.format(
+            content_1=candidate_text, content_2=reference_text
         )
     except KeyError as e:
-        logging.error(f"Error formatting EDIT_RESPONSIBILITY_PROMPT: {e}")
+        logger.error(f"Error formatting STRUCTURE_TRANSFER_PROMPT: {e}")
         raise
 
-    # Call the OpenAI API
+    # Call api function and get response; deserialize from pydantic obj to dict
+    response_pyd_obj = call_openai_api(
+        client,
+        model_id,
+        prompt,
+        expected_res_type="json",
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+    # Ensure the response is in the correct format (Pydantic JSONResponse model)
+    if not isinstance(response_pyd_obj, JSONResponse):
+        logger.error("Received response is not in expected JSONResponse format.")
+        raise ValueError("Received response is not in expected JSONResponse format.")
+
+    # Deserialize pydantic obj. (expect a dictionary)
+    response_dict = response_pyd_obj.model_dump()
+    # print(f"final text: {response_dict}")
+
+    # Validate the JSON structure using JSON Schema
     try:
-        response = openai.chat.completions.create(
-            model=model_id,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant that strictly adheres to the provided instructions and returns responses only in the specified JSON format.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.4,
-            max_tokens=200,  # Ensure sufficient tokens for response
+        jsonschema.validate(instance=response_dict, schema=LLM_RES_JSON_SCHEMA)
+        logger.info("JSON schema validation passed.")
+    except jsonschema.exceptions.ValidationError as e:
+        logger.error(f"JSON schema validation failed: {e}")
+        raise ValueError(f"Invalid JSON format: {e}")
+
+    # Combine w/t id, then return the combined dictionary
+    result = {"resp_id": text_id, **response_dict}  # ** to unpack a dictionary
+
+    logger.info(f"Results updated: \n{result}")
+    return result
+
+
+def edit_text_for_dp(
+    client,
+    target_text,
+    source_text,
+    text_id=None,
+    model_id="gpt-4-turbo",
+    temperature=0.8,
+    max_tokens=1056,
+):
+    """
+    Re-edit the target text to better align w/t source text's dependency parsing (DP),
+    leveraging the OpenAI API.
+
+    Example:
+    Re-edit revised responsibility to match with the original responsibility text's DP
+    to perserve the tone & style.
+
+    Args:
+        - client (OpenAI()): OpenAI API client instance.
+        - text_id (str): Identifier of the target text (defaulted to None - unique IDs
+        to be generated by UUID function)
+        (i.e., the responsibility bullet text.)
+        - target_text (str): The target text to be transformed (i.e.,
+        revised responsibility text).
+        - source_text (str): The source text from whose "dependency parsing"
+        to be modeled after (i.e., original responsibility text from resume).
+        - model_id (str): OpenAI model to use (default is 'gpt-4').
+        - temperature (float): defaulted to 0.8 (a higher temperature setting is
+        needed to give the model more flexibility/creativity).
+        - max_token: default to 1056
+
+        Note:
+        - resp is short for responsibility
+        - req is short for (job) requirement
+
+    Returns:
+        dict: A dictionary in the format of {'resp_id': "...", 'optimized_text': "..."}.
+    """
+    # Generate a unique text_id using UUID
+    if text_id is None:
+        text_id = str(uuid.uuid4())
+
+    # Define the JSON schema and instructions clearly in the prompt
+    try:
+        prompt = STRUCTURE_TRANSFER_PROMPT.format(
+            content_1=source_text, content_2=target_text
         )
-    except Exception as e:
-        logging.error(f"OpenAI API call failed: {e}")
+        print(f"DEBUG - Formatted Prompt in edit_text_for_dp:\n{prompt}")
+    except KeyError as e:
+        logger.error(f"Error formatting STRUCTURE_TRANSFER_PROMPT: {e}")
         raise
 
-    # Extract the content from the response
-    edited_resp = response.choices[0].message.content
+    # Call API function and get response; deserialize from pydantic obj to dict
+    response_pyd_obj = call_openai_api(
+        client,
+        model_id,
+        prompt,
+        expected_res_type="json",
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
-    # Check if the response is empty
-    if not edited_resp:
-        logging.error("Received an empty response from OpenAI API.")
-        raise Exception("Received an empty response from OpenAI API.")
+    # Ensure the response is in the correct format (Pydantic JSONResponse model)
+    if not isinstance(response_pyd_obj, JSONResponse):
+        logger.error("Received response is not in expected JSONResponse format.")
+        raise ValueError("Received response is not in expected JSONResponse format.")
 
-    # Debugging: Print the raw response to see what OpenAI returned
-    logging.info(f"Raw LLM Response: {edited_resp}")
+    # Deserialize pydantic obj. (expect a dictionary)
+    response_dict = response_pyd_obj.model_dump()
 
-    # combine revised text with id, and return the dictionary
+    # Validate the JSON structure using JSON Schema
     try:
-        # Parse the JSON response
-        response_dict = json.loads(edited_resp)
+        jsonschema.validate(instance=response_dict, schema=LLM_RES_JSON_SCHEMA)
+        logger.info("JSON schema validation passed.")
+    except jsonschema.exceptions.ValidationError as e:
+        logger.error(f"JSON schema validation failed: {e}")
+        raise ValueError(f"Invalid JSON format: {e}")
 
-        # Validate the JSON structure
-        validate_response(response_dict)
+    # Combine w/t id, then return the combined dictionary
+    result = {"resp_id": text_id, **response_dict}  # ** to unpack a dictionary
 
-        # Include resp_id in the result
-        result = {"resp_id": resp_id}
-        result.update(response_dict)
-        return result
-
-    except json.JSONDecodeError as e:
-        logging.error(f"JSON decoding failed: {e}")
-        raise ValueError("JSON decoding failed. Please check the response format.")
-    except ValidationError as e:
-        logging.error(f"JSON schema validation failed: {e}")
-        raise ValueError("JSON schema validation failed.")
+    logger.info(f"Results updated: \n{result}")
+    return result
 
 
 # Function to modify resume w/t ChatGPT (unfinished...)
