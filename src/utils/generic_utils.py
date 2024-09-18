@@ -26,6 +26,7 @@ def check_json_file(file_path):
         bool: True if the file exists and has a .json extension, False otherwise.
     """
     # Check if the file exists and has a .json extension
+    file_path = str(file_path)
     if os.path.exists(file_path) and file_path.lower().endswith(".json"):
         logging.info(f"The file '{file_path}' already exists.")
         return True

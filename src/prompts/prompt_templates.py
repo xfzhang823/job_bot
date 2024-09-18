@@ -50,59 +50,6 @@ CONVERT_JOB_POSTING_TO_JSON_PROMPT = (
     "Do not include any explanations or extraneous text in the output."
 )
 
-
-# Per the new GPT model (o1) explanation:
-# bullets are better for instructions and
-# JSON should be used for output, esp. with examples.
-# double {{ }} is needed for JSON output instruction.
-SEMANTIC_ALIGNMENT_PROMPT = """
-You are a skilled professional at writing resumes. Please perform the following tasks:
-1. Optimize the candidate text to increase semantic precision and similarity with the reference text.
-2. Reduce the semantic distance between the candidate text and reference text.
-3. Enhance entailment relationships, where the candidate text serves as the premise and the reference text serves as the hypothesis.
-4. For the entailment task, the candidate text serves as the premise and the reference text serves as the hypothesis, reversing their typical roles.
-5. Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.
-
-**Candidate text:**
-"{content_1}"
-
-**Reference text:**
-"{content_2}"
-
-**Return Format:**
-Please return the result in JSON format as follows:
-
-{{
-  "optimized_text": "Edited version of candidate text"
-}}
-
-Do not include any additional text or explanations.
-"""
-
-STRUCTURE_TRANSFER_PROMPT = """
-You are a skilled professional at writing resumes. Please perform the following tasks:
-
-1. Analyze the **source text** at a high level.
-
-2. Apply the ""source text's** dependency structure to the **target text**. Ensure that the original meaning of the **target text** is mostly preserved.
-
-**Source Text:**
-"{content_1}"
-
-**Target Text:**
-"{content_2}"
-
-**Return Format:**
-Please return the result in JSON format as follows:
-
-{{
-  "optimized_text": "Edited version of the target text"
-}}
-
-Do not include any additional text or explanations.
-"""
-
-
 EXTRACT_JOB_REQUIREMENTS_PROMPT = (
     "You are a skilled professional at analyzing job descriptions. Given the following job description, extract all sections relevant to a candidate's qualifications, responsibilities, skills, education, experience, company culture, values, or any other unique criteria that are important to the employer. "
     "Search broadly for sections that match these categories, including those with different titles or phrasing that express similar ideas. Use synonyms and context to find all relevant information. Prioritize recall over precision to ensure no important details are missed.\n\n"
@@ -148,3 +95,96 @@ EXTRACT_JOB_REQUIREMENTS_PROMPT = (
     "Trim leading and trailing spaces and newline characters from all values. "
     "Do not include any explanations or extraneous text in the output."
 )
+
+
+# Per the new GPT model (o1) explanation:
+# bullets are better for instructions and
+# JSON should be used for output, esp. with examples.
+# double {{ }} is needed for JSON output instruction.
+SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Optimize the candidate text to increase semantic precision and similarity with the reference text.
+2. Reduce the semantic distance between the candidate text and reference text.
+3. Enhance entailment relationships, where the candidate text serves as the premise and the reference text serves as the hypothesis.
+4. For the entailment task, the candidate text serves as the premise and the reference text serves as the hypothesis, reversing their typical roles.
+5. Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.
+
+**Candidate text:**
+"{content_1}"
+
+**Reference text:**
+"{content_2}"
+
+**Return Format:**
+Please return the result in JSON format as follows:
+
+{{
+  "optimized_text": "Edited version of candidate text"
+}}
+
+Do not include any additional text or explanations.
+"""
+
+ENTAILMENT_ALIGNMENT_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Enhance entailment relationships between **the premise text** and **the hypothesis text** by modifying ONLY the **premise text".
+2. Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.
+
+**Premise text:**
+"{content_1}"
+
+**Hypothesis text:**
+"{content_2}"
+
+**Return Format:**
+Please return the result in JSON format as follows:
+
+{{
+  "optimized_text": "Edited version of candidate text"
+}}
+
+Do not include any additional text or explanations.
+"""
+
+SEMANTIC_ALIGNMENT_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Optimize **the candidate text** to increase semantic precision and similarity with **the reference text**.
+2. Reduce the semantic distance between **the candidate text** and the **reference text**.
+
+**Candidate text:**
+"{content_1}"
+
+**Reference text:**
+"{content_2}"
+
+**Return Format:**
+Please return the result in JSON format as follows:
+
+{{
+  "optimized_text": "Edited version of candidate text"
+}}
+
+Do not include any additional text or explanations.
+"""
+
+
+STRUCTURE_TRANSFER_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Analyze the **source text** at a high level.
+2. Apply the ""source text's** dependency structure to the **target text**. Ensure that the original meaning of the **target text** is mostly preserved.
+
+**Target Text:**
+"{content_1}"
+
+**Source Text:**
+"{content_2}"
+
+**Return Format:**
+Please return the result in JSON format as follows:
+
+{{
+  "optimized_text": "Edited version of the target text"
+}}
+
+Do not include any additional text or explanations.
+"""
