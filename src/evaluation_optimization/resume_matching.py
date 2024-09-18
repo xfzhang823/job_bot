@@ -48,17 +48,17 @@ def calculate_resp_similarity_metrices(resps_flat, job_reqs_str):
 
 
 def calculate_segment_resp_similarity_metrices(
-    responsibilities: list[str], requirements: list[str]
+    responsibilities: dict[str, str], requirements: dict[str, str]
 ):
     """
     Calculate text similarity metrics:
     - between EACH resume responsibility and EACH job requirement;
     - leveraging the AsymmetricTextSimilarity class due to the asymmetrical relationship
-    btw experience/responsibilities and job requirements.
+    between experience/responsibilities and job requirements.
 
     Args:
-        responsibilities (list of str): List of flattened responsibilities from the resume.
-        requirements (list of str): List of flattened job requirements from the job posting.
+        responsibilities (dict of str): Dictionary of flattened responsibilities from the resume.
+        requirements (dict of str): Dictionary of flattened job requirements from the job posting.
 
     Returns:
         pd.DataFrame: DataFrame containing similarity metrics.
