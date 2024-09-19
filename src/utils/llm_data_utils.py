@@ -50,6 +50,8 @@ def call_openai_api(
         CodeResponse: a custom Pydantic model for code response (e.g., inherited from pydantic.BaseModel).
     """
     try:
+        logger.info(f"Making API call with expected response type: {expected_res_type}")
+
         response = client.chat.completions.create(
             model=model_id,
             messages=[
@@ -71,7 +73,7 @@ def call_openai_api(
         # Check if the response is empty
         if not response_content:
             logger.error("Received an empty response from OpenAI API.")
-            raise Exception("Received an empty response from OpenAI API.")
+            raise ValueError("Received an empty response from OpenAI API.")
 
         # Handle response based on expected type using Pydantic models
         if expected_res_type == "str":
@@ -83,7 +85,22 @@ def call_openai_api(
             # Parse JSON response
             try:
                 # Convert JSON-formatted string to Python dictionary
-                response_dict = json.loads(response_content)
+
+                # Check if response contains an incomplete or non-JSON response
+                if not response_content.endswith("}"):
+                    logger.error("Response appears incomplete or malformed.")
+                    raise ValueError("Received an incomplete response from OpenAI API.")
+
+                # Clean the response to extract the JSON block
+                cleaned_response_content = clean_and_extract_json(response_content)
+
+                # Check if the response is empty after cleaning
+                if not cleaned_response_content:
+                    logger.error("Received an empty response from LLaMA API.")
+                    raise ValueError("Received an empty response from LLaMA API.")
+
+                # Convert cleaned JSON-formatted string to Python dictionary
+                response_dict = json.loads(cleaned_response_content)
 
                 # Use Pydantic to validate and parse the dictionary into a model
                 parsed_response = JSONResponse(**response_dict)
@@ -94,11 +111,15 @@ def call_openai_api(
                 raise ValueError("Invalid JSON format received from OpenAI API.")
 
         elif expected_res_type == "tabular":
-            # Parse tabular response using pandas
-            # Assumes the response is in a CSV or Markdown table format
-            df = pd.read_csv(StringIO(response_content))
-            parsed_response = TabularResponse(data=df)
-            return parsed_response
+            try:
+                # Parse tabular response using pandas
+                # Assumes the response is in a CSV or Markdown table format
+                df = pd.read_csv(StringIO(response_content))
+                parsed_response = TabularResponse(data=df)
+                return parsed_response
+            except Exception as e:
+                logger.error(f"Error parsing tabular data: {e}")
+                raise ValueError("Invalid tabular format received from OpenAI API.")
 
         elif expected_res_type == "code":
             # Return the code as a Pydantic model
@@ -117,7 +138,12 @@ def call_openai_api(
         raise
 
 
-def call_llama3(prompt: str, expected_res_type: str = "str", temperature: float = 0.4):
+def call_llama3(
+    prompt: str,
+    expected_res_type: str = "str",
+    temperature: float = 0.4,
+    max_tokens: int = 1056,
+):
     """
     Handles calls to LLaMA 3 (on-premise) to generate responses based on
     a given prompt and expected response type.
@@ -140,16 +166,22 @@ def call_llama3(prompt: str, expected_res_type: str = "str", temperature: float 
             prompt=prompt,
             options={
                 "temperature": temperature,
+                "max_tokens": max_tokens,
+                "batch_size": 10,
+                "retry_enabled": True,
             },
         )
 
         # Extract the content from the response
         response_content = response["response"]
 
+        # Log the raw response before attempting to parse it
+        logger.info(f"Raw response content: {response_content}")
+
         # Check if the response is empty
         if not response_content:
             logger.error("Received an empty response from LLaMA 3.")
-            raise Exception("Received an empty response from LLaMA 3.")
+            raise ValueError("Received an empty response from LLaMA 3.")
 
         # Handle response based on expected type using Pydantic models
         if expected_res_type == "str":
@@ -158,19 +190,30 @@ def call_llama3(prompt: str, expected_res_type: str = "str", temperature: float 
             return parsed_response.content  # return as plain string instead the model
 
         elif expected_res_type == "json":
-            # Parse JSON response
+            # Extract JSON content using string manipulation
+            start_idx = response_content.find("{")
+            end_idx = response_content.rfind("}")
+            if start_idx != -1 and end_idx != -1:
+                cleaned_response_content = response_content[start_idx : end_idx + 1]
+            else:
+                logger.error("Failed to extract JSON content.")
+                raise ValueError("Failed to extract JSON content.")
+
+            # Validate extracted JSON
             try:
-                # Convert JSON-formatted string to Python dictionary
-                response_dict = json.loads(response_content)
+                response_dict = json.loads(cleaned_response_content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON: {e}")
+                raise ValueError("Invalid JSON format received from LLaMA 3.")
 
-                # Use Pydantic to validate and parse the dictionary into a model
+            # Verify JSON structure using Pydantic model
+            try:
                 parsed_response = JSONResponse(**response_dict)
+            except ValidationError as e:
+                logger.error(f"JSON validation error: {e}")
+                raise ValueError("Invalid JSON format received from LLaMA 3.")
 
-                return parsed_response
-            except (json.JSONDecodeError, ValidationError) as e:
-                logger.error(f"Failed to parse JSON or validate with Pydantic: {e}")
-                raise ValueError("Invalid JSON format received from OpenAI API.")
-
+            return parsed_response
         elif expected_res_type == "tabular":
             # Parse tabular response using pandas
             # Assumes the response is in a CSV or Markdown table format
@@ -189,10 +232,21 @@ def call_llama3(prompt: str, expected_res_type: str = "str", temperature: float 
             raise ValueError(f"Unsupported expected_response_type: {expected_res_type}")
     except (json.JSONDecodeError, ValidationError) as e:
         logger.error(f"Validation or parsing error: {e}")
-        raise ValueError(f"Invalid format received from OpenAI API: {e}")
+        raise ValueError(f"Invalid format received from LLaMA 3: {e}")
     except Exception as e:
-        logger.error(f"OpenAI API call failed: {e}")
+        logger.error(f"LLaMA 3 call failed: {e}")
         raise
+
+
+def clean_and_extract_json(response_content):
+    """Ensure that a response does not have text other than json"""
+    # Use regex to extract the JSON block from the response
+    json_block = re.search(r"{.*}", response_content, re.DOTALL)
+
+    if json_block:
+        return json_block.group(0)
+    else:
+        raise ValueError("No valid JSON block found in response.")
 
 
 # Function to convert text to JSON with OpenAI

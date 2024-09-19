@@ -2,14 +2,100 @@ import os
 import logging
 import json
 import pandas as pd
-
+from tqdm import tqdm
+import math
+from joblib import Parallel, delayed
 from evaluation_optimization.resume_editor import TextEditor
 from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
 from evaluation_optimization.similarity_metrics_eval import categorize_scores
-import logging_config
+from evaluation_optimization.resume_editor import TextEditor
+from utils.generic_utils import read_from_json_file, save_to_json_file
+
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+def modify_one_resp_based_on_reqs(resp_key, resp, reqs, model, model_id):
+    """Modify a single responsibility by matching to multiple job requirements"""
+    text_editor = TextEditor(model=model, model_id=model_id, max_tokens=1024)
+
+    local_modifications = {}
+    for req_key, req in reqs.items():
+        logger.info(f"Modifying Responsibility: {resp} \nwith Requirement: {req}")
+
+        # Step 1: Align Semantic
+        revised = text_editor.edit_for_semantics(
+            candidate_text=resp,
+            reference_text=req,
+            text_id=f"{resp_key}_{req_key}",
+            temperature=0.5,
+        )
+        revised_text_1 = revised["optimized_text"]
+
+        # Step 2: Align Entailment
+        revised = text_editor.edit_for_entailment(
+            premise_text=revised_text_1,
+            hypothesis_text=req,
+            text_id=f"{resp_key}_{req_key}",
+            temperature=0.6,
+        )
+        revised_text_2 = revised["optimized_text"]
+
+        # Step 3: Align Original Sentence's DP
+        revised = text_editor.edit_for_dp(
+            target_text=revised_text_2,
+            source_text=resp,
+            text_id=f"{resp_key}_{req_key}",
+            temperature=0.9,
+        )
+        revised_text_3 = revised["optimized_text"]
+
+        # Store the modification for this requirement
+        local_modifications[req_key] = {"optimized_text": revised_text_3}
+
+    return (resp_key, local_modifications)
+
+
+def modify_multi_resps_based_on_reqs(
+    responsibilities: dict[str, str],
+    requirements: dict[str, str],
+    TextEditor: callable,  # Add TextEditor as an argument here
+    model: str = "openai",
+    model_id: str = "gpt-3.5-turbo",
+    n_jobs: int = -1,
+):
+    """
+    Modify multiple-responsibilities based on matching each of them
+    with each job requirement in parallel batches using Joblib.
+    """
+
+    # Debugging: Check length of responsibilities and requirements
+    logger.info(f"Number of responsibilities: {len(responsibilities)}")
+    logger.info(f"Number of requirements: {len(requirements)}")
+
+    # Initialize the result dictionary
+    modified_responsibilities = {}
+
+    # Progress bar setup
+    total = len(responsibilities)
+    with tqdm(total=total, desc="Modifying Responsibilities") as pbar:
+        # Run the processing in parallel using joblib's Parallel
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(modify_one_resp_based_on_reqs)(
+                resp_key, resp, requirements, model, model_id
+            )
+            for resp_key, resp in responsibilities.items()
+        )
+
+        # Update the progress bar after all results are gathered
+        pbar.update(len(results))
+
+    # Aggregate the results
+    for resp_key, modifications in results:
+        modified_responsibilities[resp_key] = modifications
+
+    return modified_responsibilities
 
 
 def filter_responsibilities_by_low_scores(df, fields):
@@ -47,182 +133,52 @@ def filter_responsibilities_by_low_scores(df, fields):
     return responsibilities_to_optimize
 
 
-# # Example usage:
-# # Assuming your dataframe is loaded into 'df'
-# fields_to_check = ["soft_similarity_cat", "deberta_entailment_score_cat"]
-# responsibilities_to_optimize = filter_responsibilities_by_low_scores(
-#     df, fields_to_check
-# )
-# print(responsibilities_to_optimize)
-
-
-def get_sim_score_categories(revised_text, reference_text):
-    textsimilarity = AsymmetricTextSimilarity()
-
-    # Get sim scores
-    candidate_text = revised_text
-    sim_scores = textsimilarity.short_text_similarity_metrics(
-        candidate=candidate_text, reference=reference_text
-    )
-    logger.info("Similarity related scores calculated")
-
-    sim_score_cats = categorize_scores(sim_scores)
-    logger.info("Similarity related score categories assigned.")
-
-    return sim_scores, sim_score_cats
-
-
-def run_pipeline(sim_metrices_csv_file):
+def run_pipeline(
+    responsibilities_flat_json_file,
+    requirements_flat_json_file,
+    modified_resps_flat_json_file,
+):
     """Pipeline to modify resume"""
 
-    # Step 1. Read responsibility vs requirement similarity metrics csv file
-    try:
-        df = pd.read_csv(sim_metrices_csv_file)
-        print("CSV file loaded successfully.")
-        print(df.head(5))  # Print the first few rows
-    except Exception as e:
-        print(f"Error reading CSV file: {str(e)}")
+    # Step 1. Read responsibility vs requirement similarity metrics JSON files
+    if not (
+        os.path.exists(responsibilities_flat_json_file)
+        and os.path.exists(requirements_flat_json_file)
+    ):
+        raise FileNotFoundError("One or both of the JSON files do not exist.")
 
-    # Step 2. Exclude certain responsibilities from modification
-    # (to be added back afterwards-factual statements like "promoted to ... in ...")
-    df_to_exclude = df[
-        df["Responsibility Key"] == "3.responsibilities.5"
-    ]  # This is the "promoted to manger in ..."
+    else:
+        # Step 1. Read both dictionaries into
+        resps_flat = read_from_json_file(responsibilities_flat_json_file)
+        reqs_flat = read_from_json_file(requirements_flat_json_file)
 
-    # Save on disk to be added back later
-    df_to_exclude.to_csv()
+        # Step 2. Exclude certain responsibilities from modification
+        # (to be added back afterwards-factual statements like "promoted to ... in ...")
+        excluded_key = "3.responsibilities.5"
+        # resps_flat = {k: v for k, v in resps_flat.items() if k not in excluded_keys}
+        resps_flat.pop(excluded_key, None)
 
-    # df w/t resp. to modify w/t LLM
-    df_to_optimize = df[~df_to_exclude]
+        # Step 3: Modify responsibility texts
+        gpt3 = "gpt-3.5-turbo"
+        gpt4 = "gpt-4-turbo"
 
-    # Step 3. Loop over Optimize responsibilities
-
-    responsibilities_to_optimize = filter_responsibilities_by_low_scores(df)
-    print(responsibilities_to_optimize)
-    # Step 4. Modify responsibilities by matching to requirements
-    # Instantiate API object (do this outside the function to reduce overhead)
-
-
-def other():
-    gpt3 = "gpt-3.5-turbo"
-    gpt4 = "gpt-4-turbo"
-
-    # Set up dict holders
-    all_revised_texts = {"revised_text": []}
-    all_revised_scores = {"revised_scores": []}
-    all_revised_score_categories = {"revised_score_categories": []}
-
-    all_final_texts = {"final_text": []}
-    all_final_scores = {"final_scores": []}
-    all_final_score_categories = {"final_score_categories": []}
-
-    requirement_list = [reqs_text1, reqs_text2, reqs_text3]
-
-    print(f"Original text:\n{resp_text}")
-
-    # Start looping
-    id = 1
-    for requirment in requirement_list:
-        print(f"id: {id} \nMatch to {requirment}")
-        try:
-            revised_text_dict = edit_text_for_semantic_entailment(
-                client=client,
-                text_id=id,
-                candidate_text=resp_text,
-                reference_text=requirment,
-                model_id=gpt3,
-            )  # The function returns both id and the actual revised text
-
-            # Debugging: Check keys in revised_text_dict
-            print(f"Keys in revised_text_dict: {revised_text_dict.keys()}")
-
-            if "optimized_text" not in revised_text_dict:
-                raise KeyError("Key 'optimized_text' not found in revised_text_dict")
-
-            revised_text = revised_text_dict["optimized_text"]
-            logger.info(f"revised_text: {revised_text}")
-
-            print("\n\n")
-
-            final_text_dict = edit_text_for_dp(
-                client=client,
-                text_id=id,
-                target_text=revised_text,
-                source_text=resp_text,
-                model_id=gpt3,
+        # modified_resps = modify_responsibilities_based_on_requirements(
+        #     responsibilities=resps_flat,
+        #     requirements=reqs_flat,
+        #     TextEditor=TextEditor,  # Pass the class instance
+        #     model="openai",
+        #     model_id=gpt3,
+        # )
+        with tqdm(total=len(resps_flat), desc="Modifying Responsibilities") as pbar:
+            modified_resps = modify_multi_resps_based_on_reqs(
+                responsibilities=resps_flat,
+                requirements=reqs_flat,
+                TextEditor=TextEditor,  # Pass your TextEditor class here
+                model="openai",
+                model_id="gpt-3.5-turbo",
+                n_jobs=-1,
             )
+            pbar.update(1)  # Update progress bar
 
-            # Debugging: Check keys in final_text_dict
-            print(f"Keys in final_text_dict: {final_text_dict.keys()}")
-
-            if "optimized_text" not in final_text_dict:
-                raise KeyError("Key 'optimized_text' not found in final_text_dict")
-
-            final_text = final_text_dict["optimized_text"]
-            logger.info(f"final_text: {final_text}")
-
-            print("\n\n")
-
-            sim_scores, sim_score_categories = get_sim_score_categories(
-                revised_text, requirment
-            )
-
-            print("\n\n")
-
-            final_sim_scores, final_sim_score_categories = get_sim_score_categories(
-                final_text, requirment
-            )
-
-            print("Initial revision:")
-            print(f"Scores:\n{sim_scores}")
-            print(f"Scores_Cat:\n{sim_score_categories}")
-
-            print("Final version")
-            print(f"Scores:\n{final_sim_scores}")
-            print(f"Scores_Cat:\n{final_sim_score_categories}")
-
-            # Update combined dicts
-            all_revised_texts["revised_text"].append(revised_text)
-            all_revised_scores["revised_scores"].append(sim_scores)
-            all_revised_score_categories["revised_score_categories"].append(
-                sim_score_categories
-            )
-
-            all_final_texts["revised_text"].append(final_text)
-            all_final_scores["revised_scores"].append(final_sim_scores)
-            all_final_score_categories["revised_score_categories"].append(
-                final_sim_score_categories
-            )
-
-        except Exception as e:
-            print(f"An error occurred during revision 1: {e}")
-
-        id += 1
-        print("\n\n\n")
-
-    # Combine and save to json file
-    original_texts = {"original_text": resp_text}
-    all_req_texts = {"requirments": [reqs_text1, reqs_text2, reqs_text3]}
-    combined_dict_list_1 = [
-        original_texts,
-        all_req_texts,
-        all_revised_texts,
-        all_revised_scores,
-        all_revised_score_categories,
-    ]
-
-    combined_dict_list_2 = [
-        original_texts,
-        all_req_texts,
-        all_final_texts,
-        all_final_scores,
-        all_final_score_categories,
-    ]
-
-    f_path_1 = r"C:\github\job_bot\data\edited_resps_examples_1.json"
-    with open(f_path_1, "w") as f:
-        json.dump(combined_dict_list_1, f, indent=4)
-
-    f_path_2 = r"C:\github\job_bot\data\edited_resps_examples_2.json"
-    with open(f_path_2, "w") as f:
-        json.dump(combined_dict_list_2, f, indent=4)
+        # Step 4: Save modified responsibilities
+        save_to_json_file(modified_resps, modified_resps_flat_json_file)

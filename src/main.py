@@ -17,8 +17,11 @@ from config import (
     responsibilities_flat_json_file,
     requirements_flat_json_file,
     resp_req_sim_metrics_file,
-    excluded_from_modification_file,
+    modified_resps_flat_iter_1_json_file,
+    modified_resps_flat_iter_2_json_file,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_pipeline_1():
@@ -62,14 +65,14 @@ def run_pipeline_2():
 
 
 def run_pipeline_3():
-    """ "Pipeline for editing responsibility text from resume"""
-    sim_metrics_file = resp_req_sim_metrics_file
-    import os
-
-    dir_path = r"C:\github\job_bot\input_output\evaluation_optimization\output"
-    print(os.listdir(dir_path))
-    print(sim_metrics_file)
-    run_resume_editting_pipeline(sim_metrics_file, excluded_from_modification_file)
+    """Pipeline for editing responsibility text from resume"""
+    logger.info("Running pipeline 3...")
+    run_resume_editting_pipeline(
+        responsibilities_flat_json_file=responsibilities_flat_json_file,
+        requirements_flat_json_file=requirements_flat_json_file,
+        modified_resps_flat_json_file=modified_resps_flat_iter_1_json_file,
+    )
+    logger.info("Finished running pipeline 3.")
 
 
 def run_pipeline_4():
@@ -86,4 +89,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_pipeline_1()
+    run_pipeline_3()
