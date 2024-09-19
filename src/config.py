@@ -61,11 +61,20 @@ EVALUATION_OPTIMIZATION_OUTPUT_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / 
 resp_req_sim_metrics_file = (
     EVALUATION_OPTIMIZATION_OUTPUT_DIR / "output_seg_by_seg_sim_metrics.csv"
 )
+modified_resps_flat_iter_1_json_file = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
+    / "modified_responsibilities_flat_iteration_1.json"
+)
+modified_resps_flat_iter_2_json_file = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
+    / "modified_responsibilities_flat_iteration_2.json"
+)
 
-RESUME_EDITING_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "resume_editing"
+
 # CSV file containing df with resp. excluded from modification b/c they are just
 # factual statements, i.e., "promoted to .... in ..."
 # They need to be added back to the final edited resume
-excluded_from_modification_file = (
-    RESUME_EDITING_INPUT_OUTPUT_DIR / "dataframe_to_add_back.csv"
-)
+
+# excluded_from_modification_file = (
+#     RESUME_EDITING_INPUT_OUTPUT_DIR / "dataframe_to_add_back.csv"
+# )

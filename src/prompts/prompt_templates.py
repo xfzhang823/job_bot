@@ -116,19 +116,19 @@ You are a skilled professional at writing resumes. Please perform the following 
 "{content_2}"
 
 **Return Format:**
-Please return the result in JSON format as follows:
+Return only a valid JSON object, without markdown formatting, as follows:
 
 {{
   "optimized_text": "Edited version of candidate text"
 }}
 
-Do not include any additional text or explanations.
+Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
 
 ENTAILMENT_ALIGNMENT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
-1. Enhance entailment relationships between **the premise text** and **the hypothesis text** by modifying ONLY the **premise text".
-2. Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.
+1. Modify the **premise text** to enhance its entailment relationship with the **hypothesis text**.
+2. Improve the overall alignment and relevance between the two texts without changing the directional relationship.
 
 **Premise text:**
 "{content_1}"
@@ -137,19 +137,20 @@ You are a skilled professional at writing resumes. Please perform the following 
 "{content_2}"
 
 **Return Format:**
-Please return the result in JSON format as follows:
+Return only a valid JSON object, without markdown formatting, as follows:
 
 {{
-  "optimized_text": "Edited version of candidate text"
+  "optimized_text": "Edited version of premise text"
 }}
 
-Do not include any additional text or explanations.
+Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
+
 
 SEMANTIC_ALIGNMENT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
-1. Optimize **the candidate text** to increase semantic precision and similarity with **the reference text**.
-2. Reduce the semantic distance between **the candidate text** and the **reference text**.
+1. Optimize the **candidate text** to increase semantic precision and similarity with the **reference text**.
+2. Reduce the semantic distance between them.
 
 **Candidate text:**
 "{content_1}"
@@ -158,20 +159,20 @@ You are a skilled professional at writing resumes. Please perform the following 
 "{content_2}"
 
 **Return Format:**
-Please return the result in JSON format as follows:
+Return only a valid JSON object, without markdown formatting, as follows:
 
 {{
   "optimized_text": "Edited version of candidate text"
 }}
 
-Do not include any additional text or explanations.
+Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
 
 
 STRUCTURE_TRANSFER_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Analyze the **source text** at a high level.
-2. Apply the ""source text's** dependency structure to the **target text**. Ensure that the original meaning of the **target text** is mostly preserved.
+2. Apply the **source text's** sentence structure or syntactic dependencies to the **target text**, ensuring that the original meaning of the **target text** is preserved as much as possible.
 
 **Target Text:**
 "{content_1}"
@@ -180,11 +181,11 @@ You are a skilled professional at writing resumes. Please perform the following 
 "{content_2}"
 
 **Return Format:**
-Please return the result in JSON format as follows:
+Return only a valid JSON object, without markdown formatting, as follows:
 
 {{
   "optimized_text": "Edited version of the target text"
 }}
 
-Do not include any additional text or explanations.
+Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
