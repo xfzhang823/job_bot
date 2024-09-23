@@ -54,13 +54,19 @@ requirements_flat_json_file = (
 
 # Evaluation and Optimization
 EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "evaluation_optimization"
-EVALUATION_OPTIMIZATION_OUTPUT_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "output"
 
 # CSV file containing the original resp (from resume) and reqs (from job description)
 # along with different similarity related scores/score categories
-resp_req_sim_metrics_file = (
-    EVALUATION_OPTIMIZATION_OUTPUT_DIR / "output_seg_by_seg_sim_metrics.csv"
+resp_req_sim_metrics_0_csv_file = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "output_seg_by_seg_sim_metrics_0.csv"
 )
+resp_req_sim_metrics_1_csv_file = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "output_seg_by_seg_sim_metrics_1.csv"
+)
+resp_req_sim_metrics_2_csv_file = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "output_seg_by_seg_sim_metrics_2.csv"
+)
+
 modified_resps_flat_iter_1_json_file = (
     EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
     / "modified_responsibilities_flat_iteration_1.json"

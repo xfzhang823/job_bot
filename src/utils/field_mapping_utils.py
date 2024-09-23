@@ -8,7 +8,7 @@ COLUMN_NAMES_TO_VARS_MAPPING = {
     "BERTScore Precision": "bert_score_precision",
     "Soft Similarity": "soft_similarity",
     "Word Mover's Distance": "word_movers_distance",
-    "Deberta Entailment Scoree": "deberta_entailment_score",
+    "Deberta Entailment Score": "deberta_entailment_score",
     # Add any other mappings as needed
 }
 

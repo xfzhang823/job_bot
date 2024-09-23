@@ -189,3 +189,29 @@ Return only a valid JSON object, without markdown formatting, as follows:
 
 Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
+
+# Create a prompt and insert the JSON data into it
+MATCHING_KEYWORDS_AGAINST_TEXT_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Given the following **resume keywords** in JSON, extract keywords from the {content_1} sections.
+2. Match these extracted keywords with the **job description** in JSON provided below, replace or modify the **resume keywords** if they are similar to **job description keywords**, and then prioritize them based on their importance to the job description.
+
+**Resume keywords** in JSON:
+{content_2}
+
+**Job description** in JSON:
+{content_3}
+
+**Return Format:**
+Return only a valid JSON object, without markdown formatting, as follows:
+
+{{
+  "optimized_keywords": [],
+  "prioritized_keywords": []
+}}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax.
+"""
+
+# # Insert the JSON object as a string into the prompt
+# formatted_prompt = prompt_template.format(resume_json=json.dumps(json_data, indent=2))

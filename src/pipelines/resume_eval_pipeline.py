@@ -1,20 +1,94 @@
 import os
 import pandas as pd
 import logging
+import logging_config
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 from evaluation_optimization.text_similarity_finder import TextSimilarity
-from evaluation_optimization.resume_matching import (
+from evaluation_optimization.similarity_metrics_eval import (
     calculate_segment_resp_similarity_metrices,
+    SimilarityScoreCalculator,
 )
 from evaluation_optimization.similarity_metrics_eval import categorize_scores_for_df
+from utils.generic_utils import read_from_json_file, pretty_print_json
+
 from IPython.display import display
 
 
-def run_pipeline(requirements_json_file, resume_json_file, csv_file):
-    """run pipeline"""
+# Set up logger
+logger = logging.getLogger(__name__)
 
-    # Check if resps comparison csv file exists
+
+def unpack_and_combine_json(nested_json, requirements_json):
+    """
+    Unpacks the nested responsibilities JSON and combines it with matching requirement texts
+    from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
+
+    Args:
+        nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
+        requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
+
+    Returns:
+        list: A list of dictionaries containing responsibility keys, requirement keys,
+              responsibility texts, and matched requirement texts.
+
+    Error Handling:
+        - If a requirement key is not found in the requirements JSON, it will skip that entry.
+        - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
+        - Logs warnings for missing fields and unmatched keys for better traceability.
+    """
+    results = []
+
+    for resp_key, values in nested_json.items():  # Unpack the 1st level
+        if not isinstance(values, dict):
+            logger.info(
+                f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
+            )
+            continue
+
+        for req_key, sub_value in values.items():  # Unpack the 2nd level
+            if not isinstance(sub_value, dict):
+                logger.info(
+                    f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
+                )
+                continue
+
+            # Extract the optimized_text
+            if "optimized_text" in sub_value:
+                optimized_text = sub_value["optimized_text"]
+            else:
+                logger.info(
+                    f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
+                )
+                continue
+
+            # Perform the lookup in the requirements JSON
+            requirement_text = requirements_json.get(req_key)
+            if requirement_text is None:
+                logger.info(
+                    f"Warning: Requirement key '{req_key}' not found in requirements JSON. Skipping entry."
+                )
+                continue
+
+            # Append results to a list for further processing
+            results.append(
+                {
+                    "responsibility_key": resp_key,
+                    "requirement_key": req_key,
+                    "responsibility_text": optimized_text,
+                    "requirement_text": requirement_text,
+                }
+            )
+
+    return results
+
+
+def run_pipeline(requirements_json_file, resume_json_file, csv_file):
+    """1st time run pipeline to calculate responsibility vs requirement alignment scores"""
+
+    logger.info("Start running responsibility/requirement alignment scoring pipeline.")
+
+    # Check if resps comparison csv file (the results) exists already
     if os.path.exists(csv_file):
         df = pd.read_csv(csv_file)
     else:
@@ -28,29 +102,24 @@ def run_pipeline(requirements_json_file, resume_json_file, csv_file):
         # parse/flatten/conncactenate into a single string
         job_reqs_parser = JobRequirementsParser(requirements_json_file)
         reqs_flat = job_reqs_parser.extract_flatten_reqs()  # this is a dict
-        reqs_flat_str = (
-            job_reqs_parser.extract_flatten_concat_reqs()
-        )  # concat into a single str.
 
-        # # Step 3A: Calcualte and display BERTScore precisions
-        # bscore_p_df = calculate_resps_reqs_bscore_precisions(resps_flat, reqs_flat_str)
+        # Not needed for now
+        # reqs_flat_str = (
+        #     job_reqs_parser.extract_flatten_concat_reqs()
+        # )  # concat into a single str.
 
-        # # Step 3B: Calcualte and display BERTScore precisions - SEGMENT by SEGMENT
-        # bscore_p_df = calculate_segment_resp_bscore_precisions(resps_flat, reqs_flat)
-
-        # Step 4A. Calculate and display similarity metrices
-
-        # Step 4B. Calculate and display similarity metrices - Segment by Segment
+        # Step 3. Calculate and display similarity metrices - Segment by Segment
         similarity_df = calculate_segment_resp_similarity_metrices(
             resps_flat, reqs_flat
         )
         logging.info("Similarity metrics calcuated.")
 
-        # Step 5. Add score category values (high, mid, low)
+        # Step 4. Add score category values (high, mid, low)
         # Translate DataFrame columns to match expected column names**
         similarity_df = categorize_scores_for_df(similarity_df)
+        logger.info("Similarity metrics score categories created.")
 
-        # Clean and save to csv
+        # Step 5. Clean and save to csv
         # df_cleaned = bscore_p_df.applymap(lambda x: str(x).replace("\n", " ").strip())
         df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
         df.to_csv(csv_file, index=False)
@@ -59,38 +128,59 @@ def run_pipeline(requirements_json_file, resume_json_file, csv_file):
         # Load the dataframe
         df = pd.read_csv(csv_file)
 
+        logger.info(f"Similarity metrics saved to file ({csv_file})")
+    logger.info(
+        "Finished running responsibility/requirement alignment scoring pipeline."
+    )
     # Display the top rows of the dataframe for verification
     print("Similarity Metrics Dataframe:")
-    display(df.head(30))
-
-    # Step 6. Filter responsibilities to keep only the more relevant bullets
-
-    # Load csv_file
+    display(df.head(10))
 
 
-# Step 5:
-# # Step 4: Analyze resume against job requirements
-# analysis = analyze_resume_against_requirements(resume_json, requirements)
-# print("Analysis and Suggestions:", analysis)
+def re_run_pipeline(requirements_file, responsibilities_file, csv_file):
+    """
+    Re-run pipeline to calculate revised responsibility vs (job) requirement alignment scores
+    """
 
-# # Step 6: Modify relevant resume sections based on analysis
-# for section in resume_json["experience"]:  # Example: Modify experience sections
-#     modified_section = modify_resume_section(section, requirements)
-#     section.update(modified_section)  # Update the section in place
+    # Check if resps comparison csv file (the results) ALREADY exists
+    if os.path.exists(csv_file):
+        df = pd.read_csv(csv_file)
 
-# # Step 6: Save the modified resume to a file
-# add_to_json_file(resume_json, "modified_resume.json")
-# print("Resume modification completed and saved to 'modified_resume.json'.")
-# steps = [
-#     (
-#         "Gather Requirements",
-#         lambda: extract_job_requirements_with_gpt(job_description),
-#     ),
-#     ("Read and Compare Resume", lambda: read_resume(resume_file)),
-#     (
-#         "Match Resume to Job Description",
-#         lambda resume_data, job_data: match_resume_to_job(
-#             resume_data, job_description_json
-#         ),
-#     ),
-# ]
+        print(f"Similarity Metrics Dataframe: {df.head(10)}")
+
+        logger.info("Output already exists, skipping pipeline.")
+        return  # Early exit if output exists
+
+    logger.info("Start running responsibility/requirement alignment scoring pipeline.")
+
+    # Step 1: Read JSON files
+    resps_dict = read_from_json_file(responsibilities_file)  # Nested dictionary
+    reqs_dict = read_from_json_file(requirements_file)
+
+    # Step 2: parse and combine 2 into a single list/dict
+    combined_list = unpack_and_combine_json(
+        nested_json=resps_dict, requirements_json=reqs_dict
+    )
+
+    # Step 3. Iterate through the Calculate and display similarity metrices - Segment by Segment
+    similarity_calculator = SimilarityScoreCalculator()
+    similarity_df = similarity_calculator.one_to_one(combined_list)
+
+    logger.info("Similarity metrics calcuated.")
+
+    # Step 4. Add score category values (high, mid, low)
+    # Translate DataFrame columns to match expected column names**
+    similarity_df = categorize_scores_for_df(similarity_df)
+    logger.info("Similarity metrics score categories created.")
+
+    # Step 5. Clean and save to csv
+    # df_cleaned = bscore_p_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+    df.to_csv(csv_file, index=False)
+
+    logging.info(f"Similarity metrics saved to location {csv_file}.")
+
+    # Print out for debugging
+    print(f"Similarity Metrics Dataframe: {df.head(10)}")
+
+    logger.info(f"Similarity scores saved to csv file ({csv_file})")

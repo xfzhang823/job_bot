@@ -9,6 +9,9 @@ from pipelines.resume_eval_pipeline import (
 from pipelines.resume_editing_pipeline import (
     run_pipeline as run_resume_editting_pipeline,
 )
+from pipelines.resume_eval_pipeline import (
+    re_run_pipeline as re_run_resume_comparison_pipeline,
+)
 from config import (
     resume_json_file,
     job_descriptions_json_file,
@@ -16,7 +19,8 @@ from config import (
     description_text_holder,
     responsibilities_flat_json_file,
     requirements_flat_json_file,
-    resp_req_sim_metrics_file,
+    resp_req_sim_metrics_0_csv_file,
+    resp_req_sim_metrics_1_csv_file,
     modified_resps_flat_iter_1_json_file,
     modified_resps_flat_iter_2_json_file,
 )
@@ -45,7 +49,7 @@ def run_pipeline_1():
 
 def run_pipeline_2():
     """Pipeline for resume evaluation"""
-    logging.info("Running pipeline 2: Matching Resume")
+    logger.info("Running pipeline 2: Matching Resume")
 
     resume_json_path = (
         r"C:\github\job_bot\data\Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
@@ -76,7 +80,13 @@ def run_pipeline_3():
 
 
 def run_pipeline_4():
-    pass
+    """Pipeline for re-run resume evaluation"""
+    logger.info("Running pipeline 4...")
+    re_run_resume_comparison_pipeline(
+        requirements_file=requirements_flat_json_file,
+        responsibilities_file=modified_resps_flat_iter_1_json_file,
+        csv_file=resp_req_sim_metrics_1_csv_file,
+    )
 
 
 def main():
@@ -89,4 +99,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_pipeline_3()
+    run_pipeline_4()
