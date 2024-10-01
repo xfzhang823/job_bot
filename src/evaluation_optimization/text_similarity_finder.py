@@ -15,7 +15,8 @@ using methods from models including:
 """
 
 # Dependencies
-
+import logging
+import logging_config
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -30,6 +31,10 @@ from transformers import (
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics import pairwise_distances
 import spacy
+
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Load spacy
 nlp = spacy.load("en_core_web_sm")

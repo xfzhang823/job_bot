@@ -7,14 +7,19 @@ from utils.generic_utils import find_project_root
 root_dir = find_project_root()
 logs_dir = os.path.join(root_dir, "logs")
 
+# Ensure the logs directory exists
 if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
+    logging.info(f"Created logs directory: {logs_dir}")
 
-# Set up log file rotation: max 10MB per file, up to 5 backup files
+# Set up log file rotation: max 100MB per file, up to 5 backup files
+log_file_path = os.path.join(logs_dir, "app.log")
+
+# Initialize the rotating file handler
 file_handler = logging.handlers.RotatingFileHandler(
-    os.path.join(logs_dir, "app.log"),
-    maxBytes=100 * 1024 * 1024,
-    backupCount=5,  # 100 MB
+    log_file_path,
+    maxBytes=100 * 1024 * 1024,  # 100 MB
+    backupCount=5,
 )
 
 # Configure file handler log format and level
@@ -32,8 +37,12 @@ console_formatter = logging.Formatter(
 )
 console_handler.setFormatter(console_formatter)
 
-# Configure the root logger
-logging.basicConfig(
-    level=logging.DEBUG,  # Log level
-    handlers=[file_handler, console_handler],  # Use both file and console handlers
-)
+# Get the root logger and attach handlers directly
+root_logger = logging.getLogger()
+
+# Add both the file handler and console handler to the root logger
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# Set the overall logging level (root level)
+root_logger.setLevel(logging.DEBUG)

@@ -86,7 +86,7 @@ class TextEditor:
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-        # Conditionally initialize the client based on the model
+        # Conditionally initialize the client based on model
         if self.model == "openai":
             # Initialize OpenAI API client
             api_key = get_openai_api_key()  # Fetch the API key

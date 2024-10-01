@@ -5,11 +5,11 @@ import logging_config
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 from evaluation_optimization.text_similarity_finder import TextSimilarity
-from evaluation_optimization.similarity_metrics_eval import (
-    calculate_segment_resp_similarity_metrices,
+from evaluation_optimization.similarity_metric_eval import (
+    calculate_many_to_many_similarity_metrices,
     SimilarityScoreCalculator,
 )
-from evaluation_optimization.similarity_metrics_eval import categorize_scores_for_df
+from evaluation_optimization.similarity_metric_eval import categorize_scores_for_df
 from utils.generic_utils import read_from_json_file, pretty_print_json
 
 from IPython.display import display
@@ -109,7 +109,7 @@ def run_pipeline(requirements_json_file, resume_json_file, csv_file):
         # )  # concat into a single str.
 
         # Step 3. Calculate and display similarity metrices - Segment by Segment
-        similarity_df = calculate_segment_resp_similarity_metrices(
+        similarity_df = calculate_many_to_many_similarity_metrices(
             resps_flat, reqs_flat
         )
         logging.info("Similarity metrics calcuated.")

@@ -12,43 +12,51 @@ return: filtered content only; do not include explanation
 # When use .format() method in Python strings, any curly braces {} in the string
 # are treated as placeholders for variable substitution.
 # Therefore, you need to escape them by doubling them ({{ for { and }} for })!!!
+# Updated this with Claude's suggested prompt
+CONVERT_JOB_POSTING_TO_JSON_PROMPT = """
+Extract key information and relevant content from the provided job description, converting it into a comprehensive, valid JSON format. Exclude purely website-related information or general company boilerplate not specific to the job.
 
-CONVERT_JOB_POSTING_TO_JSON_PROMPT = (
-    "Extract structured data from the provided job description and convert it into a detailed, valid JSON format. "
-    "Include all relevant sections such as 'Minimum qualifications', 'Responsibilities', 'Overview', and any other details. "
-    "If the section names differ from the provided examples, map them to the closest relevant categories in the output JSON. "
-    "For example, if a section is titled 'Desired Skills,' it could be mapped to 'Minimum qualifications.' If a section is missing, omit it from the JSON. "
-    "Do not summarize; capture all content as-is in the 'content' section. Ensure the output is a well-formatted JSON object.\n\n"
-    "Additionally, identify and include any time-based or experience-related data points (e.g., '11 years of experience in management consulting...') under their respective categories in the JSON output. "
-    "These should not be omitted or summarized; they are crucial details to be captured as part of the structured data.\n\n"
-    "Content: {content}\n\n"
-    "Response format: JSON\n"
-    "Output structure example:\n"
-    "{{\n"
-    '  "url": "<string>",\n'
-    '  "job_title": "<string>",\n'
-    '  "posted_date": "<string>",\n'
-    '  "company": "<string>",\n'
-    '  "content": {{\n'
-    '    "overview": "<string>",\n'
-    '    "minimum_qualifications": [\n'
-    '      "<string>",\n'
-    '      "11 years of hands-on experience with Python",\n'
-    "      ...\n"
-    "    ],\n"
-    '    "responsibilities": [\n'
-    '      "<string>",\n'
-    "      ...\n"
-    "    ],\n"
-    '    "requirements": "<string>",\n'
-    "    ...\n"
-    "  }}\n"
-    "}}\n\n"
-    "Ensure every key and value is correctly enclosed in double quotes. Validate the JSON format before outputting it. "
-    "Remove non-ASCII characters, special characters, and control characters. "
-    "Trim leading and trailing spaces and newline characters from all values. "
-    "Do not include any explanations or extraneous text in the output."
-)
+Instructions:
+1. Identify and extract the following key details if present:
+   - Job title
+   - Company name
+   - Location
+   - Salary information
+   - Posted date (if available)
+2. Capture the job-specific content, preserving its structure as much as possible.
+3. Use clear section headers as keys in the JSON structure when present.
+4. For content without clear section headers, use general keys like "description" or "additional_info".
+5. Exclude information that is:
+   - Purely related to website navigation or functionality
+   - Generic company information not specific to the job role
+   - Legal disclaimers or privacy policies unrelated to the job
+   - Repetitive footer information
+
+Content to process: {content}
+
+Output structure:
+{{
+  "job_title": "<string or null if not found>",
+  "company": "<string or null if not found>",
+  "location": "<string or null if not found>",
+  "salary_info": "<string or null if not found>",
+  "posted_date": "<string or null if not found>",
+  "content": {{
+    "<section_name>": "<full text of relevant section>",
+    "<another_section>": "<full text of relevant section>",
+    "description": "<any relevant content without a clear section header>",
+    "additional_info": "<any remaining relevant content>"
+  }}
+}}
+
+JSON Formatting Instructions:
+1. Use "null" (without quotes) for any key details not found in the content.
+2. Preserve newlines within string values using \\n.
+3. Escape any double quotes within string values.
+4. Ensure the output is a valid JSON object.
+
+Extract all job-relevant information, but exclude website-specific content and generic company information not directly related to the job posting.
+"""
 
 EXTRACT_JOB_REQUIREMENTS_PROMPT = (
     "You are a skilled professional at analyzing job descriptions. Given the following job description, extract all sections relevant to a candidate's qualifications, responsibilities, skills, education, experience, company culture, values, or any other unique criteria that are important to the employer. "
@@ -108,6 +116,7 @@ You are a skilled professional at writing resumes. Please perform the following 
 3. Enhance entailment relationships, where the candidate text serves as the premise and the reference text serves as the hypothesis.
 4. For the entailment task, the candidate text serves as the premise and the reference text serves as the hypothesis, reversing their typical roles.
 5. Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.
+6. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
 
 **Candidate text:**
 "{content_1}"
@@ -129,6 +138,8 @@ ENTAILMENT_ALIGNMENT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Modify the **premise text** to enhance its entailment relationship with the **hypothesis text**.
 2. Improve the overall alignment and relevance between the two texts without changing the directional relationship.
+3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+4. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
 
 **Premise text:**
 "{content_1}"
@@ -151,6 +162,7 @@ SEMANTIC_ALIGNMENT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Optimize the **candidate text** to increase semantic precision and similarity with the **reference text**.
 2. Reduce the semantic distance between them.
+3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
 
 **Candidate text:**
 "{content_1}"
@@ -173,6 +185,7 @@ STRUCTURE_TRANSFER_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Analyze the **source text** at a high level.
 2. Apply the **source text's** sentence structure or syntactic dependencies to the **target text**, ensuring that the original meaning of the **target text** is preserved as much as possible.
+3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
 
 **Target Text:**
 "{content_1}"
