@@ -33,6 +33,7 @@ INPUT_DIR = INPUT_OUTPUT_DIR / "input"
 
 # Resume file in JSON format
 resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
+job_posting_urls_file = INPUT_DIR / "job_posting_urls.json"
 
 
 # Preprocessing Input/Output

@@ -2,7 +2,15 @@
 
 import os
 import logging
-from pipelines.preprocessing_pipeline import run_pipeline as run_preprocessing_pipeline
+from tqdm import tqdm
+import asyncio
+from pipelines.preprocessing_pipeline_async import (
+    run_pipeline_async as run_preprocessing_pipeline_async,
+)
+from pipelines.preprocessing_pipeline import (
+    run_pipeline as run_preprocessing_pipeline,
+)
+from pipelines.preprocessing_pipeline import fetch_new_urls
 from pipelines.resume_eval_pipeline import (
     run_pipeline as run_resume_comparison_pipeline,
 )
@@ -14,6 +22,7 @@ from pipelines.resume_eval_pipeline import (
 )
 from config import (
     resume_json_file,
+    job_posting_urls_file,
     job_descriptions_json_file,
     job_requirements_json_file,
     description_text_holder,
@@ -29,22 +38,85 @@ logger = logging.getLogger(__name__)
 
 
 def run_pipeline_1():
-    """Pipeline for preprocessing job posting webpage"""
-    # Run pipeline 1: preprocessing
-    # Define input data sources
-    job_description_url = "https://www.google.com/about/careers/applications/jobs/results/113657145978692294-ai-market-intelligence-principal/?src=Online/LinkedIn/linkedin_us&utm_source=linkedin&utm_medium=jobposting&utm_campaign=contract&utm_medium=jobboard&utm_source=linkedin"
-    # Define paths using os.path.join for cross-platform compatibility
+    """
+    Pipeline for preprocessing job posting webpage(s).
+    This is the sync version.
 
-    # Run the pipeline
-    run_preprocessing_pipeline(
-        job_description_url=job_description_url,
-        job_descriptions_json_file=job_descriptions_json_file,
-        requirements_json_file=job_requirements_json_file,
-        resume_json_file=resume_json_file,
-        text_file_holder=description_text_holder,
-        responsibilities_flat_json_file=responsibilities_flat_json_file,
-        requirements_flat_json_file=requirements_flat_json_file,
+    If there are multiple URL links, iterate through them and
+    run the `run_preprocessing_pipeline` function for each.
+
+    The pipeline will skip processing if no new URLs are found.
+    """
+    # Fetch new URLs to process
+    new_urls = fetch_new_urls(
+        existing_url_list_file=job_descriptions_json_file,
+        url_list_file=job_posting_urls_file,
     )
+
+    # Check if new_urls is empty; if so, return early
+    if not new_urls:
+        logger.info("No new URLs found... Skipping this process.")
+        return  # Early return
+
+    logger.info("New URLs found:")
+    for url in new_urls:  # debugging
+        print(url)
+
+    # Initialize tqdm for progress visualization;
+    # Iterate through the list of urls and run the preprocessing pipeline for each
+    for url in tqdm(new_urls, desc="Processing job postings", unit="job"):
+
+        logger.info(f"Processing for URL: {url}")
+
+        run_preprocessing_pipeline_async(
+            job_description_url=url,
+            job_descriptions_json_file=job_descriptions_json_file,
+            requirements_json_file=job_requirements_json_file,
+            resume_json_file=resume_json_file,
+            text_file_holder=description_text_holder,
+            responsibilities_flat_json_file=responsibilities_flat_json_file,
+            requirements_flat_json_file=requirements_flat_json_file,
+        )
+
+
+async def run_pipeline_1_async():
+    """
+    Asynchronous pipeline for preprocessing job posting webpage(s).
+    If there are multiple URL links, iterate through them and
+    run the `run_pipeline_async` function for each.
+
+    The pipeline will skip processing if no new URLs are found.
+    """
+    # Fetch new URLs to process
+    new_urls = fetch_new_urls(
+        existing_url_list_file=job_descriptions_json_file,
+        url_list_file=job_posting_urls_file,
+    )
+
+    # Check if new_urls is empty; if so, return early
+    if not new_urls:
+        logger.info("No new URLs found... Skipping this process.")
+        return  # Early return
+
+    logger.info("New URLs found:")
+    for url in new_urls:  # debugging
+        print(url)
+
+    # Initialize tqdm for progress visualization;
+    # Iterate through the list of urls and run the preprocessing pipeline for each
+    for url in tqdm(new_urls, desc="Processing job postings", unit="job"):
+
+        logger.info(f"Processing for URL: {url}")
+
+        await run_preprocessing_pipeline_async(
+            job_description_url=url,
+            job_descriptions_json_file=job_descriptions_json_file,
+            requirements_json_file=job_requirements_json_file,
+            resume_json_file=resume_json_file,
+            # text_file_holder=description_text_holder,
+            responsibilities_flat_json_file=responsibilities_flat_json_file,
+            requirements_flat_json_file=requirements_flat_json_file,
+        )
 
 
 def run_pipeline_2():
@@ -91,12 +163,12 @@ def run_pipeline_4():
 
 def main():
     """main to run the pipelines"""
-    run_pipeline_1()
+    run_pipeline_1_async()
     run_pipeline_2()
     run_pipeline_3()
 
-    # Run pipeline 2: Compare resume pipeline
-
 
 if __name__ == "__main__":
-    run_pipeline_4()
+    asyncio.run(run_pipeline_1_async())
+
+    # run_pipeline_1()

@@ -587,11 +587,11 @@ def analyze_resume_against_requirements(
         "Provide your suggestions in JSON format, with modifications highlighted."
     )
 
-    response = openai.chat.completions.create(
-        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.3
-    )
+    # response = openai.chat.completions.create(
+    #     model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.3
+    # )
 
-    return response.choices[0].message.content
+    # return response.choices[0].message.content
 
 
 if __name__ == "__main__":

@@ -4,15 +4,6 @@ import os
 import json
 import logging
 from pathlib import Path
-import re
-from dotenv import load_dotenv
-import ollama
-import openai
-from utils.search_uitls import fetch_and_summarize_company_news
-from prompts.prompt_templates import (
-    CLEAN_JOB_PAGE_PROMPT,
-    CONVERT_JOB_POSTING_TO_JSON_PROMPT,
-)
 
 
 def check_json_file(file_path):
@@ -156,7 +147,12 @@ def add_to_json_file(new_data, filename, key=None):
         with open(filename, "r", encoding="utf-8") as f:
             master_data = json.load(f)
 
-        # If a key is provided, add/update under that key
+        # Log the types of the existing and new data for better debugging
+        logging.debug(
+            f"Loaded data type: {type(master_data).__name__}, New data type: {type(new_data).__name__}"
+        )
+
+        # If a key is provided, ensure master_data is a dict and handle the update under the key
         if key:
             if not isinstance(master_data, dict):
                 raise ValueError(
@@ -167,16 +163,18 @@ def add_to_json_file(new_data, filename, key=None):
             if key in master_data:
                 # If both are lists, extend the list
                 if isinstance(master_data[key], list) and isinstance(new_data, list):
-                    master_data[key].extend(new_data)  # Append new list items
+                    master_data[key].extend(new_data)
                 # If both are dicts, update the dictionary
                 elif isinstance(master_data[key], dict) and isinstance(new_data, dict):
-                    master_data[key].update(new_data)  # Merge new dictionary items
+                    master_data[key].update(new_data)
                 else:
+                    # If the data types for the existing key and new data don't match, raise an error
                     raise ValueError(
-                        f"Data types for merging under key '{key}' are incompatible."
+                        f"Incompatible data types for merging under key '{key}': "
+                        f"{type(master_data[key]).__name__} vs {type(new_data).__name__}"
                     )
             else:
-                # If the key does not exist, add it
+                # If the key does not exist, add it with the new data
                 master_data[key] = new_data
         else:
             # If no key is provided, attempt to merge the data directly
@@ -186,7 +184,8 @@ def add_to_json_file(new_data, filename, key=None):
                 master_data.update(new_data)
             else:
                 raise ValueError(
-                    "Mismatched data types or unsupported structure for merging JSON data."
+                    f"Mismatched data types: cannot merge {type(master_data).__name__} "
+                    f"with {type(new_data).__name__}."
                 )
 
         # Save the updated master data back to the file
@@ -201,16 +200,12 @@ def add_to_json_file(new_data, filename, key=None):
             json.dump(new_data, f, indent=4, ensure_ascii=False)
         logging.info(f"File {filename} created and data added.")
 
-    except KeyError as e:
-        logging.error(f"KeyError when accessing key '{e}' in {filename}.")
-        raise
-
-    except ValueError as e:
-        logging.error(f"ValueError: {e}")
+    except (KeyError, ValueError) as e:
+        logging.error(f"Error adding data to {filename}: {e}")
         raise
 
     except Exception as e:
-        logging.error(f"Error adding data to {filename}: {e}")
+        logging.error(f"Unexpected error adding data to {filename}: {e}")
         raise
 
 

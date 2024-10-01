@@ -7,7 +7,7 @@ import math
 from joblib import Parallel, delayed
 from evaluation_optimization.resume_editor import TextEditor
 from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
-from evaluation_optimization.similarity_metrics_eval import categorize_scores
+from evaluation_optimization.similarity_metric_eval import categorize_scores
 from evaluation_optimization.resume_editor import TextEditor
 from utils.generic_utils import read_from_json_file, save_to_json_file
 

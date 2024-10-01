@@ -9,6 +9,8 @@ import os
 import json
 import logging
 from dotenv import load_dotenv
+import asyncio
+import nest_asyncio
 import openai
 from utils.generic_utils import (
     pretty_print_json,
@@ -17,13 +19,13 @@ from utils.generic_utils import (
     save_to_json_file,
 )
 
-# from utils.webpage_reader import process_webpages_to_json
-from utils.webpage_reader import process_webpages_to_json
-
+from utils.webpage_reader_async import process_webpages_to_json_async
 from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 
+
+nest_asyncio.apply()
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -138,17 +140,17 @@ def extract_flatten_resps_and_reqs(resume_json_file, requirements_json_file):
     return resps_flat, reqs_flat
 
 
-def run_pipeline(
-    job_description_url,
-    job_descriptions_json_file,
-    requirements_json_file,
-    resume_json_file,
-    text_file_holder,
-    responsibilities_flat_json_file,
-    requirements_flat_json_file,
+async def run_pipeline_async(
+    job_description_url: list,
+    job_descriptions_json_file: str,
+    requirements_json_file: str,
+    resume_json_file: str,
+    responsibilities_flat_json_file: str,
+    requirements_flat_json_file: str,
 ):
     """
     Orchestrates the entire pipeline for modifying a resume based on a job description.
+    The webpage reading/converting to JSON part is async.
 
     Args:
         - job_description_url (str): URL of the job description.
@@ -178,15 +180,16 @@ def run_pipeline(
             f"Job description for URL:\n '{job_description_url}' \n"
             f"already exists. Skipping the rest of the preprocessing steps."
         )
-        job_description_json = asyncio.run * (job_descriptions[job_description_url])
+        job_description_json = job_descriptions[job_description_url]
     else:
-        # **Step 2: Fetch the job description from the URL and save it**
+        # **Step 2: Async fetch the job description from the URL and save it**
         logger.info(f"Fetching job description from {job_description_url}...")
 
         # Convert job description text to JSON
-        job_description_json = process_webpages_to_json_async(job_description_url)
+        job_description_json = await process_webpages_to_json_async(job_description_url)
+        logger.info(f"job description json: {job_description_json}")  # debugging
 
-        add_to_json_file(job_description_json, job_descriptions_json_file)
+        await add_to_json_file(job_description_json, job_descriptions_json_file)
 
         logger.info(
             "job posting webpage(s) processed; job descriptions JSON file updated."

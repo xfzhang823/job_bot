@@ -11,14 +11,8 @@ import pandas as pd
 from pydantic import BaseModel, ValidationError
 from base_models import CodeResponse, JSONResponse, TabularResponse, TextResponse
 import openai
+from openai import OpenAI
 import ollama
-
-# Internal modules
-from utils.webpage_reader import read_webpages
-from prompts.prompt_templates import (
-    CLEAN_JOB_PAGE_PROMPT,
-    CONVERT_JOB_POSTING_TO_JSON_PROMPT,
-)
 
 # Import necessary modules for OpenAI and similarity scoring
 # from openai_module import OpenAI, get_openai_api_key  # Ensure correct import paths
@@ -26,13 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 def call_openai_api(
-    client, model_id, prompt, expected_res_type="str", temperature=0.4, max_tokens=1056
+    prompt,
+    client=None,
+    model_id="gpt-4-turbo",
+    expected_res_type="str",
+    temperature=0.4,
+    max_tokens=1056,
 ):
     """
     Handles API call to OpenAI to generate responses based on a given prompt and expected response type.
 
     Args:
-        client: OpenAI API client instance.
+        client: OpenAI API client instance (optional)
         model_id (str): Model ID to use for the OpenAI API call.
         prompt (str): The prompt to send to the API.
         expected_response_type (str): The expected type of response from the API.
@@ -49,6 +48,11 @@ def call_openai_api(
         pd.DataFrame: pandas object; for tabular response
         CodeResponse: a custom Pydantic model for code response (e.g., inherited from pydantic.BaseModel).
     """
+    if not client:
+        openai_api_key = get_openai_api_key()
+        client = OpenAI(api_key=openai_api_key)
+        logger.info("OpenaAI API instantiated.")
+
     try:
         logger.info(f"Making API call with expected response type: {expected_res_type}")
 
@@ -317,49 +321,3 @@ def get_openai_api_key():
         logging.error("OpenAI API key not found. Please set it in the .env file.")
         raise EnvironmentError("OpenAI API key not found.")
     return api_key
-
-
-# Function to read webpage and clean with llama3
-def read_and_clean_webpage_wt_llama3(url):
-    """
-    Reads a webpage, cleans the content using LLaMA for job related content only, and
-    returns the cleaned content.
-
-    Args:
-        url (str): The URL of the webpage to read.
-
-    Returns:
-        str: The cleaned content with the URL included at the beginning.
-    """
-    page = read_webpages(urls=[url], single_page=True)
-    page_content = page[url]
-    logging.info("Page read.")
-
-    # Initialize cleaned_chunks with the URL as the first element
-    cleaned_chunks = [url]
-    paragraphs = re.split(r"\n\s*\n", page_content)  # Split by paragraphs
-
-    for paragraph in paragraphs:
-        # If paragraph is too long, split into chunks of approximately 3000 characters
-        if len(paragraph) > 3000:
-            chunks = [paragraph[i : i + 3000] for i in range(0, len(paragraph), 3000)]
-            for chunk in chunks:
-                # Find the last sentence or paragraph break in the chunk
-                last_break = max(chunk.rfind(". "), chunk.rfind("\n"))
-                if last_break != -1:
-                    chunk = chunk[
-                        : last_break + 1
-                    ]  # Split at the last sentence or paragraph break
-                    prompt = CLEAN_JOB_PAGE_PROMPT.format(content=chunk)
-                response = ollama.generate(model="llama3", prompt=prompt)
-                cleaned_chunks.append(response["response"])
-        else:
-            # Format the prompt with the current paragraph content
-            prompt = CLEAN_JOB_PAGE_PROMPT.format(content=paragraph)
-            response = ollama.generate(model="llama3", prompt=prompt)
-            cleaned_chunks.append(response["response"])
-
-    cleaned_content = "\n".join(cleaned_chunks)
-    cleaned_content = re.sub(r"\n\s*\n", "\n", cleaned_content)
-    logging.info("Page cleaned.")
-    return cleaned_content
