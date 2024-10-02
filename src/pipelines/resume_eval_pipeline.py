@@ -12,9 +12,17 @@ from evaluation_optimization.similarity_metric_eval import (
     SimilarityScoreCalculator,
 )
 from evaluation_optimization.similarity_metric_eval import categorize_scores_for_df
-from utils.generic_utils import read_from_json_file, pretty_print_json
+from utils.generic_utils import (
+    read_from_json_file,
+    pretty_print_json,
+    get_company_and_job_title,
+)
 from utils.get_file_names import get_file_names
-from config import METRICS_OUTPUTS_EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
+
+from config import METRICS_OUTPUTS_CSV_FILES_DIR, job_descriptions_json_file
+from evaluation_optimization.evaluation_optimization_utils import (
+    get_new_urls_and_file_names,
+)
 from IPython.display import display
 
 
@@ -22,54 +30,28 @@ from IPython.display import display
 logger = logging.getLogger(__name__)
 
 
-def create_csv_file_name(company, job_title):
+def preprocess_for_eval(
+    job_descriptions_file, output_dir=METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0"
+):
     """
-    Creates a CSV file name from company and job title.
-
-    Replaces illegal file name characters with underscores.
+    Preprocess job descriptions for evaluation by identifying new URLs to process.
 
     Args:
-        company (str): Company name
-        job_title (str): Job title
+        job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
+        output_dir (str or Path, optional): Directory where output files are stored.
+            Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
 
     Returns:
-        str: CSV file name
+        Dict: A dictionary of new URLs that need to be processed and their filenames to be saved.
     """
+    job_descriptions = read_from_json_file(job_descriptions_file)
+    if not job_descriptions:
+        logger.error("No job descriptions loaded. Exiting.")
+        return {}
 
-    # Define illegal file name characters
-    illegal_chars = r"[^a-zA-Z0-9._-]"
-
-    # Replace illegal characters with underscores
-    company = re.sub(illegal_chars, "_", company)
-    job_title = re.sub(illegal_chars, "_", job_title)
-
-    # Create CSV file name
-    file_name = f"{company}_{job_title}.csv"
-
-    return file_name
-
-
-directory = METRICS_OUTPUTS_EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
-
-
-def check_if_existing(dir, file_name):
-    """
-    Checks if a file exists in the specified directory.
-
-    Args:
-        dir (str): Directory path
-        file_name (str): File name
-
-    Returns:
-        bool: True if file exists, False otherwise
-    """
-    existing_files = get_file_names(
-        dir_path=dir, full_path=False, file_type_inclusive=True
-    )
-    if file_name in existing_files:
-        logger.info(f"File ({file_name}) already exists. Skipping this step.")
-        return True
-    return False
+    new_urls_and_f_names = get_new_urls_and_file_names(job_descriptions, output_dir)
+    logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
+    return new_urls_and_f_names  # a dict
 
 
 def unpack_and_combine_json(nested_json, requirements_json):
@@ -136,58 +118,66 @@ def unpack_and_combine_json(nested_json, requirements_json):
     return results
 
 
-def run_pipeline(requirements_json_file, resume_json_file, csv_file):
-    """1st time run pipeline to calculate responsibility vs requirement alignment scores"""
+def run_pipeline(
+    url: str, requirements_json_file: str, resume_json_file: str, csv_file: str
+):
+    """
+    1st time run pipeline to calculate responsibility vs requirement alignment scores.
+
+    Args:
+        - url (str): URL of the job posting
+        (serves as the unique identifier to extract data from a single job posting in the requirement JSON file)
+        - requirements_json_file (str): Path of the JSON file containing all the job requirements
+        (from job sites)
+        - resume_json_file (str): Path of the JSON file containing the resume file
+        - csv_file (str): File path of the metric results in CSV (resume responsibilities vs job requirements of
+        a single job posting)
+    """
 
     logger.info("Start running responsibility/requirement alignment scoring pipeline.")
 
-    # Check if resps comparison csv file (the results) exists already
-    if os.path.exists(csv_file):
-        df = pd.read_csv(csv_file)
-    else:
-        # Step 1: Parse and flatten responsibilities from resume (as a dict)
-        resume_parser = ResumeParser(resume_json_file)
-        resps_flat = (
-            resume_parser.extract_and_flatten_responsibilities()
-        )  # this is a dict
+    # Step 1: Parse and flatten responsibilities from resume (as a dict)
+    resume_parser = ResumeParser(resume_json_file)
+    resps_flat = resume_parser.extract_and_flatten_responsibilities()  # dict
 
-        # Step 2: Parse and flatten job requirements (as a dict) or
-        # parse/flatten/conncactenate into a single string
-        job_reqs_parser = JobRequirementsParser(requirements_json_file)
-        reqs_flat = job_reqs_parser.extract_flatten_reqs()  # this is a dict
+    # Step 2: Parse and flatten job requirements (as a dict) or
+    # parse/flatten/concatenate into a single string
+    job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
+    reqs_flat = job_reqs_parser.extract_flatten_reqs()  # dict
 
-        # Not needed for now
-        # reqs_flat_str = (
-        #     job_reqs_parser.extract_flatten_concat_reqs()
-        # )  # concat into a single str.
-
-        # Step 3. Calculate and display similarity metrices - Segment by Segment
-        similarity_df = calculate_many_to_many_similarity_metrices(
-            resps_flat, reqs_flat
+    # Check if either responsibilities or requirements are empty
+    if not resps_flat or not reqs_flat:
+        logger.error(
+            "One of the required datasets (responsibilities or requirements) is empty."
         )
-        logging.info("Similarity metrics calcuated.")
+        return
 
-        # Step 4. Add score category values (high, mid, low)
-        # Translate DataFrame columns to match expected column names**
-        similarity_df = categorize_scores_for_df(similarity_df)
-        logger.info("Similarity metrics score categories created.")
+    # Step 3. Calculate and display similarity metrics - Segment by Segment
+    similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
+    logger.info("Similarity metrics calculated.")  # Changed to logger
 
-        # Step 5. Clean and save to csv
-        # df_cleaned = bscore_p_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-        df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-        df.to_csv(csv_file, index=False)
-        logging.info(f"Similarity metrics saved to location {csv_file}.")
+    # Step 4. Add score category values (high, mid, low)
+    # Translate DataFrame columns to match expected column names
+    similarity_df = categorize_scores_for_df(similarity_df)
+    logger.info("Similarity metrics score categories created.")
 
-        # Load the dataframe
-        df = pd.read_csv(csv_file)
+    # Step 5. Clean up the data by removing newline characters from the DataFrame
+    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
 
-        logger.info(f"Similarity metrics saved to file ({csv_file})")
+    # Step 6. Ensure the output directory exists and save the CSV file
+    df.to_csv(csv_file, index=False)  # Save to the correct path
+    logger.info(f"Similarity metrics saved to file ({csv_file})")
+
     logger.info(
         "Finished running responsibility/requirement alignment scoring pipeline."
     )
-    # Display the top rows of the dataframe for verification
-    print("Similarity Metrics Dataframe:")
-    display(df.head(10))
+
+    # Display the top rows of the DataFrame for verification
+    print(df.head(10))  # Updated display to print for non-interactive environments
+    logger.info(
+        f"Finished running responsibility/requirement alignment scoring pipeline for {url}."
+    )
+    print("\n\n")
 
 
 def re_run_pipeline(requirements_file, responsibilities_file, csv_file):

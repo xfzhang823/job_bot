@@ -2,6 +2,7 @@
 
 import os
 import logging
+import logging_config
 import asyncio
 from tqdm import tqdm
 from pipelines.preprocessing_pipeline_async import (
@@ -20,6 +21,7 @@ from pipelines.resume_eval_pipeline import (
     re_run_pipeline as re_run_resume_comparison_pipeline,
 )
 from utils.generic_utils import fetch_new_urls
+from pipelines.resume_eval_pipeline import preprocess_for_eval
 
 from config import (
     resume_json_file,
@@ -33,7 +35,9 @@ from config import (
     resp_req_sim_metrics_1_csv_file,
     modified_resps_flat_iter_1_json_file,
     modified_resps_flat_iter_2_json_file,
+    METRICS_OUTPUTS_CSV_FILES_DIR,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,7 @@ def run_pipeline_1():
         )
 
 
+# This should be the main pipeline b/c it's a lot faster
 async def run_pipeline_1_async():
     """
     Asynchronous pipeline for preprocessing job posting webpage(s).
@@ -122,19 +127,24 @@ async def run_pipeline_1_async():
 
 def run_pipeline_2():
     """Pipeline for resume evaluation"""
-    logger.info("Running pipeline 2: Matching Resume")
+    logger.info("Running pipeline 2: Compare Resume with Requirements")
 
-    resume_json_path = resume_json_file
-    reqs_json_path = job_requirements_json_file
-
-    # CSV output file
-    csv_output_f_path = resp_req_sim_metrics_0_csv_file
-
-    run_resume_comparison_pipeline(
-        requirements_json_file=reqs_json_path,
-        resume_json_file=resume_json_path,
-        csv_file=csv_output_f_path,
+    # Preprocessing: Get new urls and check which are new - need to processed
+    new_urls_and_f_names = preprocess_for_eval(
+        job_descriptions_file=job_descriptions_json_file,
+        output_dir=METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0",
     )
+
+    logger.info("Preprocessing finished.")
+
+    # Run pipeline for each url
+    for url, filename in new_urls_and_f_names.items():
+        run_resume_comparison_pipeline(
+            url=url,
+            requirements_json_file=job_requirements_json_file,
+            resume_json_file=resume_json_file,
+            csv_file=filename,
+        )
 
 
 def run_pipeline_3():
@@ -160,12 +170,10 @@ def run_pipeline_4():
 
 def main():
     """main to run the pipelines"""
-    run_pipeline_1_async()
+    asyncio.run(run_pipeline_1_async())
     run_pipeline_2()
     run_pipeline_3()
 
 
 if __name__ == "__main__":
-    asyncio.run(run_pipeline_1_async())
-
-    # run_pipeline_1()
+    run_pipeline_2()
