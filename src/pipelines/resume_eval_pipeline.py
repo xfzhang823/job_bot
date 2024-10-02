@@ -1,5 +1,7 @@
 import os
+from pathlib import Path
 import pandas as pd
+import re
 import logging
 import logging_config
 from preprocessing.resume_preprocessor import ResumeParser
@@ -11,12 +13,63 @@ from evaluation_optimization.similarity_metric_eval import (
 )
 from evaluation_optimization.similarity_metric_eval import categorize_scores_for_df
 from utils.generic_utils import read_from_json_file, pretty_print_json
-
+from utils.get_file_names import get_file_names
+from config import METRICS_OUTPUTS_EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
 from IPython.display import display
 
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+
+def create_csv_file_name(company, job_title):
+    """
+    Creates a CSV file name from company and job title.
+
+    Replaces illegal file name characters with underscores.
+
+    Args:
+        company (str): Company name
+        job_title (str): Job title
+
+    Returns:
+        str: CSV file name
+    """
+
+    # Define illegal file name characters
+    illegal_chars = r"[^a-zA-Z0-9._-]"
+
+    # Replace illegal characters with underscores
+    company = re.sub(illegal_chars, "_", company)
+    job_title = re.sub(illegal_chars, "_", job_title)
+
+    # Create CSV file name
+    file_name = f"{company}_{job_title}.csv"
+
+    return file_name
+
+
+directory = METRICS_OUTPUTS_EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR
+
+
+def check_if_existing(dir, file_name):
+    """
+    Checks if a file exists in the specified directory.
+
+    Args:
+        dir (str): Directory path
+        file_name (str): File name
+
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    existing_files = get_file_names(
+        dir_path=dir, full_path=False, file_type_inclusive=True
+    )
+    if file_name in existing_files:
+        logger.info(f"File ({file_name}) already exists. Skipping this step.")
+        return True
+    return False
 
 
 def unpack_and_combine_json(nested_json, requirements_json):

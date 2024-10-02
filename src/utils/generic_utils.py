@@ -3,7 +3,11 @@
 import os
 import json
 import logging
+import logging_config
 from pathlib import Path
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 def check_json_file(file_path):
@@ -50,6 +54,48 @@ def ensure_dict_format(data, prefix="item"):
         raise TypeError("Input data must be a list or dictionary.")
 
 
+def fetch_new_urls(existing_url_list_file, url_list_file):
+    """
+    Fetch job posting URLs from the new jobs file, compare them with the existing jobs file,
+    and return only the new URLs that have not been previously processed.
+
+    Args:
+        job_descriptions_json_file (str): File path of the JSON file containing already processed job postings.
+                                          Typically from 'job_postings.json'.
+        list_of_urls_file (str): File path of the JSON file containing the list of new job posting URLs.
+
+    Returns:
+        list: A list of URLs that are new and have not been processed yet.
+
+    Notes:
+        - Both files must be in valid JSON format.
+        - The existing job descriptions file should use URLs as keys.
+        - The new jobs file should have a structure where job postings are listed under "jobs" and each job has a "url" field.
+    """
+
+    # Load new job posting URLs from the file
+    with open(url_list_file, "r") as f:
+        new_job_data = json.load(f)
+
+    # Extract URLs from the new job postings
+    urls_to_check = [job["url"] for job in new_job_data["jobs"]]
+
+    # Load the existing job descriptions from the existing JSON file
+    with open(existing_url_list_file, "r") as f:
+        existing_job_data = json.load(f)
+
+    # Extract existing URLs (assuming URLs are the keys)
+    existing_urls = list(existing_job_data.keys())
+
+    # Filter out URLs that already exist
+    new_urls = [url for url in urls_to_check if url not in existing_urls]
+
+    if not new_urls:
+        logger.info("No new URLs found.")  # Optional logging or handling
+
+    return new_urls
+
+
 def find_project_root(starting_path=None, marker=".git"):
     """
     Recursively find the root directory of the project by looking for a specific marker.
@@ -75,6 +121,26 @@ def find_project_root(starting_path=None, marker=".git"):
             return parent
 
     return None  # Return None if the marker is not found
+
+
+def is_existing(dir, file_name):
+    """
+    Checks if a file exists in the specified directory.
+
+    Args:
+        dir (str): Directory path
+        file_name (str): File name
+
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    existing_files = get_file_names(
+        dir_path=dir, full_path=False, file_type_inclusive=True
+    )
+    if file_name in existing_files:
+        logger.info(f"File ({file_name}) already exists. Skipping this step.")
+        return True
+    return False
 
 
 def load_or_create_json(filepath, key=None):

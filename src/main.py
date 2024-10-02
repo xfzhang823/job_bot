@@ -2,15 +2,14 @@
 
 import os
 import logging
-from tqdm import tqdm
 import asyncio
+from tqdm import tqdm
 from pipelines.preprocessing_pipeline_async import (
     run_pipeline_async as run_preprocessing_pipeline_async,
 )
 from pipelines.preprocessing_pipeline import (
     run_pipeline as run_preprocessing_pipeline,
 )
-from pipelines.preprocessing_pipeline import fetch_new_urls
 from pipelines.resume_eval_pipeline import (
     run_pipeline as run_resume_comparison_pipeline,
 )
@@ -20,6 +19,8 @@ from pipelines.resume_editing_pipeline import (
 from pipelines.resume_eval_pipeline import (
     re_run_pipeline as re_run_resume_comparison_pipeline,
 )
+from utils.generic_utils import fetch_new_urls
+
 from config import (
     resume_json_file,
     job_posting_urls_file,
@@ -68,7 +69,7 @@ def run_pipeline_1():
 
         logger.info(f"Processing for URL: {url}")
 
-        run_preprocessing_pipeline_async(
+        run_preprocessing_pipeline(
             job_description_url=url,
             job_descriptions_json_file=job_descriptions_json_file,
             requirements_json_file=job_requirements_json_file,
@@ -82,8 +83,10 @@ def run_pipeline_1():
 async def run_pipeline_1_async():
     """
     Asynchronous pipeline for preprocessing job posting webpage(s).
-    If there are multiple URL links, iterate through them and
-    run the `run_pipeline_async` function for each.
+    - If there are multiple URL links, iterate through them and run the `run_pipeline_async`
+    function for each.
+    - However, the pipeline is for ONE JOB SITE ONLY.
+    - Multiple job sites will be iterated through the pipeline multiple times.
 
     The pipeline will skip processing if no new URLs are found.
     """
@@ -105,9 +108,7 @@ async def run_pipeline_1_async():
     # Initialize tqdm for progress visualization;
     # Iterate through the list of urls and run the preprocessing pipeline for each
     for url in tqdm(new_urls, desc="Processing job postings", unit="job"):
-
         logger.info(f"Processing for URL: {url}")
-
         await run_preprocessing_pipeline_async(
             job_description_url=url,
             job_descriptions_json_file=job_descriptions_json_file,
@@ -123,15 +124,11 @@ def run_pipeline_2():
     """Pipeline for resume evaluation"""
     logger.info("Running pipeline 2: Matching Resume")
 
-    resume_json_path = (
-        r"C:\github\job_bot\data\Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
-    )
-
-    reqs_json_path = r"C:\github\job_bot\data\extracted_job_requirements.json"
+    resume_json_path = resume_json_file
+    reqs_json_path = job_requirements_json_file
 
     # CSV output file
-    dir_path = r"C:\github\job_bot\input_output\resume_comparison"
-    csv_output_f_path = os.path.join(dir_path, "output_seg_by_seg_sim_matrix_v2.csv")
+    csv_output_f_path = resp_req_sim_metrics_0_csv_file
 
     run_resume_comparison_pipeline(
         requirements_json_file=reqs_json_path,

@@ -29,7 +29,7 @@ from prompts.prompt_templates import (
     CONVERT_JOB_POSTING_TO_JSON_PROMPT,
 )
 from utils.llm_data_utils import call_openai_api
-from base_models import JSONResponse
+from models.base_models import JobSiteResponseModel
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -434,7 +434,7 @@ def read_webpages(urls: list):
     if isinstance(urls, str):
         urls = [urls]
 
-    documents = load_webpages(urls)
+    documents, failed_urls = load_webpages(urls)
 
     content_dict = {}
 
@@ -483,14 +483,19 @@ def convert_to_json_wt_gpt(input_text, model_id="gpt-4-turbo", temperature=0.3):
         prompt=prompt,
         model_id=model_id,
         expected_res_type="json",
+        context_type="job_site",
         temperature=temperature,
         max_tokens=2000,
     )
     logger.info(f"Raw LLM Response: {response_pyd_obj}")
 
-    if not isinstance(response_pyd_obj, JSONResponse):
-        logger.error("Received response is not in expected JSONResponse format.")
-        raise ValueError("Received response is not in expected JSONResponse format.")
+    if not isinstance(response_pyd_obj, JobSiteResponseModel):
+        logger.error(
+            "Received response is not in expected JobSiteResponseModel format."
+        )
+        raise ValueError(
+            "Received response is not in expected JobSiteResponseModel format."
+        )
 
     return response_pyd_obj.model_dump()
 
@@ -514,9 +519,9 @@ def process_webpages_to_json(urls):
 
     # Read webpage(s) content
     logger.info(f"Reading webpage(s) from: {urls}")
-    webpages_content = read_webpages(urls)
+    webpages_content, failed_urls = read_webpages(urls)
 
-    json_results = []
+    json_results = {}
 
     # Process each webpage content
     for url, content in webpages_content.items():

@@ -5,42 +5,73 @@ from utils.generic_utils import read_from_json_file
 from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
 
 
+import logging
+from utils.generic_utils import read_from_json_file
+from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
+
+
 class JobRequirementsParser:
-    def __init__(self, json_path):
+    def __init__(self, json_path, url):
         """
-        Initialize the JobRequirementsParser with a JSON path.
+        Initialize the JobRequirementsParser with a JSON path and a specific job posting URL.
 
         Args:
-            json_path (str): Path to the JSON file containing the job requirements.
+            json_path (str): Path to the JSON file containing job requirements.
+            url (str): The specific URL for the job posting to be parsed.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> print(parser.url)
+            'https://example.com/job1'
         """
         self.json_path = json_path
-        self.job_reqs_dict = self.load_job_requirements_json()
+        self.url = url
+        self.job_reqs_dict = self.load_single_job_posting()
 
-    def load_job_requirements_json(self):
+    def load_single_job_posting(self):
         """
-        Load job requirements data from a JSON file and check for validity.
+        Load the specific job posting data from the JSON file based on the provided URL.
 
         Returns:
-            dict or None: The job requirements data loaded from the JSON file,
-                          or None if the data is invalid.
-        """
-        reqs_dict = read_from_json_file(self.json_path, key=None)
+            dict or None: The job posting data loaded from the JSON file,
+                          or None if the data is invalid or the URL is not found.
 
-        # Check if reqs_dict is a valid JSON object (dict or list)
-        if not isinstance(reqs_dict, (dict, list)):
-            print("The provided data is not a valid JSON object (dict or list).")
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> job_posting = parser.load_single_job_posting()
+            >>> print(job_posting['down_to_earth'])
+            ["5+ years of experience in software development", "Strong knowledge of Python"]
+        """
+        all_reqs_dict = read_from_json_file(self.json_path, key=None)
+
+        # Check if all_reqs_dict is a valid JSON object (dict)
+        if not isinstance(all_reqs_dict, dict):
+            print("The provided data is not a valid JSON object.")
             logging.error("Invalid JSON format provided. Exiting parsing.")
             return None
 
-        logging.info("Job requirements JSON loaded from the file.")
-        return reqs_dict
+        # Fetch the job posting for the specific URL
+        job_posting = all_reqs_dict.get(self.url, None)
+        if job_posting is None:
+            print(f"No job posting found for the URL: {self.url}")
+            logging.error(f"No job posting found for the URL: {self.url}")
+            return None
+
+        logging.info(f"Job requirements for {self.url} loaded from the file.")
+        return job_posting
 
     def extract_down_to_earth(self):
         """
-        Extract 'down to earth' requirements from the job requirements.
+        Extract 'down to earth' requirements from the job posting.
 
         Returns:
-            dict: The extracted 'down to earth' requirements.
+            list or None: A list of 'down to earth' requirements, or None if not found.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> down_to_earth_reqs = parser.extract_down_to_earth()
+            >>> print(down_to_earth_reqs)
+            ["5+ years of experience in software development", "Strong knowledge of Python"]
         """
         if self.job_reqs_dict:
             down_to_earth = fetch_subtrees(self.job_reqs_dict, "down_to_earth")
@@ -52,10 +83,16 @@ class JobRequirementsParser:
 
     def extract_bare_minimum(self):
         """
-        Extract 'bare minimum' requirements from the job requirements.
+        Extract 'bare minimum' requirements from the job posting.
 
         Returns:
-            dict: The extracted 'bare minimum' requirements.
+            list or None: A list of 'bare minimum' requirements, or None if not found.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> bare_minimum_reqs = parser.extract_bare_minimum()
+            >>> print(bare_minimum_reqs)
+            ["Bachelor's degree in Computer Science or equivalent"]
         """
         if self.job_reqs_dict:
             bare_minimum = fetch_subtrees(self.job_reqs_dict, "bare_minimum")
@@ -67,10 +104,16 @@ class JobRequirementsParser:
 
     def extract_pie_in_the_sky(self):
         """
-        Extract 'pie in the sky' requirements from the job requirements.
+        Extract 'pie in the sky' requirements from the job posting.
 
         Returns:
-            dict: The extracted 'pie in the sky' requirements.
+            list or None: A list of 'pie in the sky' requirements, or None if not found.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> pie_in_the_sky_reqs = parser.extract_pie_in_the_sky()
+            >>> print(pie_in_the_sky_reqs)
+            ["PhD in Computer Science", "10+ years of experience in AI research"]
         """
         if self.job_reqs_dict:
             pie_in_the_sky = fetch_subtrees(self.job_reqs_dict, "pie_in_the_sky")
@@ -82,10 +125,16 @@ class JobRequirementsParser:
 
     def extract_other(self):
         """
-        Extract other categories of job requirements from the job requirements.
+        Extract 'other' categories of job requirements from the job posting.
 
         Returns:
-            dict: The extracted requirements of other categories.
+            list or None: A list of 'other' requirements, or None if not found.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> other_reqs = parser.extract_other()
+            >>> print(other_reqs)
+            ["English proficiency required", "Experience working with international teams"]
         """
         if self.job_reqs_dict:
             other_categories = fetch_subtrees(self.job_reqs_dict, "other")
@@ -103,96 +152,74 @@ class JobRequirementsParser:
         Returns:
             dict: A dictionary of flattened job requirements with unique keys.
 
-        Relevant requirement categories include:
-        - pie_in_sky
-        - down_to_earth
-        - other
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> flattened_reqs = parser.extract_flatten_reqs()
+            >>> print(flattened_reqs)
+            {'req_1': "5+ years of experience in software development", 'req_2': "Strong knowledge of Python"}
         """
-        # Extract requirements with error handling
         try:
-            pie_in_sky_reqs = self.extract_pie_in_the_sky()  # List of dicts
-            down_to_earth_reqs = self.extract_down_to_earth()  # List of dicts
-            other_reqs = self.extract_other()  # Corrected method call (List of dicts)
+            pie_in_sky_reqs = self.extract_pie_in_the_sky()
+            down_to_earth_reqs = self.extract_down_to_earth()
+            other_reqs = self.extract_other()
         except Exception as e:
             logging.error(f"Error extracting requirements: {e}")
             return []
 
-        # Debugging: Check the output of each extraction function
-        print(f"Extracted 'pie_in_the_sky' requirements: {pie_in_sky_reqs}")
-        print(f"Number of 'pie_in_the_sky' requirements: {len(pie_in_sky_reqs)}")
+        pie_in_sky_reqs = pie_in_sky_reqs or []
+        down_to_earth_reqs = down_to_earth_reqs or []
+        other_reqs = other_reqs or []
 
-        print(f"Extracted 'down_to_earth' requirements: {down_to_earth_reqs}")
-        print(f"Number of 'down_to_earth' requirements: {len(down_to_earth_reqs)}")
-
-        print(f"Extracted 'other' requirements: {other_reqs}")
-        print(f"Number of 'other' requirements: {len(other_reqs)}")
-
-        # Check if any of the extracted lists are None or empty
-        if not pie_in_sky_reqs:
-            logging.warning("No 'pie_in_sky' requirements found.")
-            pie_in_sky_reqs = []
-        if not down_to_earth_reqs:
-            logging.warning("No 'down_to_earth' requirements found.")
-            down_to_earth_reqs = []
-        if not other_reqs:
-            logging.warning("No 'other' requirements found.")
-            other_reqs = []
-
-        # Combine all requirements into a single list
         combined_reqs = pie_in_sky_reqs + down_to_earth_reqs + other_reqs
 
-        # Use the existing flatten_dict_and_list function to flatten the combined list
         flattened_reqs_dict = flatten_dict_and_list(combined_reqs)
 
         logging.info("Extracted and flattened job requirements.")
-        print(
-            f"Total number of flattened job requirements: {len(flattened_reqs_dict)}"
-        )  # Debugging: Check total count
-        print(f"Flattened job requirements: {flattened_reqs_dict}")
         return flattened_reqs_dict
 
     def extract_flatten_concat_reqs(self):
         """
-        Extract, flatten, and concatenate more relevant job requirements into a single string.
-        (only in a single text string format can it be properly text processed.)
+        Extract, flatten, and concatenate all relevant job requirements into a single string.
 
         Returns:
             str: Concatenated string of all job requirements.
 
-        Relevant requirement categories include:
-        - pie_in_sky
-        - down_to_earth
-        - other
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> concatenated_reqs = parser.extract_flatten_concat_reqs()
+            >>> print(concatenated_reqs)
+            "5+ years of experience in software development\nStrong knowledge of Python\nEnglish proficiency required"
         """
-
-        # Use the first function to get the flattened dictionary of requirements
         merged_flat_dict = self.extract_flatten_reqs()
 
-        # Check if the dictionary is empty to avoid concatenating an empty string
         if not merged_flat_dict:
             logging.warning("No job requirements found to concatenate.")
             return ""
 
-        # Convert dictionary values to a single string with newline separation
         job_reqs_str = "\n".join(merged_flat_dict.values())
-
         logging.info("Extracted, flattened, and concatenated job requirements.")
         return job_reqs_str
 
     def extract_all(self):
         """
-        Extract all job requirements from the job requirements dictionary, excluding the first-level key.
+        Extract all job requirements from the job posting, excluding the first-level key.
 
         Returns:
-            dict: A dictionary containing all job requirements, excluding the first-level key.
+            dict: A dictionary containing all job requirements.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> all_reqs = parser.extract_all()
+            >>> print(all_reqs)
+            {
+                "pie_in_the_sky": ["PhD in Computer Science"],
+                "down_to_earth": ["5+ years of experience in software development"],
+                "other": ["English proficiency required"]
+            }
         """
         if self.job_reqs_dict:
-            # Assuming the first level key is the URL or identifier
-            # Extract the first (and only) value from the dictionary without the key
-            all_requirements = next(iter(self.job_reqs_dict.values()), {})
-            logging.info(
-                "Fetched all job requirements (excluding the first-level key)."
-            )
+            all_requirements = self.job_reqs_dict
+            logging.info("Fetched all job requirements.")
             return all_requirements
         else:
             logging.error("Invalid job requirements data.")

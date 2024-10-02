@@ -78,6 +78,7 @@ modified_resps_flat_iter_2_json_file = (
 )
 
 
+METRICS_OUTPUTS_EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR = "C:\github\job_bot\input_output\evaluation_optimization\output_seg_by_seg_sim_metrics"
 # CSV file containing df with resp. excluded from modification b/c they are just
 # factual statements, i.e., "promoted to .... in ..."
 # They need to be added back to the final edited resume
