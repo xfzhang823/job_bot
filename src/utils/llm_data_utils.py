@@ -9,7 +9,15 @@ from io import StringIO
 from dotenv import load_dotenv
 import pandas as pd
 from pydantic import BaseModel, ValidationError
-from base_models import CodeResponse, JSONResponse, TabularResponse, TextResponse
+from typing import Union
+from models.base_models import (
+    CodeResponse,
+    JSONResponse,
+    TabularResponse,
+    TextResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+)
 import openai
 from openai import OpenAI
 import ollama
@@ -24,29 +32,40 @@ def call_openai_api(
     client=None,
     model_id="gpt-4-turbo",
     expected_res_type="str",
+    context_type: str = None,  # Use this to determine which JSON model to use
     temperature=0.4,
     max_tokens=1056,
-):
+) -> Union[
+    TextResponse,
+    JSONResponse,
+    TabularResponse,
+    CodeResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+]:
     """
     Handles API call to OpenAI to generate responses based on a given prompt and expected response type.
 
     Args:
-        client: OpenAI API client instance (optional)
-        model_id (str): Model ID to use for the OpenAI API call.
-        prompt (str): The prompt to send to the API.
-        expected_response_type (str): The expected type of response from the API.
-                                      Options are 'str' (default), 'json', 'tabular', or 'code'.
-        max_tokens: default to 1056
+        - client: OpenAI API client instance (optional)
+        - model_id (str): Model ID to use for the OpenAI API call.
+        - prompt (str): The prompt to send to the API.
+        - expected_res_type (str): The expected type of response from the API
+        ('str', 'json', 'tabular', or 'code').
+        - context_type (str): Specifies whether to use a job-related JSON model or
+        an editing model for JSON ("editing" or "job_site")
+        - temperature (str): creativity of the response (0 to 1.0)
+        - max_tokens: Maximum tokens to be generated in response.
 
     Returns:
         - Union[str, JSONResponse, pd.DataFrame, CodeResponse]:
         Response formatted according to the specified expected_response_type ()
 
-        Union: A utility from Python's typing module
-        str: plain text response
-        JSONResponse: a custom Pydantic model for JSON response (e.g., inherited from pydantic.BaseModel).
-        pd.DataFrame: pandas object; for tabular response
-        CodeResponse: a custom Pydantic model for code response (e.g., inherited from pydantic.BaseModel).
+        - Union: A utility from Python's typing module
+        - str: plain text response
+        - JSONResponse: a custom Pydantic model for JSON response (e.g., inherited from pydantic.BaseModel).
+        - pd.DataFrame: pandas object; for tabular response
+        - CodeResponse: a custom Pydantic model for code response (e.g., inherited from pydantic.BaseModel).
     """
     if not client:
         openai_api_key = get_openai_api_key()
@@ -86,30 +105,34 @@ def call_openai_api(
             return parsed_response.content  # return as plain string instead the model
 
         elif expected_res_type == "json":
-            # Parse JSON response
             try:
-                # Convert JSON-formatted string to Python dictionary
-
-                # Check if response contains an incomplete or non-JSON response
-                if not response_content.endswith("}"):
-                    logger.error("Response appears incomplete or malformed.")
-                    raise ValueError("Received an incomplete response from OpenAI API.")
-
-                # Clean the response to extract the JSON block
                 cleaned_response_content = clean_and_extract_json(response_content)
-
-                # Check if the response is empty after cleaning
                 if not cleaned_response_content:
-                    logger.error("Received an empty response from LLaMA API.")
-                    raise ValueError("Received an empty response from LLaMA API.")
+                    logger.error("Received an empty response after cleaning.")
+                    raise ValueError("Received an empty response after cleaning.")
 
-                # Convert cleaned JSON-formatted string to Python dictionary
                 response_dict = json.loads(cleaned_response_content)
 
-                # Use Pydantic to validate and parse the dictionary into a model
-                parsed_response = JSONResponse(**response_dict)
+                # Determine the correct model to use based on context_type
+                if context_type == "editing":
+                    return EditingResponseModel(
+                        optimized_text=response_dict.get("optimized_text")
+                    )
 
-                return parsed_response
+                elif context_type == "job_site":
+                    return JobSiteResponseModel(
+                        job_title=response_dict.get("job_title"),
+                        company=response_dict.get("company"),
+                        location=response_dict.get("location"),
+                        salary_info=response_dict.get("salary_info"),
+                        posted_date=response_dict.get("posted_date"),
+                        content=response_dict.get("content"),
+                    )
+
+                else:
+                    # Fallback to a more generic JSON response if no specific context is provided
+                    return JSONResponse(data=response_dict)
+
             except (json.JSONDecodeError, ValidationError) as e:
                 logger.error(f"Failed to parse JSON or validate with Pydantic: {e}")
                 raise ValueError("Invalid JSON format received from OpenAI API.")

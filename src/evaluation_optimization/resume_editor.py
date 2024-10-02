@@ -21,7 +21,7 @@ from prompts.prompt_templates import (
 )
 from utils.llm_data_utils import get_openai_api_key, call_openai_api, call_llama3
 from utils.validation_utils import validate_json_response
-from base_models import JSONResponse
+from models.base_models import EditingResponseModel
 
 # logging
 logger = logging.getLogger(__name__)
@@ -130,16 +130,17 @@ class TextEditor:
                 self.model_id,
                 prompt,
                 expected_res_type="json",
+                context_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
             )
 
-            if not isinstance(response_pyd_obj, JSONResponse):
+            if not isinstance(response_pyd_obj, EditingResponseModel):
                 logger.error(
-                    "Received response is not in expected JSONResponse format."
+                    "Received response is not in expected EditingResponseModel format."
                 )
                 raise ValueError(
-                    "Received response is not in expected JSONResponse format."
+                    "Received response is not in expected EditingResponseModel format."
                 )
 
             return response_pyd_obj.model_dump()
@@ -150,12 +151,12 @@ class TextEditor:
                 prompt, expected_res_type="json", temperature=temperature
             )
 
-            if not isinstance(response_pyd_obj, JSONResponse):
+            if not isinstance(response_pyd_obj, EditingResponseModel):
                 logger.error(
-                    "Received response is not in expected JSONResponse format."
+                    "Received response is not in expected EditingResponseModel format."
                 )
                 raise ValueError(
-                    "Received response is not in expected JSONResponse format."
+                    "Received response is not in expected EditingResponseModel format."
                 )
 
             return response_pyd_obj.model_dump()

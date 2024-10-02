@@ -18,14 +18,11 @@ from utils.generic_utils import (
     add_to_json_file,
     save_to_json_file,
 )
-
 from utils.webpage_reader_async import process_webpages_to_json_async
 from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 
-
-nest_asyncio.apply()
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -33,48 +30,6 @@ logger = logging.getLogger(__name__)
 # Load API keys
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
-
-
-def fetch_new_urls(existing_url_list_file, url_list_file):
-    """
-    Fetch job posting URLs from the new jobs file, compare them with the existing jobs file,
-    and return only the new URLs that have not been previously processed.
-
-    Args:
-        job_descriptions_json_file (str): File path of the JSON file containing already processed job postings.
-                                          Typically from 'job_postings.json'.
-        list_of_urls_file (str): File path of the JSON file containing the list of new job posting URLs.
-
-    Returns:
-        list: A list of URLs that are new and have not been processed yet.
-
-    Notes:
-        - Both files must be in valid JSON format.
-        - The existing job descriptions file should use URLs as keys.
-        - The new jobs file should have a structure where job postings are listed under "jobs" and each job has a "url" field.
-    """
-
-    # Load new job posting URLs from the file
-    with open(url_list_file, "r") as f:
-        new_job_data = json.load(f)
-
-    # Extract URLs from the new job postings
-    urls_to_check = [job["url"] for job in new_job_data["jobs"]]
-
-    # Load the existing job descriptions from the existing JSON file
-    with open(existing_url_list_file, "r") as f:
-        existing_job_data = json.load(f)
-
-    # Extract existing URLs (assuming URLs are the keys)
-    existing_urls = list(existing_job_data.keys())
-
-    # Filter out URLs that already exist
-    new_urls = [url for url in urls_to_check if url not in existing_urls]
-
-    if not new_urls:
-        logger.info("No new URLs found.")  # Optional logging or handling
-
-    return new_urls
 
 
 def extract_job_requirements_with_gpt(job_description, model_id="gpt-3.5-turbo"):
@@ -149,8 +104,13 @@ async def run_pipeline_async(
     requirements_flat_json_file: str,
 ):
     """
-    Orchestrates the entire pipeline for modifying a resume based on a job description.
-    The webpage reading/converting to JSON part is async.
+    Asynchronous pipeline for preprocessing job posting webpage(s):
+    - Orchestrates the entire pipeline for modifying a resume based on a job description.
+    - If there are multiple URL links, iterate through them and run the `run_pipeline_async`
+    function for each.
+    - However, the pipeline is for ONE JOB SITE ONLY.
+    - Multiple job sites will be iterated through the pipeline multiple times.
+    - The pipeline will skip processing if no new URLs are found.
 
     Args:
         - job_description_url (str): URL of the job description.
@@ -189,7 +149,7 @@ async def run_pipeline_async(
         job_description_json = await process_webpages_to_json_async(job_description_url)
         logger.info(f"job description json: {job_description_json}")  # debugging
 
-        await add_to_json_file(job_description_json, job_descriptions_json_file)
+        add_to_json_file(job_description_json, job_descriptions_json_file)
 
         logger.info(
             "job posting webpage(s) processed; job descriptions JSON file updated."
