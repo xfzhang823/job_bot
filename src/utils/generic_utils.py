@@ -5,6 +5,7 @@ import json
 import logging
 import logging_config
 from pathlib import Path
+from utils.get_file_names import get_file_names
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -121,6 +122,38 @@ def find_project_root(starting_path=None, marker=".git"):
             return parent
 
     return None  # Return None if the marker is not found
+
+
+import json
+
+
+def get_company_and_job_title(job_posting_url, json_data):
+    """
+    Looks up the company and job title for a given job posting URL from the JSON data.
+
+    Args:
+        job_posting_url (str): The URL of the job posting to look up.
+        json_data (dict): The JSON-like dictionary containing the job postings data.
+
+    Returns:
+        dict: A dictionary containing the 'company' and 'job_title' if found, otherwise None for both.
+
+    Example:
+        json_data = json.load(open('job_postings.json'))
+        result = get_company_and_job_title('url...', json_data)
+        print(result)
+        # Output: {'company': 'Google', 'job_title': 'AI Market Intelligence Principal'}
+    """
+    # Get the job posting data by URL
+    job_data = json_data.get(job_posting_url)
+
+    if job_data:
+        company = job_data.get("company", None)
+        job_title = job_data.get("job_title", None)
+        return {"company": company, "job_title": job_title}
+    else:
+        print(f"Job posting not found for URL: {job_posting_url}")
+        return {"company": None, "job_title": None}
 
 
 def is_existing(dir, file_name):

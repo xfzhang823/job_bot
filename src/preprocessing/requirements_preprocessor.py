@@ -5,11 +5,6 @@ from utils.generic_utils import read_from_json_file
 from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
 
 
-import logging
-from utils.generic_utils import read_from_json_file
-from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
-
-
 class JobRequirementsParser:
     def __init__(self, json_path, url):
         """
