@@ -1,9 +1,13 @@
 import os
 from pathlib import Path
 import pandas as pd
-import re
+
 import logging
 import logging_config
+
+import asyncio
+import aiofiles
+
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 from evaluation_optimization.text_similarity_finder import TextSimilarity
@@ -13,19 +17,18 @@ from evaluation_optimization.metrics_calculator import (
     SimilarityScoreCalculator,
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from utils.generic_utils import (
-    read_from_json_file,
-    pretty_print_json,
-    get_company_and_job_title_from_json,
+from utils.generic_utils_async import (
+    read_from_json_async,
+    read_from_csv_async,
+    save_to_csv_async,
 )
-
+from utils.generic_utils import pretty_print_json, get_company_and_job_title_from_json
 from config import METRICS_OUTPUTS_CSV_FILES_DIR, job_descriptions_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
-    get_new_urls_and_file_names,
     get_new_urls_and_metrics_file_paths,
+    get_new_urls_and_flat_json_file_paths,
     find_files_wo_multivariate_indices,
 )
-from IPython.display import display
 
 
 # Set up logger
@@ -130,11 +133,37 @@ def unpack_and_combine_json(nested_json, requirements_json):
     return results
 
 
-def metrics_processing_pipeline(
+async def metrics_preprocessing_mini_pipeline_async(
+    job_descriptions_file, output_dir=METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0"
+):
+    """
+    Asynchronous preprocess job descriptions for evaluation by identifying new URLs to process.
+
+    Args:
+        job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
+        output_dir (str or Path, optional): Directory where output files are stored.
+            Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
+
+    Returns:
+        Dict: A dictionary of new URLs that need to be processed and their file paths to be saved.
+    """
+    job_descriptions = await read_from_json_async(job_descriptions_file)
+    if not job_descriptions:
+        logger.error("No job descriptions loaded. Exiting.")
+        return {}
+
+    new_urls_and_f_names = get_new_urls_and_metrics_file_paths(
+        job_descriptions, output_dir
+    )
+    logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
+    return new_urls_and_f_names  # a dict
+
+
+async def metrics_processing_pipeline_async(
     url: str, requirements_json_file: str, resume_json_file: str, csv_file: str
 ):
     """
-    1st time run pipeline to calculate responsibility vs requirement alignment scores.
+    1st time run pipeline to calculate responsibility vs requirement alignment scores, asynchronously.
 
     Args:
         - url (str): URL of the job posting
@@ -176,26 +205,22 @@ def metrics_processing_pipeline(
     # Step 5. Clean up the data by removing newline characters from the DataFrame
     df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
 
-    # Step 6. Ensure the output directory exists and save the CSV file
-    df.to_csv(csv_file, index=False)  # Save to the correct path
+    # Step 6. Save the CSV file
+    async with aiofiles.open(csv_file, "w") as f:
+        df.to_csv(csv_file, index=False)  # Save to the correct path
     logger.info(f"Similarity metrics saved to file ({csv_file})")
 
-    logger.info(
-        "Finished running responsibility/requirement alignment scoring pipeline."
-    )
-
-    # Display the top rows of the DataFrame for verification
-    print(df.head(5))  # Updated display to print for non-interactive environments
     logger.info(
         f"Finished running responsibility/requirement alignment scoring pipeline for {url}."
     )
     print("\n\n")
 
 
-def multivariate_indices_processing_mini_pipeline(data_directory: str):
+async def multivariate_indices_processing_mini_pipeline_async(data_directory: str):
     """
-    A mini pipeline that processes CSV files in a directory, adding multivariate indices
-    (composite and PCA scores) to files that are missing them.
+    Asynchronous mini pipeline that:
+    - processes CSV files in a directory, and
+    - adds multivariate indices (composite and PCA scores) to files that are missing them.
 
     Parameters:
     - data_directory: The directory containing the CSV files to process.
@@ -207,15 +232,21 @@ def multivariate_indices_processing_mini_pipeline(data_directory: str):
         raise ValueError(f"The provided directory '{data_directory}' does not exist.")
     try:
         # Find csv files in the right format (with metrics) but missing indices
+        logger.info(f"Checking files in {data_directory}")
         files_need_to_process = find_files_wo_multivariate_indices(data_directory)
         logger.info(f"Files that need processing: {files_need_to_process}")
 
         # Iterate to add composite and pca scores
         for file in files_need_to_process:
             try:
-                df = pd.read_csv(file)
+                # Read CSV asynchronously
+                df = await read_from_csv_async(file)
+
+                # Add composite scores and PCA scores (multivariate indices)
                 df_wt_indices = add_multivariate_indices(df)
-                df_wt_indices.to_csv(file, index=False)
+
+                # Write CSV async
+                await save_to_csv_async(df_wt_indices, file)
                 logger.info(f"Successfully processed and saved {file}")
             except Exception as e:
                 logger.error(f"Error processing {file}: {e}")
@@ -226,32 +257,6 @@ def multivariate_indices_processing_mini_pipeline(data_directory: str):
     logger.info(
         f"Successfully added multivariate indices to {len(files_need_to_process)} files."
     )
-
-
-def metrics_preprocessing_mini_pipeline(
-    job_descriptions_file, output_dir=METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0"
-):
-    """
-    Preprocess job descriptions for evaluation by identifying new URLs to process.
-
-    Args:
-        job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
-        output_dir (str or Path, optional): Directory where output files are stored.
-            Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
-
-    Returns:
-        Dict: A dictionary of new URLs that need to be processed and their file paths to be saved.
-    """
-    job_descriptions = read_from_json_file(job_descriptions_file)
-    if not job_descriptions:
-        logger.error("No job descriptions loaded. Exiting.")
-        return {}
-
-    new_urls_and_f_names = get_new_urls_and_metrics_file_paths(
-        job_descriptions, output_dir
-    )
-    logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
-    return new_urls_and_f_names  # a dict
 
 
 def re_processing_metrics_pipeline(requirements_file, responsibilities_file, csv_file):
@@ -271,8 +276,8 @@ def re_processing_metrics_pipeline(requirements_file, responsibilities_file, csv
     logger.info("Start running responsibility/requirement alignment scoring pipeline.")
 
     # Step 1: Read JSON files
-    resps_dict = read_from_json_file(responsibilities_file)  # Nested dictionary
-    reqs_dict = read_from_json_file(requirements_file)
+    resps_dict = read_from_json_async(responsibilities_file)  # Nested dictionary
+    reqs_dict = read_from_json_async(requirements_file)
 
     # Step 2: parse and combine 2 into a single list/dict
     combined_list = unpack_and_combine_json(

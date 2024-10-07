@@ -1,14 +1,18 @@
 import os
+from pathlib import Path
 import logging
-import json
-import pandas as pd
+from typing import Union
 from tqdm import tqdm
-import math
 from joblib import Parallel, delayed
 from evaluation_optimization.resume_editor import TextEditor
 from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
-from evaluation_optimization.similarity_metric_eval import categorize_scores
-from evaluation_optimization.resume_editor import TextEditor
+from evaluation_optimization.metrics_calculator import categorize_scores
+from evaluation_optimization.evaluation_optimization_utils import (
+    get_new_urls_and_metrics_file_paths,
+    get_new_urls_and_flat_json_file_paths,
+    process_and_save_requirements_by_url,
+    process_and_save_responsibilities_from_resume,
+)
 from utils.generic_utils import read_from_json_file, save_to_json_file
 
 
@@ -133,6 +137,110 @@ def filter_responsibilities_by_low_scores(df, fields):
     return responsibilities_to_optimize
 
 
+def flat_json_files_processing_mini_pipeline(
+    job_descriptions_file: Union[str, Path],
+    job_requirements_file: Union[str, Path],
+    resume_json_file: Union[str, Path],
+    flat_json_output_files_dir: Union[str, Path],
+):
+    """
+    Preprocessing mini-pipeline for flattening and saving JSON files for responsibilities and requirements.
+
+    This pipeline processes the resume and job descriptions by flattening the JSON structure of responsibilities
+    and job requirements and saving the flattened data to separate JSON files.
+
+    The pipeline:
+    1. Finds new URLs (from job descriptions).
+    2. Creates and saves flattened responsibilities (resume) and requirements (job posting) JSON files.
+
+    Args:
+        job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
+        job_requirements_file (str or Path): Path to the extracted requirements (from job postings) JSON file.
+        resume_json_file (str or Path): Path to the resume JSON file.
+        flat_json_output_files_dir (str or Path): Directory where output files are stored.
+
+    Returns:
+        None
+    """
+    # Convert inputs to Path objects if they are not already
+    if not isinstance(job_descriptions_file, Path):
+        job_descriptions_file = Path(job_descriptions_file)
+    if not isinstance(job_requirements_file, Path):
+        job_requirements_file = Path(job_requirements_file)
+    if not isinstance(resume_json_file, Path):
+        resume_json_file = Path(resume_json_file)
+    if not isinstance(flat_json_output_files_dir, Path):
+        flat_json_output_files_dir = Path(flat_json_output_files_dir)
+
+    logger.info(f"Job descriptions file path: {job_descriptions_file}")
+    logger.info(f"Job requirements file path: {job_requirements_file}")
+    logger.info(f"Resume JSON file path: {resume_json_file}")
+    logger.info(f"Flat JSON output files dir: {flat_json_output_files_dir}")
+
+    # Step 1: Read job descriptions
+    try:
+        job_descriptions = read_from_json_file(job_descriptions_file)
+        logger.info(f"job_descriptions:\n{job_descriptions}")
+        if not job_descriptions:
+            logger.error("No job descriptions loaded. Exiting.")
+            return
+    except FileNotFoundError as e:
+        logger.error(f"Job descriptions file not found: {e}")
+        return
+    except Exception as e:
+        logger.error(f"Error reading job descriptions: {e}")
+        return
+
+    # Step 2: Find new URLs and corresponding file paths
+    try:
+        new_urls_and_file_paths = get_new_urls_and_flat_json_file_paths(
+            job_descriptions, flat_json_output_files_dir
+        )
+        if not new_urls_and_file_paths:
+            logger.info("No new flat JSON files to process. Exiting.")
+            return
+        logger.info(
+            f"Found {len(new_urls_and_file_paths)} new flat JSON files to process."
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving new URLs and file paths: {e}")
+        return
+
+    # Step 3: Create and save flattened job requirements files for each URL
+    try:
+        for url, file_path in new_urls_and_file_paths.items():
+            process_and_save_requirements_by_url(
+                requirements_json_file=job_requirements_file,
+                url=url,
+                requirements_flat_json_file=file_path,
+            )
+            logger.info(f"Requirements flat file saved: {file_path}")
+        logger.info("All requirements flat files saved.")
+    except Exception as e:
+        logger.error(f"Error processing requirements files: {e}")
+        return
+
+    # Step 4: Create and save flattened responsibilities file from the resume
+    try:
+        responsibilities_flat_json_file = (
+            flat_json_output_files_dir / "responsibilities_flat.json"
+        )
+        process_and_save_responsibilities_from_resume(
+            resume_json_file=resume_json_file,
+            responsibilities_flat_json_file=responsibilities_flat_json_file,
+        )
+        logger.info(
+            f"Responsibilities flat file saved: {responsibilities_flat_json_file}"
+        )
+    except Exception as e:
+        logger.error(f"Error processing responsibilities file: {e}")
+        return
+
+    logger.info(
+        "All responsibilities and requirements flattened files created and saved."
+    )
+
+
 def run_pipeline(
     responsibilities_flat_json_file,
     requirements_flat_json_file,
@@ -140,6 +248,8 @@ def run_pipeline(
 ):
     """Pipeline to modify resume"""
 
+    # Step 0. Create flat JSON files
+    # If not, then create them from resume and job requirements
     # Step 1. Read responsibility vs requirement similarity metrics JSON files
     if not (
         os.path.exists(responsibilities_flat_json_file)

@@ -53,8 +53,30 @@ requirements_flat_json_file = (
 )  # extracted & flattened responsibilities from resume in JSON format (dict)
 
 
-# Evaluation and Optimization
+# Evaluation and Optimization Input Output Directory
 EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "evaluation_optimization"
+
+ITERATE_0_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_0"
+ITERATE_1_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_1"
+ITERATIE_2_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_2"
+
+FLAT_JSON_FILES_ITERATE_0_DIR = ITERATE_0_DIR / "flat_json_files"
+PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = ITERATE_0_DIR / "pruned_flat_json_files"
+SIMILARITY_METRICS_ITERATE_0_DIR = PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = (
+    ITERATE_0_DIR / "similarity_metrics"
+)
+
+FLAT_JSON_FILES_ITERATE_1_DIR = ITERATE_0_DIR / "flat_json_files"
+PRUNED_FLAT_JSON_FILES_ITERATE_1_DIR = ITERATE_0_DIR / "pruned_flat_json_files"
+SIMILARITY_METRICS_ITERATE_1_DIR = PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = (
+    ITERATE_0_DIR / "similarity_metrics"
+)
+
+FLAT_JSON_FILES_ITERATE_2_DIR = ITERATE_0_DIR / "flat_json_files"
+PRUNED_FLAT_JSON_FILES_ITERATE_2_DIR = ITERATE_0_DIR / "pruned_flat_json_files"
+SIMILARITY_METRICS_ITERATE_2_DIR = PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = (
+    ITERATE_0_DIR / "similarity_metrics"
+)
 
 # CSV file containing the original resp (from resume) and reqs (from job description)
 # along with different similarity related scores/score categories
