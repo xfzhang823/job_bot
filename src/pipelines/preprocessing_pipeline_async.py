@@ -99,9 +99,6 @@ async def run_pipeline_async(
     job_description_url: list,
     job_descriptions_json_file: str,
     requirements_json_file: str,
-    resume_json_file: str,
-    responsibilities_flat_json_file: str,
-    requirements_flat_json_file: str,
 ):
     """
     Asynchronous pipeline for preprocessing job posting webpage(s):
@@ -117,7 +114,7 @@ async def run_pipeline_async(
         - job_descriptions_json_file (str): Path to the job description JSON file.
         - requirements_json_file (str): Path to the extracted job requirements JSON file.
         - resume_json_file (str): Path to the resume JSON file.
-        - text_file_holder (str): Path to the temporary text file holder for job description content.
+
 
     Returns:
         None
@@ -172,24 +169,3 @@ async def run_pipeline_async(
         add_to_json_file(
             {job_description_url: requirements_json}, requirements_json_file
         )
-
-    # Step 4: Extract, flatten, and save responsibilities and requirements
-    # to JSON files
-
-    # Check if the json files exist already
-    if os.path.exists(responsibilities_flat_json_file) and os.path.exists(
-        requirements_flat_json_file
-    ):
-        logger.info("Responsibilities and requirements flat JSON files already exist.")
-
-    else:
-        resps_flat, reqs_flat = extract_flatten_resps_and_reqs(
-            resume_json_file=resume_json_file,
-            requirements_json_file=requirements_json_file,
-        )
-
-        save_to_json_file(resps_flat, responsibilities_flat_json_file)
-        logger.info("Responsibilities in flat dictionary format extracted and saved.")
-
-        save_to_json_file(reqs_flat, requirements_flat_json_file)
-        logger.info("Requirments in flat dictionary format extracted and saved.")

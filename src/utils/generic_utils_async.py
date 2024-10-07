@@ -1,9 +1,11 @@
-"""Tool functions"""
+"""Async tool functions"""
 
 import os
 import json
+import io
 import logging
 import logging_config
+import aiofiles
 from pathlib import Path
 import pandas as pd
 from utils.get_file_names import get_file_names
@@ -208,7 +210,7 @@ def find_project_root(starting_path=None, marker=".git"):
 import json
 
 
-def get_company_and_job_title_from_json(job_posting_url, json_data):
+def get_company_and_job_title(job_posting_url, json_data):
     """
     Looks up the company and job title for a given job posting URL from the JSON data.
 
@@ -309,17 +311,13 @@ def pretty_print_json(data):
         print("The provided data is not a valid JSON object (dict or list).")
 
 
-import json
-import os
-import logging
-
-
-def read_from_json_file(json_file, key=None):
+async def read_from_json_async(filename, key=None):
     """
+    Asynchronous version of reading a JSON file:
     Loads data from a master JSON file and extracts specific sections or values.
 
     Args:
-        json_file (str): The path to the master JSON file.
+        filename (str): The path to the master JSON file.
         key (str, optional): If provided, extracts the data under this specific key.
 
     Returns:
@@ -332,43 +330,53 @@ def read_from_json_file(json_file, key=None):
         JSONDecodeError: If there is an error decoding the JSON data.
     """
     # Check directory exist or not
-    directory_name = os.path.dirname(json_file)  # Fixed reference to json_file
-    if not os.path.exists(directory_name):
+    directory = os.path.dirname(filename)
+    if not os.path.exists(directory):
         raise FileNotFoundError(
-            f"Directory '{directory_name}' does not exist. Please create the directory first."
+            f"Directory '{directory}' does not exist. Please create the directory first."
         )
 
     # Check if the file exists; if not, return an empty dictionary to handle the creation
-    if not os.path.exists(json_file):
-        logging.info(f"File {json_file} not found. It will be created.")
+    if not os.path.exists(filename):
+        logging.info(f"File {filename} not found. It will be created.")
         return {}
 
     try:
-        with open(json_file, "r", encoding="utf-8") as f:
-            master_data = json.load(f)
+        async with aiofiles.open(filename, "r", encoding="utf-8") as f:
+            file_content = await f.read()
+
+        # Parse the JSON content
+        master_data = json.loads(file_content)
 
         # Debugging: Log the loaded data structure
-        logging.info(f"Loaded data from {json_file}")
+        logger.info(f"Loaded data from {filename}")
 
         # If a key is provided, extract data under that key
         if key:
             if key in master_data:
-                logging.info(f"Data for key '{key}' found in {json_file}.")
+                logging.info(f"Data for key '{key}' found in {filename}.")
                 return master_data[key]
             else:
                 raise KeyError(f"Key '{key}' not found in the JSON data.")
         else:
             return master_data  # Return the entire JSON data if no key is provided
 
-    except FileNotFoundError:
-        print(f"File {json_file} not found.")
-        return None
     except json.JSONDecodeError as e:
-        logging.error(f"Error decoding JSON from {json_file}: {e}")
-        raise
+        print(f"Error decoding JSON from {filename}: {e}")
+        logger.error(f"Error decoding JSON from {filename}: {e}")
+        raise  # Re-raise the exception to handle it outside the function
     except Exception as e:
-        logging.error(f"Error loading data from {json_file}: {e}")
-        raise
+        print(f"Error loading data from {filename}: {e}")
+        logger.error(f"Error loading data from {filename}: {e}")
+        raise  # Re-raise any other exceptions to handle them outside the function
+
+
+async def read_from_csv_async(filepath):
+    """Asynchronously read CSV file using aiofiles and io.StringIO."""
+    async with aiofiles.open(filepath, mode="r") as f:
+        content = await f.read()
+    # Use Python's built-in io.StringIO to read CSV from the string content
+    return pd.read_csv(io.StringIO(content))
 
 
 def replace_spaces_in_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -385,7 +393,13 @@ def replace_spaces_in_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def save_to_json_file(data, filename):
+async def save_to_csv_async(df, filepath):
+    """Asynchronously write CSV file."""
+    async with aiofiles.open(filepath, mode="w") as f:
+        await f.write(df.to_csv(index=False))
+
+
+def save_to_json(data, filename):
     """
     Saves a Python dictionary or list to a JSON file.
 

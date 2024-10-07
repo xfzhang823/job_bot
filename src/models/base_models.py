@@ -88,6 +88,7 @@ class CodeResponse(BaseResponseModel):
 
 # Example job-specific response inheriting from JSONResponse (for job processing pipelines)
 class JobSiteResponseModel(JSONResponse):
+    url: Optional[str] = None
     job_title: Optional[str] = None
     company: Optional[str] = None
     location: Optional[str] = None
@@ -107,6 +108,7 @@ class JobSiteResponseModel(JSONResponse):
             "example": {
                 "status": "success",
                 "message": "Job data extracted successfully.",
+                "url": "https://searchjobs.libertymutualgroup.com/careers/job/618499888480?microsite=libertymutual.com&domain=libertymutual.com&utm_source=Job+Board&utm_campaign=LinkedIn+Jobs&extcmp=bof-paid-text-lkin-aljb",
                 "job_title": "Software Engineer",
                 "company": "Tech Corp",
                 "location": "New York, NY",

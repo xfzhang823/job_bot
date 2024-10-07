@@ -349,7 +349,9 @@ class TextEditor:
 
 
 # Function to modify resume w/t ChatGPT (unfinished...)
-def modify_resume_section(section_json, requirements, model_id="gpt-3.5-turbo"):
+def modify_resume_responsibilities(
+    section_json, requirements, model_id="gpt-3.5-turbo"
+):
     """
     Modifies a specific section of the resume to better align with job requirements.
 

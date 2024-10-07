@@ -66,44 +66,11 @@ def extract_job_requirements_with_gpt(job_description, model_id="gpt-3.5-turbo")
         return None
 
 
-def extract_flatten_resps_and_reqs(resume_json_file, requirements_json_file):
-    """Function to:
-    * read resume and job requirments JSON files
-    * flatten and nornalize them in dictionary format
-
-    Args:
-        resume_json_file (str.): resume JSON file path.
-        requirements_json_file (str.): extracted requirements (from job posting) JSON file path.
-
-    Return:
-        responsibilities (dict), requiremnts (dict)
-
-    Example format:
-    {"json index": "text"}
-    """
-    # SParse and flatten responsibilities from resume (as a dict)
-    resume_parser = ResumeParser(resume_json_file)
-    resps_flat = (
-        resume_parser.extract_and_flatten_responsibilities()
-    )  # extract as a dict
-
-    # Parse and flatten job requirements (as a dict) or
-    # parse/flatten/conncactenate into a single string
-    job_reqs_parser = JobRequirementsParser(requirements_json_file)
-    reqs_flat = job_reqs_parser.extract_flatten_reqs()  # extract as a dict
-
-    logger.info("Responsibilities and requirements extracted and flatted.")
-    return resps_flat, reqs_flat
-
-
 def run_pipeline(
     job_description_url,
     job_descriptions_json_file,
     requirements_json_file,
-    resume_json_file,
-    text_file_holder,
-    responsibilities_flat_json_file,
-    requirements_flat_json_file,
+    # resume_json_file,
 ):
     """
     Orchestrates the entire pipeline for modifying a resume based on a job description.
@@ -136,13 +103,13 @@ def run_pipeline(
             f"Job description for URL:\n '{job_description_url}' \n"
             f"already exists. Skipping the rest of the preprocessing steps."
         )
-        job_description_json = asyncio.run * (job_descriptions[job_description_url])
+        job_description_json = job_descriptions[job_description_url]
     else:
         # **Step 2: Fetch the job description from the URL and save it**
         logger.info(f"Fetching job description from {job_description_url}...")
 
         # Convert job description text to JSON
-        job_description_json = process_webpages_to_json_async(job_description_url)
+        job_description_json = process_webpages_to_json(job_description_url)
 
         add_to_json_file(job_description_json, job_descriptions_json_file)
 
@@ -167,24 +134,3 @@ def run_pipeline(
         add_to_json_file(
             {job_description_url: requirements_json}, requirements_json_file
         )
-
-    # Step 4: Extract, flatten, and save responsibilities and requirements
-    # to JSON files
-
-    # Check if the json files exist already
-    if os.path.exists(responsibilities_flat_json_file) and os.path.exists(
-        requirements_flat_json_file
-    ):
-        logger.info("Responsibilities and requirements flat JSON files already exist.")
-
-    else:
-        resps_flat, reqs_flat = extract_flatten_resps_and_reqs(
-            resume_json_file=resume_json_file,
-            requirements_json_file=requirements_json_file,
-        )
-
-        save_to_json_file(resps_flat, responsibilities_flat_json_file)
-        logger.info("Responsibilities in flat dictionary format extracted and saved.")
-
-        save_to_json_file(reqs_flat, requirements_flat_json_file)
-        logger.info("Requirments in flat dictionary format extracted and saved.")
