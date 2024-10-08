@@ -1,4 +1,8 @@
 import pandas as pd
+import matplotlib.pyplot as plt
+
+
+plt.use("Agg")
 
 
 def plot_histograms(self, bins=20):
@@ -8,8 +12,6 @@ def plot_histograms(self, bins=20):
     Parameters:
     - bins (int): Number of bins to use in the histograms (default is 20).
     """
-    import matplotlib.pyplot as plt
-
     # Define columns to plot
     metrics_to_plot = self.metrics
     scaled_metrics_to_plot = [
