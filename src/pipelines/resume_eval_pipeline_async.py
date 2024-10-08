@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import pandas as pd
-
+import json
 import logging
 import logging_config
 
@@ -23,11 +23,11 @@ from utils.generic_utils_async import (
     save_to_csv_async,
 )
 from utils.generic_utils import pretty_print_json, get_company_and_job_title_from_json
-from config import METRICS_OUTPUTS_CSV_FILES_DIR, job_descriptions_json_file
+from config import job_descriptions_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
     get_new_urls_and_metrics_file_paths,
     get_new_urls_and_flat_json_file_paths,
-    find_files_wo_multivariate_indices,
+    get_files_wo_multivariate_indices,
 )
 
 
@@ -67,6 +67,31 @@ def add_multivariate_indices(df):
         print(f"AttributeError: {ae}. Ensure MultivariateIndexer and its method exist.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
+
+async def generate_matching_metrics_async(reqs_file, resps_file, sim_metrics_file):
+    """
+    Generate and save similarity metrics asynchronously.
+    """
+    logger.info(f"Generating metrics for: {sim_metrics_file}")
+
+    # Load responsibilities and requirements asynchronously
+    async with aiofiles.open(reqs_file, mode="r") as f_req:
+        reqs_flat = await f_req.read()
+
+    async with aiofiles.open(resps_file, mode="r") as f_resp:
+        resps_flat = await f_resp.read()
+
+    # Calculate metrics
+    similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
+    similarity_df = categorize_scores_for_df(similarity_df)
+    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+
+    # Save the metrics CSV asynchronously
+    async with aiofiles.open(sim_metrics_file, mode="w") as f_csv:
+        await df.to_csv(f_csv, index=False)
+
+    logger.info(f"Metrics saved to {sim_metrics_file}")
 
 
 def unpack_and_combine_json(nested_json, requirements_json):
@@ -133,87 +158,71 @@ def unpack_and_combine_json(nested_json, requirements_json):
     return results
 
 
-async def metrics_preprocessing_mini_pipeline_async(
-    job_descriptions_file, output_dir=METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0"
+async def metrics_processing_pipeline_async(
+    mapping_file: str, generate_metrics: callable = generate_matching_metrics_async
 ):
     """
-    Asynchronous preprocess job descriptions for evaluation by identifying new URLs to process.
+    Asynchronous version of the pipeline to process and create missing sim_metrics files by reading from the mapping file.
 
     Args:
-        job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
-        output_dir (str or Path, optional): Directory where output files are stored.
-            Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
+        mapping_file (str or Path): Path to the JSON mapping file.
+        generate_metrics_func (callable): Function to generate the metrics CSV file.
 
     Returns:
-        Dict: A dictionary of new URLs that need to be processed and their file paths to be saved.
+        None
     """
-    job_descriptions = await read_from_json_async(job_descriptions_file)
-    if not job_descriptions:
-        logger.error("No job descriptions loaded. Exiting.")
-        return {}
-
-    new_urls_and_f_names = get_new_urls_and_metrics_file_paths(
-        job_descriptions, output_dir
-    )
-    logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
-    return new_urls_and_f_names  # a dict
-
-
-async def metrics_processing_pipeline_async(
-    url: str, requirements_json_file: str, resume_json_file: str, csv_file: str
-):
-    """
-    1st time run pipeline to calculate responsibility vs requirement alignment scores, asynchronously.
-
-    Args:
-        - url (str): URL of the job posting
-        (serves as the unique identifier to extract data from a single job posting in the requirement JSON file)
-        - requirements_json_file (str): Path of the JSON file containing all the job requirements
-        (from job sites)
-        - resume_json_file (str): Path of the JSON file containing the resume file
-        - csv_file (str): File path of the metric results in CSV (resume responsibilities vs job requirements of
-        a single job posting)
-    """
-
-    logger.info("Start running responsibility/requirement alignment scoring pipeline.")
-
-    # Step 1: Parse and flatten responsibilities from resume (as a dict)
-    resume_parser = ResumeParser(resume_json_file)
-    resps_flat = resume_parser.extract_and_flatten_responsibilities()  # dict
-
-    # Step 2: Parse and flatten job requirements (as a dict) or
-    # parse/flatten/concatenate into a single string
-    job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
-    reqs_flat = job_reqs_parser.extract_flatten_reqs()  # dict
-
-    # Check if either responsibilities or requirements are empty
-    if not resps_flat or not reqs_flat:
-        logger.error(
-            "One of the required datasets (responsibilities or requirements) is empty."
-        )
-        return
-
-    # Step 3. Calculate and display similarity metrics - Segment by Segment
-    similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
-    logger.info("Similarity metrics calculated.")  # Changed to logger
-
-    # Step 4. Add score category values (high, mid, low)
-    # Translate DataFrame columns to match expected column names
-    similarity_df = categorize_scores_for_df(similarity_df)
-    logger.info("Similarity metrics score categories created.")
-
-    # Step 5. Clean up the data by removing newline characters from the DataFrame
-    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-
-    # Step 6. Save the CSV file
-    async with aiofiles.open(csv_file, "w") as f:
-        df.to_csv(csv_file, index=False)  # Save to the correct path
-    logger.info(f"Similarity metrics saved to file ({csv_file})")
 
     logger.info(
-        f"Finished running responsibility/requirement alignment scoring pipeline for {url}."
+        "Start running responsibility/requirement alignment scoring pipeline (async)."
     )
-    print("\n\n")
+
+    # Step 1: Read the mapping file asynchronously
+    try:
+        async with aiofiles.open(mapping_file, mode="r") as f:
+            content = await f.read()
+            file_mapping = json.loads(content)
+        logger.info(f"Loaded mapping file from {mapping_file}")
+    except FileNotFoundError:
+        logger.error(f"Mapping file not found: {mapping_file}")
+        return
+    except Exception as e:
+        logger.error(f"Error loading mapping file: {e}")
+        return
+
+    # Step 2: Check for missing sim_metrics files
+    missing_metrics = {
+        url: mapping["sim_metrics"]
+        for url, mapping in file_mapping.items()
+        if not Path(mapping["sim_metrics"]).exists()
+    }
+
+    if not missing_metrics:
+        logger.info("All sim_metrics files already exist. Exiting pipeline.")
+        return  # Early exit if all files exist
+
+    # Step 3: Process missing sim_metrics files concurrently using asyncio.gather
+    tasks = []
+    for url, sim_metrics_file in missing_metrics.items():
+        logger.info(f"Processing missing metrics for {url}")
+
+        # Load the requirements and responsibilities files from the mapping
+        reqs_file = Path(file_mapping[url]["reqs_flat"])
+        resps_file = Path(file_mapping[url]["resps_flat"])
+
+        # Step 3.1: Check if reqs and resps files exist
+        if not reqs_file.exists() or not resps_file.exists():
+            logger.error(
+                f"Missing requirements or responsibilities files for {url}. Skipping."
+            )
+            continue
+
+        # Step 3.2: Create async task for each URL
+        tasks.append(generate_metrics(reqs_file, resps_file, sim_metrics_file))
+
+    # Step 4: Run tasks concurrently
+    await asyncio.gather(*tasks)
+
+    logger.info("Finished processing all missing sim_metrics files.")
 
 
 async def multivariate_indices_processing_mini_pipeline_async(data_directory: str):
@@ -233,7 +242,7 @@ async def multivariate_indices_processing_mini_pipeline_async(data_directory: st
     try:
         # Find csv files in the right format (with metrics) but missing indices
         logger.info(f"Checking files in {data_directory}")
-        files_need_to_process = find_files_wo_multivariate_indices(data_directory)
+        files_need_to_process = get_files_wo_multivariate_indices(data_directory)
         logger.info(f"Files that need processing: {files_need_to_process}")
 
         # Iterate to add composite and pca scores

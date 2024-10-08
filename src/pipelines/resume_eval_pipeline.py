@@ -4,6 +4,7 @@ import pandas as pd
 import re
 import logging
 import logging_config
+import json
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 from evaluation_optimization.text_similarity_finder import TextSimilarity
@@ -18,14 +19,11 @@ from utils.generic_utils import (
     pretty_print_json,
     get_company_and_job_title_from_json,
 )
-
-from config import METRICS_OUTPUTS_CSV_FILES_DIR, job_descriptions_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
     get_new_urls_and_file_names,
     get_new_urls_and_metrics_file_paths,
-    find_files_wo_multivariate_indices,
+    get_files_wo_multivariate_indices,
 )
-from IPython.display import display
 
 
 # Set up logger
@@ -64,6 +62,59 @@ def add_multivariate_indices(df):
         print(f"AttributeError: {ae}. Ensure MultivariateIndexer and its method exist.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
+
+def generate_matching_metrics(reqs_flat_file: str, resps_flat_file: str, csv_file: str):
+    """
+    Generate similarity metrics between flattened responsibilities and requirements and save to a CSV file.
+
+    Args:
+        reqs_flat_file (str): Path to the pre-flattened requirements JSON file.
+        resps_flat_file (str): Path to the pre-flattened responsibilities JSON file.
+        csv_file (str): Path where the output CSV file should be saved.
+
+    Returns:
+        None
+    """
+    # Step 1: Load flattened responsibilities from file
+    try:
+        resps_flat = read_from_json_file(resps_flat_file)
+        reqs_flat = read_from_json_file(reqs_flat_file)
+
+        # Check if either responsibilities or requirements are empty
+        if not resps_flat or not reqs_flat:
+            logger.error(
+                "One of the required datasets (responsibilities or requirements) is empty."
+            )
+            return
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e.filename}")
+        return
+    except Exception as e:
+        logger.error(f"Error loading files: {e}")
+        return
+
+    # Step 4: Calculate similarity metrics - Segment by Segment
+    similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
+    logger.info("Similarity metrics calculated.")
+
+    # Step 5: Add score category values (high, mid, low)
+    similarity_df = categorize_scores_for_df(similarity_df)
+    logger.info("Similarity metrics score categories created.")
+
+    # Step 6: Clean up the data by removing newline characters from the DataFrame
+    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+
+    # Step 7: Ensure the output directory exists and save the CSV file
+    df.to_csv(csv_file, index=False)
+    logger.info(f"Similarity metrics saved to file ({csv_file})")
+
+    logger.info(
+        "Finished running responsibility/requirement alignment scoring pipeline."
+    )
+
+    # Display the top rows of the DataFrame for verification
+    print(df.head(5))
 
 
 def unpack_and_combine_json(nested_json, requirements_json):
@@ -131,65 +182,63 @@ def unpack_and_combine_json(nested_json, requirements_json):
 
 
 def metrics_processing_pipeline(
-    url: str, requirements_json_file: str, resume_json_file: str, csv_file: str
+    mapping_file: str, generate_metrics: callable = generate_matching_metrics
 ):
     """
-    1st time run pipeline to calculate responsibility vs requirement alignment scores.
+    Process and create missing sim_metrics files by reading from the mapping file.
 
     Args:
-        - url (str): URL of the job posting
-        (serves as the unique identifier to extract data from a single job posting in the requirement JSON file)
-        - requirements_json_file (str): Path of the JSON file containing all the job requirements
-        (from job sites)
-        - resume_json_file (str): Path of the JSON file containing the resume file
-        - csv_file (str): File path of the metric results in CSV (resume responsibilities vs job requirements of
-        a single job posting)
-    """
+        mapping_file (str or Path): Path to the JSON mapping file.
+        generate_metrics_func (callable): Function to generate the metrics CSV file.
 
+    Returns:
+        None
+    """
     logger.info("Start running responsibility/requirement alignment scoring pipeline.")
 
-    # Step 1: Parse and flatten responsibilities from resume (as a dict)
-    resume_parser = ResumeParser(resume_json_file)
-    resps_flat = resume_parser.extract_and_flatten_responsibilities()  # dict
-
-    # Step 2: Parse and flatten job requirements (as a dict) or
-    # parse/flatten/concatenate into a single string
-    job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
-    reqs_flat = job_reqs_parser.extract_flatten_reqs()  # dict
-
-    # Check if either responsibilities or requirements are empty
-    if not resps_flat or not reqs_flat:
-        logger.error(
-            "One of the required datasets (responsibilities or requirements) is empty."
-        )
+    # Step 1: Read the mapping file
+    try:
+        with open(mapping_file, "r") as f:
+            file_mapping = json.load(f)
+        logger.info(f"Loaded mapping file from {mapping_file}")
+    except FileNotFoundError:
+        logger.error(f"Mapping file not found: {mapping_file}")
+        return
+    except Exception as e:
+        logger.error(f"Error loading mapping file: {e}")
         return
 
-    # Step 3. Calculate and display similarity metrics - Segment by Segment
-    similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
-    logger.info("Similarity metrics calculated.")  # Changed to logger
+    # Step 2: Check if all sim_metrics files exist
+    missing_metrics = {
+        url: mapping["sim_metrics"]
+        for url, mapping in file_mapping.items()
+        if not Path(mapping["sim_metrics"]).exists()
+    }
 
-    # Step 4. Add score category values (high, mid, low)
-    # Translate DataFrame columns to match expected column names
-    similarity_df = categorize_scores_for_df(similarity_df)
-    logger.info("Similarity metrics score categories created.")
+    if not missing_metrics:
+        logger.info("All sim_metrics files already exist. Exiting pipeline.")
+        return  # Early exit if all files exist
 
-    # Step 5. Clean up the data by removing newline characters from the DataFrame
-    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+    # Step 3: Process missing sim_metrics files
+    for url, sim_metrics_file in missing_metrics.items():
+        logger.info(f"Processing missing metrics for {url}")
 
-    # Step 6. Ensure the output directory exists and save the CSV file
-    df.to_csv(csv_file, index=False)  # Save to the correct path
-    logger.info(f"Similarity metrics saved to file ({csv_file})")
+        # Load the requirements and responsibilities files from the mapping
+        reqs_file = Path(file_mapping[url]["reqs_flat"])
+        resps_file = Path(file_mapping[url]["resps_flat"])
 
-    logger.info(
-        "Finished running responsibility/requirement alignment scoring pipeline."
-    )
+        # Step 3.1: Check if reqs and resps files exist
+        if not reqs_file.exists() or not resps_file.exists():
+            logger.error(
+                f"Missing requirements or responsibilities files for {url}. Skipping."
+            )
+            continue
 
-    # Display the top rows of the DataFrame for verification
-    print(df.head(5))  # Updated display to print for non-interactive environments
-    logger.info(
-        f"Finished running responsibility/requirement alignment scoring pipeline for {url}."
-    )
-    print("\n\n")
+        # Step 3.2: Generate the metrics file
+        generate_metrics(reqs_file, resps_file, sim_metrics_file)
+        logger.info(f"Generated metrics for {url} and saved to {sim_metrics_file}")
+
+    logger.info("Finished processing all missing sim_metrics files.")
 
 
 def multivariate_indices_processing_mini_pipeline(data_directory: str):
@@ -207,7 +256,7 @@ def multivariate_indices_processing_mini_pipeline(data_directory: str):
         raise ValueError(f"The provided directory '{data_directory}' does not exist.")
     try:
         # Find csv files in the right format (with metrics) but missing indices
-        files_need_to_process = find_files_wo_multivariate_indices(data_directory)
+        files_need_to_process = get_files_wo_multivariate_indices(data_directory)
         logger.info(f"Files that need processing: {files_need_to_process}")
 
         # Iterate to add composite and pca scores
@@ -226,32 +275,6 @@ def multivariate_indices_processing_mini_pipeline(data_directory: str):
     logger.info(
         f"Successfully added multivariate indices to {len(files_need_to_process)} files."
     )
-
-
-def metrics_preprocessing_mini_pipeline(
-    job_descriptions_file, output_dir=METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0"
-):
-    """
-    Preprocess job descriptions for evaluation by identifying new URLs to process.
-
-    Args:
-        job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
-        output_dir (str or Path, optional): Directory where output files are stored.
-            Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
-
-    Returns:
-        Dict: A dictionary of new URLs that need to be processed and their file paths to be saved.
-    """
-    job_descriptions = read_from_json_file(job_descriptions_file)
-    if not job_descriptions:
-        logger.error("No job descriptions loaded. Exiting.")
-        return {}
-
-    new_urls_and_f_names = get_new_urls_and_metrics_file_paths(
-        job_descriptions, output_dir
-    )
-    logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
-    return new_urls_and_f_names  # a dict
 
 
 def re_processing_metrics_pipeline(requirements_file, responsibilities_file, csv_file):
@@ -301,3 +324,95 @@ def re_processing_metrics_pipeline(requirements_file, responsibilities_file, csv
     print(f"Similarity Metrics Dataframe: {df.head(10)}")
 
     logger.info(f"Similarity scores saved to csv file ({csv_file})")
+
+
+# def metrics_preprocessing_mini_pipeline(job_descriptions_file, output_dir):
+#     """
+#     Preprocess job descriptions for evaluation by identifying new URLs to process.
+
+#     Args:
+#         job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
+#         output_dir (str or Path, optional): Directory where output files are stored.
+#             Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
+
+#     Returns:
+#         Dict: A dictionary of new URLs that need to be processed and their file paths to be saved.
+#     """
+#     job_descriptions = read_from_json_file(job_descriptions_file)
+#     if not job_descriptions:
+#         logger.error("No job descriptions loaded. Exiting.")
+#         return {}
+
+#     new_urls_and_f_names = get_new_urls_and_metrics_file_paths(
+#         job_descriptions, output_dir
+#     )
+#     logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
+#     return new_urls_and_f_names  # a dict
+
+
+# def metrics_processing_pipeline(
+#     url: str, requirements_json_file: str, resume_json_file: str, csv_file: str
+# ):
+
+#     logger.info("Start running responsibility/requirement alignment scoring pipeline.")
+
+#     # Step 1: Parse and flatten responsibilities from resume (as a dict)
+#     resume_parser = ResumeParser(resume_json_file)
+#     resps_flat = resume_parser.extract_and_flatten_responsibilities()  # dict
+
+#     # Step 2: Parse and flatten job requirements (as a dict) or
+#     # parse/flatten/concatenate into a single string
+#     job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
+#     reqs_flat = job_reqs_parser.extract_flatten_reqs()  # dict
+
+#     # Check if either responsibilities or requirements are empty
+#     if not resps_flat or not reqs_flat:
+#         logger.error(
+#             "One of the required datasets (responsibilities or requirements) is empty."
+#         )
+#         return
+
+#     # Step 3. Calculate and display similarity metrics - Segment by Segment
+#     similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
+#     logger.info("Similarity metrics calculated.")  # Changed to logger
+
+#     # Step 4. Add score category values (high, mid, low)
+#     # Translate DataFrame columns to match expected column names
+#     similarity_df = categorize_scores_for_df(similarity_df)
+#     logger.info("Similarity metrics score categories created.")
+
+#     # Step 5. Clean up the data by removing newline characters from the DataFrame
+#     df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+
+#     # Step 6. Ensure the output directory exists and save the CSV file
+#     df.to_csv(csv_file, index=False)  # Save to the correct path
+#     logger.info(f"Similarity metrics saved to file ({csv_file})")
+
+#     logger.info(
+#         "Finished running responsibility/requirement alignment scoring pipeline."
+#     )
+
+#     # Display the top rows of the DataFrame for verification
+#     print(df.head(5))  # Updated display to print for non-interactive environments
+#     logger.info(
+#         f"Finished running responsibility/requirement alignment scoring pipeline for {url}."
+#     )
+#     print("\n\n")
+
+
+# def get_metrics_file_paths(mapping_file, output_dir):
+#     """
+#     Get a dictionary of URLs and their corresponding metrics file paths.
+
+#     Args:
+#         mapping_file_path (str or Path): Path to the JSON mapping file.
+#         output_dir (str or Path): Directory where the new metrics files will be created.
+
+#     Returns:
+#         dict: A dictionary where keys are URLs and values are the paths to the metrics files.
+#     """
+
+#     sim_metrics_mapping_dict = {
+#         url: data["sim_metrics"] for url, data in mapping_dict.items()
+#     }
+#     return sim_metrics_mapping_dict

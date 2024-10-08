@@ -8,8 +8,6 @@ from config import (
 
 """
 
-# config.py
-
 from pathlib import Path
 import os
 
@@ -58,26 +56,39 @@ EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "evaluation_optimi
 
 ITERATE_0_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_0"
 ITERATE_1_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_1"
-ITERATIE_2_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_2"
+ITERATE_2_DIR = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_2"
 
-FLAT_JSON_FILES_ITERATE_0_DIR = ITERATE_0_DIR / "flat_json_files"
-PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = ITERATE_0_DIR / "pruned_flat_json_files"
-SIMILARITY_METRICS_ITERATE_0_DIR = PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = (
-    ITERATE_0_DIR / "similarity_metrics"
+requirements_flat_dir_name = "requirements_flat"
+responsibilities_flat_dir_name = "responsibilities_flat"
+pruned_responsibilities_flat_dir_name = "pruned_responsibilities_flat"
+similarity_metrics_dir_name = "similarity_metrics"
+
+mapping_file_name = "url_to_file_mapping.json"
+
+FLAT_REQS_FILES_ITERATE_0_DIR = ITERATE_0_DIR / requirements_flat_dir_name
+FLAT_RESPS_FILES_ITERATE_0_DIR = ITERATE_0_DIR / responsibilities_flat_dir_name
+PRUNED_FLAT_RESPS_FILES_ITERATE_0_DIR = (
+    ITERATE_0_DIR / pruned_responsibilities_flat_dir_name
 )
+SIMILARITY_METRICS_ITERATE_0_DIR = ITERATE_0_DIR / similarity_metrics_dir_name
+url_to_file_mapping_file_iterate_0 = ITERATE_0_DIR / mapping_file_name
 
-FLAT_JSON_FILES_ITERATE_1_DIR = ITERATE_0_DIR / "flat_json_files"
-PRUNED_FLAT_JSON_FILES_ITERATE_1_DIR = ITERATE_0_DIR / "pruned_flat_json_files"
-SIMILARITY_METRICS_ITERATE_1_DIR = PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = (
-    ITERATE_0_DIR / "similarity_metrics"
+
+FLAT_REQS_FILES_ITERATE_1_DIR = ITERATE_1_DIR / requirements_flat_dir_name
+FLAT_RESPS_FILES_ITERATE_1_DIR = ITERATE_1_DIR / responsibilities_flat_dir_name
+PRUNED_FLAT_RESPS_FILES_ITERATE_1_DIR = (
+    ITERATE_1_DIR / pruned_responsibilities_flat_dir_name
 )
+SIMILARITY_METRICS_ITERATE_1_DIR = ITERATE_0_DIR / similarity_metrics_dir_name
+url_to_file_mapping_file_iterate_1 = ITERATE_1_DIR / mapping_file_name
 
-FLAT_JSON_FILES_ITERATE_2_DIR = ITERATE_0_DIR / "flat_json_files"
-PRUNED_FLAT_JSON_FILES_ITERATE_2_DIR = ITERATE_0_DIR / "pruned_flat_json_files"
-SIMILARITY_METRICS_ITERATE_2_DIR = PRUNED_FLAT_JSON_FILES_ITERATE_0_DIR = (
-    ITERATE_0_DIR / "similarity_metrics"
+FLAT_REQS_FILES_ITERATE_2_DIR = ITERATE_2_DIR / requirements_flat_dir_name
+FLAT_RESPS_FILES_ITERATE_2_DIR = ITERATE_2_DIR / responsibilities_flat_dir_name
+PRUNED_FLAT_RESPS_FILES_ITERATE_2_DIR = (
+    ITERATE_2_DIR / pruned_responsibilities_flat_dir_name
 )
-
+SIMILARITY_METRICS_ITERATE_2_DIR = ITERATE_2_DIR / similarity_metrics_dir_name
+url_to_file_mapping_file_iterate_2 = ITERATE_2_DIR / mapping_file_name
 # CSV file containing the original resp (from resume) and reqs (from job description)
 # along with different similarity related scores/score categories
 resp_req_sim_metrics_0_csv_file = (
@@ -100,9 +111,6 @@ modified_resps_flat_iter_2_json_file = (
 )
 
 
-METRICS_OUTPUTS_CSV_FILES_DIR = (
-    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "similarity_metrics"
-)
 # CSV file containing df with resp. excluded from modification b/c they are just
 # factual statements, i.e., "promoted to .... in ..."
 # They need to be added back to the final edited resume
