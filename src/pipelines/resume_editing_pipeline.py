@@ -21,88 +21,111 @@ from utils.generic_utils import read_from_json_file, save_to_json_file
 logger = logging.getLogger(__name__)
 
 
-# Pipeline to edit multiple responsibilities files
-def multi_files_modification_pipeline(
-    mapping_file: Union[str, Path],
-    output_dir: Union[str, Path],
+def set_directory_paths(
+    mapping_file_prev: Union[str, Path], mapping_file_curr: Union[str, Path]
+) -> dict:
+    """
+    Set up directory and file paths based on the mapping files from the previous and current iterations.
+
+    Args:
+        mapping_file_prev (Union[str, Path]): Path to the mapping file from the previous iteration.
+        mapping_file_curr (Union[str, Path]): Path to the mapping file for the current iteration.
+
+    Returns:
+        dict: A dictionary containing paths for requirements, responsibilities, and output directories.
+    """
+    # Load the mapping files
+    try:
+        file_mapping_prev = read_from_json_file(mapping_file_prev)
+        file_mapping_curr = read_from_json_file(mapping_file_curr)
+        logger.info(
+            f"Loaded mapping files from {mapping_file_prev} and {mapping_file_curr}"
+        )
+    except FileNotFoundError:
+        logger.error(
+            f"One of the mapping files not found: {mapping_file_prev} or {mapping_file_curr}"
+        )
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading mapping files: {e}")
+        return {}
+
+    # Set directory paths using both the previous and current mapping files
+    paths_dict = {}
+    for url, prev_paths in file_mapping_prev.items():
+        if url not in file_mapping_curr:
+            logger.warning(
+                f"URL {url} not found in the current iteration's mapping file."
+            )
+            continue
+
+        curr_paths = file_mapping_curr[url]
+        paths_dict[url] = {
+            "reqs_flat": Path(prev_paths["reqs_flat"]),
+            "pruned_resps_flat": Path(prev_paths["pruned_resps_flat"]),
+            "resps_modified": Path(curr_paths["resps_flat"]).parent / "resps_modified",
+        }
+
+        # Ensure the output directory exists;
+        # exist_ok=True allows the mkdir function to proceed without any issue
+        # if the directory already exists.
+        paths_dict[url]["resps_modified"].mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Directory path dictionary:\n{paths_dict}")
+    return paths_dict
+
+
+def run_pipeline(
+    mapping_file_prev: Union[str, Path],
+    mapping_file_curr: Union[str, Path],
     model: str = "openai",
     model_id: str = "gpt-3.5-turbo",
     n_jobs: int = -1,
 ):
     """
-    Run the pipeline to modify responsibilities for multiple job postings by matching
-    them with corresponding requirements based on the mapping file.
+    Run the pipeline to modify responsibilities based on the previous and current mapping files.
+    The piple uses joblib to process jobs in parallel.
 
     Args:
-        mapping_file (str): Path to the mapping file containing the URLs and
-                            the corresponding file paths for responsibilities and requirements.
-        output_dir (str or Path): Directory where modified responsibility files should be saved.
-        model (str, optional): Model name to be used for modifications.
-                                Defaults to 'openai'.
-        model_id (str, optional): Specific model version to be used.
-                                Defaults to 'gpt-3.5-turbo'.
+        mapping_file_prev (Union[str, Path]): Path to the mapping file for the previous iteration.
+        mapping_file_curr (Union[str, Path]): Path to the mapping file for the current iteration.
+        model (str, optional): Model name to be used for modifications. Defaults to 'openai'.
+        model_id (str, optional): Specific model version to be used. Defaults to 'gpt-3.5-turbo'.
+        n_jobs (int, optional): Number of parallel jobs. Defaults to -1 (use all available).
 
     Returns:
         None
     """
-    # Step 0: Validate / ensure output_dir is path and exists
-    output_dir = Path(output_dir)  # Ensure output directory is a Path object
-    if not output_dir.exists():
-        os.makedirs(output_dir)
-
-    # Step 1: Load the mapping file
-    try:
-        file_mapping = read_from_json_file(mapping_file)
-        logger.info(f"Loaded mapping file from {mapping_file}")
-    except FileNotFoundError:
-        logger.error(f"Mapping file not found: {mapping_file}")
-        return
-    except Exception as e:
-        logger.error(f"Error loading mapping file: {e}")
+    # Step 1: Set up directory and file paths
+    paths_dict = set_directory_paths(mapping_file_prev, mapping_file_curr)
+    if not paths_dict:
+        logger.error("Failed to set up directory paths.")
         return
 
-    # Step 2: Parallel processing to extract responsibilities and requirements paths,
-    # read them, and modify them (editing each)
-    for url, paths in file_mapping.items():
+    # Step 2: Process each job posting URL and modify responsibilities
+    for url, paths in paths_dict.items():
         logger.info(f"Processing job posting from {url}")
 
-        # Step 2.1: Extract file paths for responsibilities and requirements
-        resps_file = Path(paths["resps_flat"])
-        reqs_file = Path(paths["reqs_flat"])
-
-        # Step 2.2: Check if the files exist and are valid
         try:
-            # Ensure both files exist
-            if not Path(resps_file).exists() or not Path(reqs_file).exists():
-                raise FileNotFoundError(
-                    f"One or both files not found for job posting {url}"
-                )
+            # Extract file paths for requirements and pruned responsibilities
+            reqs_file = paths["reqs_flat"]
+            resps_file = paths["pruned_resps_flat"]
 
-            # Step 2.3: Load responsibilities and requirements files
+            # Load responsibilities and requirements files
+            if not reqs_file.exists() or not resps_file.exists():
+                raise FileNotFoundError(f"Files not found for {url}")
+
             responsibilities = read_from_json_file(resps_file)
             requirements = read_from_json_file(reqs_file)
 
-            # Check if either file is empty
-            if not responsibilities:
-                raise ValueError(
-                    f"Responsibilities file {resps_file} is empty for job posting {url}"
-                )
-            if not requirements:
-                raise ValueError(
-                    f"Requirements file {reqs_file} is empty for job posting {url}"
-                )
+            if not responsibilities or not requirements:
+                raise ValueError(f"Files are empty for {url}")
 
-        except FileNotFoundError as fnf_error:
-            logger.error(fnf_error)
-            continue  # Skip to the next job posting if files are missing
-        except ValueError as val_error:
-            logger.error(val_error)
-            continue  # Skip to the next job posting if files are empty
-        except Exception as e:
-            logger.error(f"Unexpected error processing {url}: {e}")
+        except (FileNotFoundError, ValueError) as error:
+            logger.error(error)
             continue
 
-        # Step 2.4: Modify responsibilities based on requirements
+        # Step 3: Modify responsibilities based on requirements
         with tqdm(
             total=len(responsibilities), desc=f"Modifying responsibilities for {url}"
         ) as pbar:
@@ -113,18 +136,16 @@ def multi_files_modification_pipeline(
                 model_id=model_id,
                 n_jobs=n_jobs,
             )
-            pbar.update(1)  # Update progress bar
+            pbar.update(1)
 
-        # Step 5: Save the modified responsibilities to the output directory
-        output_file_name = Path(output_dir) / Path(resps_file).name.replace(
-            "resps_flat", "modified_resps_flat"
+        # Step 4: Save the modified responsibilities
+        output_file = paths["resps_modified"] / resps_file.name.replace(
+            "pruned_resps_flat", "modified_resps_flat"
         )
-        save_to_json_file(modified_resps, output_file_name)
-        logger.info(
-            f"Modified responsibilities for URL {url} saved to {output_file_name}"
-        )
+        save_to_json_file(modified_resps, output_file)
+        logger.info(f"Modified responsibilities for {url} saved to {output_file}")
 
-    logger.info("Finished modifying all responsibilities based on the mapping file.")
+    logger.info("Pipeline execution completed.")
 
 
 # def run_pipeline(
@@ -148,9 +169,7 @@ def multi_files_modification_pipeline(
 
 #         # Step 2. Exclude certain responsibilities from modification
 #         # (to be added back afterwards-factual statements like "promoted to ... in ...")
-#         excluded_key = "3.responsibilities.5"
-#         # resps_flat = {k: v for k, v in resps_flat.items() if k not in excluded_keys}
-#         resps_flat.pop(excluded_key, None)
+
 
 #         # Step 3: Modify responsibility texts
 #         gpt3 = "gpt-3.5-turbo"

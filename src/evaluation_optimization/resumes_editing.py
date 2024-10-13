@@ -43,7 +43,7 @@ def modify_resp_based_on_reqs(resp_key, resp, reqs, model, model_id):
 
     Returns:
         tuple: A tuple containing:
-            - `resp_key` (str): The same responsibility key passed to the function.
+            - `resp_key` (str): The same responsibility_key passed to the function.
             - `local_modifications` (dict): A dictionary of modified responsibility texts for
               each requirement, keyed by the requirement identifier. The value is a dict
               containing the final `optimized_text`.
@@ -63,7 +63,7 @@ def modify_resp_based_on_reqs(resp_key, resp, reqs, model, model_id):
     local_modifications = {}
 
     for req_key, req in reqs.items():
-        logger.info(f"Modifying Responsibility: {resp} \nwith Requirement: {req}")
+        logger.info(f"Modifying responsibility: {resp} \nwith requirement: {req}")
 
         # Step 1: Align Semantic
         revised = text_editor.edit_for_semantics(

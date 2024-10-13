@@ -221,10 +221,10 @@ def calculate_one_to_many_similarity_metrices(resps_flat, job_reqs_str):
         # Append results ot list
         simiarity_results.append(
             {
-                "Responsibility Key": key,
-                "Responsibility": value,
-                "Requirements": job_reqs_str,
-                "Similarity Metrices": similarity_dict,
+                "responsibility_key": key,
+                "responsibility": value,
+                "requirements": job_reqs_str,
+                "similarity_metrices": similarity_dict,
             }
         )
 
@@ -266,7 +266,7 @@ def calculate_many_to_many_similarity_metrices(
         for req_key, req in requirements.items():
 
             # Debugging
-            logger.info(f"Comparing Responsibility: {resp} \nwith Requirement: {req}")
+            logger.info(f"Comparing responsibility: {resp} \nwith requirement: {req}")
 
             # Compute BERTScore Precision (assuming compute_bertscore_precision is defined)
             similarity_dict = text_similarity.short_text_similarity_metrics(resp, req)
@@ -274,10 +274,10 @@ def calculate_many_to_many_similarity_metrices(
             # Append results with responsibility index and value, and requirement index and value
             similarity_results.append(
                 {
-                    "Responsibility Key": resp_key,
-                    "Responsibility": resp,
-                    "Requirement Key": req_key,
-                    "Requirement": req,
+                    "responsibility_key": resp_key,
+                    "responsibility": resp,
+                    "requirement_key": req_key,
+                    "requirement": req,
                     "BERTScore Precision": similarity_dict["bert_score_precision"],
                     "Soft Similarity": similarity_dict["soft_similarity"],
                     "Word Mover's Distance": similarity_dict["word_movers_distance"],
@@ -339,7 +339,7 @@ def calculate_resps_reqs_bscore_precisions(resps_flat, job_reqs_str):
 
         # Append results to the list
         bscore_p_results.append(
-            {"Responsibility": value, "BERTScore Precision": bscore_p}
+            {"responsibility": value, "BERTScore Precision": bscore_p}
         )
 
     # Convert list to a DataFrame
@@ -377,7 +377,7 @@ def calculate_segment_resp_bscore_precisions(
         for req_key, req in requirements.items():
 
             # Debugging
-            print(f"Comparing Responsibility: {resp} \nwith Requirement: {req}")
+            print(f"Comparing responsibility: {resp} \nwith requirement: {req}")
 
             # Compute BERTScore Precision (assuming compute_bertscore_precision is defined)
             bscore_p = compute_bertscore_precision(resp, req)
@@ -385,10 +385,10 @@ def calculate_segment_resp_bscore_precisions(
             # Append results with responsibility index and value, and requirement index and value
             results.append(
                 {
-                    "Responsibility Key": resp_key,
-                    "Responsibility": resp,
-                    "Requirement Key": req_key,
-                    "Requirement": req,
+                    "responsibility_key": resp_key,
+                    "responsibility": resp,
+                    "requirement_key": req_key,
+                    "requirement": req,
                     "BERTScore Precision": bscore_p,
                 }
             )
@@ -467,7 +467,7 @@ class SimilarityScoreCalculator:
         # Perform many-to-many comparison
         for resp_key, resp in responsibilities.items():
             for req_key, req in requirements.items():
-                print(f"Comparing Responsibility: {resp} \nwith Requirement: {req}")
+                print(f"Comparing responsibility: {resp} \nwith requirement: {req}")
 
                 # Calculate similarity metrics
                 similarity_dict = self.calculate_similarity(resp, req)
@@ -475,10 +475,10 @@ class SimilarityScoreCalculator:
                 # Append results
                 similarity_results.append(
                     {
-                        "Responsibility Key": resp_key,
-                        "Responsibility": resp,
-                        "Requirement Key": req_key,
-                        "Requirement": req,
+                        "responsibility_key": resp_key,
+                        "responsibility": resp,
+                        "requirement_key": req_key,
+                        "requirement": req,
                         "BERTScore Precision": similarity_dict["bert_score_precision"],
                         "Soft Similarity": similarity_dict["soft_similarity"],
                         "Word Mover's Distance": similarity_dict[
@@ -515,7 +515,7 @@ class SimilarityScoreCalculator:
             req_key = entry["requirement_key"]
             req = entry["requirement_text"]
 
-            print(f"Comparing Responsibility: {resp} \nwith Requirement: {req}")
+            print(f"Comparing responsibility: {resp} \nwith requirement: {req}")
 
             # Calculate similarity metrics
             similarity_dict = self.calculate_similarity(resp, req)
@@ -523,10 +523,10 @@ class SimilarityScoreCalculator:
             # Append results
             similarity_results.append(
                 {
-                    "Responsibility_Key": resp_key,
-                    "Responsibility": resp,
-                    "Requirement_Key": req_key,
-                    "Requirement": req,
+                    "responsibility_key": resp_key,
+                    "responsibility": resp,
+                    "requirement_Key": req_key,
+                    "requirement": req,
                     "BERTScore Precision": similarity_dict["bert_score_precision"],
                     "Soft Similarity": similarity_dict["soft_similarity"],
                     "Word Mover's Distance": similarity_dict["word_movers_distance"],

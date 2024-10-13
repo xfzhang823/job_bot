@@ -6,32 +6,34 @@ import logging
 import logging_config
 from pathlib import Path
 import pandas as pd
+from typing import Union
 from utils.get_file_names import get_file_names
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 
-def add_to_json_file(new_data, filename, key=None):
+def add_to_json_file(new_data: Union[list, dict], file_path: str, key: str = None):
     """
     Adds or updates data in a master JSON file.
 
     Args:
         new_data (dict or list): The data to be added or updated in the JSON file.
-        filename (str): The path to the master JSON file.
-        key (str, optional): If provided, adds or updates the data under this specific key.
-                             If not provided, the new data is merged directly with the existing JSON data.
+        file_path (str): The path to the master JSON file.
+        key (str, optional):
+            - If provided, adds or updates the data under this specific key.
+            - If not provided, the new data is merged directly with the existing JSON data.
 
     Returns:
         None
     """
     try:
         # Load existing data from the file
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             master_data = json.load(f)
 
         # Log the types of the existing and new data for better debugging
-        logging.debug(
+        logger.debug(
             f"Loaded data type: {type(master_data).__name__}, New data type: {type(new_data).__name__}"
         )
 
@@ -72,27 +74,27 @@ def add_to_json_file(new_data, filename, key=None):
                 )
 
         # Save the updated master data back to the file
-        with open(filename, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(master_data, f, indent=4, ensure_ascii=False)
 
-        logging.info(f"Data successfully added to {filename}.")
+        logger.info(f"Data successfully added to {file_path}.")
 
     except FileNotFoundError:
         # If the file doesn't exist, create a new one with the new data
-        with open(filename, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(new_data, f, indent=4, ensure_ascii=False)
-        logging.info(f"File {filename} created and data added.")
+        logger.info(f"File {file_path} created and data added.")
 
     except (KeyError, ValueError) as e:
-        logging.error(f"Error adding data to {filename}: {e}")
+        logger.error(f"Error adding data to {file_path}: {e}")
         raise
 
     except Exception as e:
-        logging.error(f"Unexpected error adding data to {filename}: {e}")
+        logger.error(f"Unexpected error adding data to {file_path}: {e}")
         raise
 
 
-def check_json_file(file_path):
+def check_json_file(file_path: str):
     """
     Checks if the file path exists and its extension is .json.
 
@@ -105,10 +107,10 @@ def check_json_file(file_path):
     # Check if the file exists and has a .json extension
     file_path = str(file_path)
     if os.path.exists(file_path) and file_path.lower().endswith(".json"):
-        logging.info(f"The file '{file_path}' already exists.")
+        logger.info(f"The file '{file_path}' already exists.")
         return True
     else:
-        logging.info(
+        logger.info(
             f"The file '{file_path}' does not exist or does not have a .json extension."
         )
         return False
@@ -278,18 +280,31 @@ def load_or_create_json(filepath, key=None):
                 data = json.load(f)
                 # Check if the specific key exists in the JSON data
                 if key and key in data:
-                    logging.info(
-                        f"Data for key '{key}' already exists in '{filepath}'."
-                    )
+                    logger.info(f"Data for key '{key}' already exists in '{filepath}'.")
                     return data, True  # Key exists, return data and True
                 else:
                     return data, False  # Key does not exist, return data and False
         except (json.JSONDecodeError, FileNotFoundError) as e:
-            logging.error(f"Error reading {filepath}: {e}")
+            logger.error(f"Error reading {filepath}: {e}")
             return {}, False  # Return empty dict if there is an error
     else:
         # Initialize an empty dictionary if the file does not exist
         return {}, False  # Return empty dict and False since file does not exist
+
+
+def normalize_dataframe_column_names(df):
+    """
+    This function converts the column names of a DataFrame to lowercase
+    and replaces spaces with underscores.
+
+    Args:
+    - df (pd.DataFrame): Input DataFrame with columns to be normalized.
+
+    Returns:
+    - df (pd.DataFrame): DataFrame with normalized column names.
+    """
+    df.columns = df.columns.str.lower().str.replace(" ", "_")
+    return df
 
 
 def pretty_print_json(data):
@@ -307,11 +322,6 @@ def pretty_print_json(data):
         print(json.dumps(data, indent=4))
     else:
         print("The provided data is not a valid JSON object (dict or list).")
-
-
-import json
-import os
-import logging
 
 
 def read_from_json_file(json_file, key=None):
@@ -340,7 +350,7 @@ def read_from_json_file(json_file, key=None):
 
     # Check if the file exists; if not, return an empty dictionary to handle the creation
     if not os.path.exists(json_file):
-        logging.info(f"File {json_file} not found. It will be created.")
+        logger.info(f"File {json_file} not found. It will be created.")
         return {}
 
     try:
@@ -348,12 +358,12 @@ def read_from_json_file(json_file, key=None):
             master_data = json.load(f)
 
         # Debugging: Log the loaded data structure
-        logging.info(f"Loaded data from {json_file}")
+        logger.info(f"Loaded data from {json_file}")
 
         # If a key is provided, extract data under that key
         if key:
             if key in master_data:
-                logging.info(f"Data for key '{key}' found in {json_file}.")
+                logger.info(f"Data for key '{key}' found in {json_file}.")
                 return master_data[key]
             else:
                 raise KeyError(f"Key '{key}' not found in the JSON data.")
@@ -364,10 +374,10 @@ def read_from_json_file(json_file, key=None):
         print(f"File {json_file} not found.")
         return None
     except json.JSONDecodeError as e:
-        logging.error(f"Error decoding JSON from {json_file}: {e}")
+        logger.error(f"Error decoding JSON from {json_file}: {e}")
         raise
     except Exception as e:
-        logging.error(f"Error loading data from {json_file}: {e}")
+        logger.error(f"Error loading data from {json_file}: {e}")
         raise
 
 
@@ -385,20 +395,40 @@ def replace_spaces_in_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def save_to_json_file(data, filename):
+def save_to_json_file(data: Union[dict, list], file_path: str):
     """
     Saves a Python dictionary or list to a JSON file.
 
     Args:
-        data (dict or list): The data to be saved in JSON format.
-        filename (str): The path to the file where the data will be saved.
+        data (Union[dict, list]): The data to be saved in JSON format.
+        file_path (str): The full path to the file where the data will be saved.
+
+    Raises:
+        ValueError: If the data is not a dictionary or a list.
+        FileNotFoundError: If the provided file path does not exist.
+        Exception: For any general errors during file saving.
 
     Returns:
         None
     """
     try:
-        with open(filename, "w", encoding="utf-8") as f:
+        # Validate file path
+        directory = os.path.dirname(file_path)
+        if not os.path.exists(directory):
+            raise FileNotFoundError(
+                f"Directory does not exist for the file path: {file_path}"
+            )
+
+        # Validate data type
+        if not isinstance(data, (dict, list)):
+            raise ValueError(
+                f"Invalid data type. Expected dict or list, got {type(data).__name__}"
+            )
+
+        # Attempt to write data to the JSON file
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-        logging.info(f"Data successfully saved to {filename}.")
-    except Exception as e:
-        logging.info(f"Error saving data to {filename}: {e}")
+        logger.info(f"Data successfully saved to {file_path}.")
+
+    except FileNotFoundError as e:
+        logger.error(f"File path not found: {file_path} - Error: {e}")

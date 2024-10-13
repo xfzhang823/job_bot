@@ -64,6 +64,7 @@ pruned_responsibilities_flat_dir_name = "pruned_responsibilities_flat"
 similarity_metrics_dir_name = "similarity_metrics"
 
 mapping_file_name = "url_to_file_mapping.json"
+elbow_curve_plot_file_name = "elbow_curve_plot.png"
 
 FLAT_REQS_FILES_ITERATE_0_DIR = ITERATE_0_DIR / requirements_flat_dir_name
 FLAT_RESPS_FILES_ITERATE_0_DIR = ITERATE_0_DIR / responsibilities_flat_dir_name
