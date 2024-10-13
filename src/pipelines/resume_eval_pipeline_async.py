@@ -104,11 +104,11 @@ def unpack_and_combine_json(nested_json, requirements_json):
         requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
 
     Returns:
-        list: A list of dictionaries containing responsibility keys, requirement keys,
+        list: A list of dictionaries containing responsibility_keys, requirement_keys,
               responsibility texts, and matched requirement texts.
 
     Error Handling:
-        - If a requirement key is not found in the requirements JSON, it will skip that entry.
+        - If a requirement_key is not found in the requirements JSON, it will skip that entry.
         - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
         - Logs warnings for missing fields and unmatched keys for better traceability.
     """
@@ -141,7 +141,7 @@ def unpack_and_combine_json(nested_json, requirements_json):
             requirement_text = requirements_json.get(req_key)
             if requirement_text is None:
                 logger.info(
-                    f"Warning: Requirement key '{req_key}' not found in requirements JSON. Skipping entry."
+                    f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
                 )
                 continue
 

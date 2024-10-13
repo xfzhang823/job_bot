@@ -107,11 +107,11 @@ class MetricsAnalyer:
         """
         if previous_or_current == "current":
             return self.df_merged.nlargest(n, "Composite_Score_1")[
-                [self.resp_key, "Composite_Score_1", "Responsibility_1"]
+                [self.resp_key, "Composite_Score_1", "responsibility_1"]
             ]
         elif previous_or_current == "previous":
             return self.df_merged.nlargest(n, "Composite_Score_0")[
-                [self.resp_key, "Composite_Score_0", "Responsibility_0"]
+                [self.resp_key, "Composite_Score_0", "responsibility_0"]
             ]
         else:
             raise ValueError(
@@ -122,7 +122,7 @@ class MetricsAnalyer:
         Analyze which metrics represent the most changes between the two iterations, using average absolute percentage change.
 
         Parameters:
-        - group_by (str): If 'responsibility', group by Responsibility_Key; if 'requirement', group by Requirement_Key.
+        - group_by (str): If 'responsibility', group by responsibility_Key; if 'requirement', group by requirement_key.
 
         Returns:
         pd.DataFrame showing the average absolute percentage change for each metric.
@@ -157,7 +157,7 @@ class MetricsAnalyer:
         Generate summary statistics (mean, min, max, var) for each metric.
 
         Parameters:
-        - group_by (str): If 'responsibility', group by Responsibility_Key; if 'requirement', group by Requirement_Key.
+        - group_by (str): If 'responsibility', group by responsibility_Key; if 'requirement', group by requirement_key.
 
         Returns:
         pd.DataFrame with summary statistics.
@@ -188,7 +188,7 @@ class MetricsAnalyer:
         Perform aggregate analysis of metrics (mean and standard deviation).
 
         Parameters:
-        - group_by (str): If 'responsibility', group by Responsibility_Key; if 'requirement', group by Requirement_Key.
+        - group_by (str): If 'responsibility', group by responsibility_Key; if 'requirement', group by requirement_key.
 
         Returns:
         pd.DataFrame with aggregate analysis of metrics (mean, std).

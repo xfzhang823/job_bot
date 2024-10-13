@@ -80,8 +80,8 @@ class MetricsComparator_old_version:
     def __init__(
         self,
         dfs: List[pd.DataFrame],
-        resp_key: str = "Responsibility_Key",
-        req_key: str = "Requirement_Key",
+        resp_key: str = "responsibility_Key",
+        req_key: str = "requirement_Key",
         metrics: list = None,
     ):
         """
@@ -103,17 +103,17 @@ class MetricsComparator_old_version:
         ]
         self.df_merged = None
 
-    # Internal method to group by Responsibility_Key
+    # Internal method to group by responsibility_key
     def _group_by_responsibility(self) -> pd.DataFrame:
-        """Group DataFrame by Responsibility_Key."""
+        """Group DataFrame by responsibility_key."""
         numeric_cols = self.df_merged.select_dtypes(
             include=["int64", "float64"]
         ).columns
         return self.df_merged.groupby(self.resp_key)[numeric_cols].mean().reset_index()
 
-    # Internal method to group by Requirement_Key
+    # Internal method to group by requirement_key
     def _group_by_requirement(self) -> pd.DataFrame:
-        """Group DataFrame by Requirement_Key."""
+        """Group DataFrame by requirement_key."""
         numeric_cols = self.df_merged.select_dtypes(
             include=["int64", "float64"]
         ).columns
@@ -144,70 +144,6 @@ class MetricsComparator_old_version:
             )  # Prevent division by zero
             pct_changes[metric] = pct_change_col
         return df_grouped, pct_changes
-
-    # def _merge_dataframes(self):
-    #     """Merge multiple DataFrames on Responsibility_Key and Requirement_Key."""
-    #     df_merged = self.dfs[0]
-    #     for i, df in enumerate(self.dfs[1:], start=1):
-    #         df_merged = pd.merge(
-    #             df_merged,
-    #             df,
-    #             on=[self.resp_key, self.req_key],
-    #             suffixes=(f"_{i-1}", f"_{i}"),
-    #             how="inner",
-    #         )
-    #     self.df_merged = df_merged
-
-    # def calculate_changes(
-    #     self, by_pct: bool = False, group_by: str = None
-    # ) -> pd.DataFrame:
-    #     """
-    #     Calculate changes between previous and current metrics, with options for absolute or percentage change.
-
-    #     Args:
-    #         -by_pct (bool): If True, return percentage changes; if False, return absolute value changes.
-    #         -group_by (str): If 'responsibility', group by Responsibility_Key; if 'requirement', \
-    #             group by Requirement_Key.
-
-    #     Returns:
-    #         pd.DataFrame with either absolute changes or percentage changes, optionally grouped.
-    #     """
-    #     if group_by == "responsibility":
-    #         df_grouped = self._group_by_responsibility()
-    #         key_col = self.resp_key
-    #     elif group_by == "requirement":
-    #         df_grouped = self._group_by_requirement()
-    #         key_col = self.req_key
-    #     else:
-    #         df_grouped = self.df_merged
-    #         key_col = [self.resp_key, self.req_key]
-
-    #     if by_pct:
-    #         df_grouped, changes = self._calculate_percentage_change(df_grouped)
-    #     else:
-    #         df_grouped, changes = self._calculate_absolute_change(df_grouped)
-
-    #     if isinstance(key_col, list):
-    #         df_change = df_grouped[key_col + list(changes.values())]
-    #     else:
-    #         df_change = df_grouped[[key_col] + list(changes.values())]
-
-    #     total_col = "total_pct_change" if by_pct else "total_change"
-    #     df_change.loc[:, total_col] = (
-    #         df_change[list(changes.values())].abs().sum(axis=1)
-    #     )
-
-    #     return df_change.sort_values(by=total_col, ascending=False)
-
-    # def execute_comparison(self):
-    #     """
-    #     Execute the comparison process: merge dataframes and calculate changes.
-    #     """
-    #     # Step 1: Merge DataFrames
-    #     self._merge_dataframes()
-
-    #     # Step 2: Calculate and return changes
-    #     return self.calculate_changes()
 
     def get_full_data_with_composite_score(self):
         """

@@ -6,14 +6,17 @@ from pathlib import Path
 import logging_config
 import asyncio
 from tqdm import tqdm
-from utils.generic_utils import fetch_new_urls
+from utils.generic_utils import fetch_new_urls, read_from_json_file, save_to_json_file
 from pipelines.preprocessing_pipeline_async import (
     run_pipeline_async as run_preprocessing_pipeline_async,
 )
 from pipelines.preprocessing_pipeline import (
     run_pipeline as run_preprocessing_pipeline,
 )
-from pipelines.generating_flat_resps_reqs_mini_pipeline import (
+from pipelines.upserting_mapping_pipeline import (
+    run_pipe_line as run_upserting_mapping_file_pipeline,
+)
+from pipelines.flattened_resps_reqs_processing_mini_pipeline import (
     run_pipeline as run_flat_requirements_and_responsibilities_mini_pipeline,
 )
 from pipelines.resume_eval_pipeline import (
@@ -22,19 +25,26 @@ from pipelines.resume_eval_pipeline import (
 from pipelines.resume_eval_pipeline import (
     multivariate_indices_processing_mini_pipeline as run_adding_multivariate_indices_mini_pipeline,
 )
-from pipelines.resume_eval_pipeline import generate_matching_metrics
-
+from pipelines.exclude_responsibilities_mini_pipeline import (
+    run_pipeline as run_excluding_responsibilities_mini_pipeline,
+)
+from pipelines.resume_pruning_pipeline import (
+    run_pipeline as run_resume_pruning_pipeline,
+)
+from pipelines.new_iteration_IO_setup_pipeline import (
+    run_pipe_line as run_new_iteration_IO_setup_pipeline,
+)
+from pipelines.resume_editing_pipeline import (
+    run_pipeline as run_resume_editting_pipeline,
+)
+from pipelines.resume_eval_pipeline import (
+    re_processing_metrics_pipeline as re_run_resume_comparison_pipeline,
+)
 from pipelines.resume_eval_pipeline_async import (
     metrics_processing_pipeline_async as run_resume_comparison_pipeline_async,
 )
 from pipelines.resume_eval_pipeline_async import (
     multivariate_indices_processing_mini_pipeline_async as run_adding_multivariate_indices_mini_pipeline_async,
-)
-from pipelines.resume_editing_pipeline import (
-    multi_files_modification_pipeline as run_resume_editting_pipeline,
-)
-from pipelines.resume_eval_pipeline import (
-    re_processing_metrics_pipeline as re_run_resume_comparison_pipeline,
 )
 
 from config import (
@@ -45,11 +55,17 @@ from config import (
     modified_resps_flat_iter_1_json_file,
     modified_resps_flat_iter_2_json_file,
     mapping_file_name,
+    elbow_curve_plot_file_name,
     ITERATE_0_DIR,
     FLAT_REQS_FILES_ITERATE_0_DIR,
     FLAT_RESPS_FILES_ITERATE_0_DIR,
     PRUNED_FLAT_RESPS_FILES_ITERATE_0_DIR,
     SIMILARITY_METRICS_ITERATE_0_DIR,
+    ITERATE_1_DIR,
+    FLAT_REQS_FILES_ITERATE_1_DIR,
+    FLAT_RESPS_FILES_ITERATE_1_DIR,
+    SIMILARITY_METRICS_ITERATE_1_DIR,
+    PRUNED_FLAT_RESPS_FILES_ITERATE_1_DIR,
 )
 
 
@@ -98,31 +114,50 @@ def run_pipeline_1():
 
 
 def run_pipeline_2a():
-    """Pipeline for creating flattened responsibilities and requirements files"""
-    logger.info(
-        "Running pipeline 2a: creating flattened responsibilities and requirements files."
-    )
+    """
+    Pipeline for creating/updating the mapping file:
+    - Copy requirements files from previous iteration directory
+    to the current iteration directory
+    - Create the mapping file for this iteration
+    """
+    logger.info("Running pipeline 2a: creating/updating the mapping file.")
 
-    run_flat_requirements_and_responsibilities_mini_pipeline(
+    run_upserting_mapping_file_pipeline(
         job_descriptions_file=job_descriptions_json_file,
-        job_requirements_file=job_requirements_json_file,
-        resume_json_file=resume_json_file,
         flat_reqs_output_files_dir=FLAT_REQS_FILES_ITERATE_0_DIR,
         flat_resps_output_files_dir=FLAT_RESPS_FILES_ITERATE_0_DIR,
         sim_metrics_output_files_dir=SIMILARITY_METRICS_ITERATE_0_DIR,
+        pruned_resps_output_files_dir=PRUNED_FLAT_RESPS_FILES_ITERATE_0_DIR,
         mapping_file_dir=ITERATE_0_DIR,
         mapping_file_name=mapping_file_name,
     )
-
-    logger.info(
-        "Finished running pipeline 2a: creating flattened responsibilities and requirements files."
-    )
+    logger.info("Finished running pipeline 2a: creating/updating the mapping file.")
 
 
 def run_pipeline_2b():
+    """Pipeline for creating flattened responsibilities and requirements files"""
+    logger.info(
+        "Running pipeline 2b: creating flattened responsibilities and requirements files."
+    )
+    mapping_file_path = ITERATE_0_DIR / mapping_file_name
+    logger.info(f"mapping file path: {mapping_file_path}")
+
+    # Run pipeline
+    run_flat_requirements_and_responsibilities_mini_pipeline(
+        mapping_file=mapping_file_path,
+        job_requirements_file=job_requirements_json_file,
+        resume_json_file=resume_json_file,
+    )
+
+    logger.info(
+        "Finished running pipeline 2b: creating flattened responsibilities and requirements files."
+    )
+
+
+def run_pipeline_2c():
     """Pipeline for resume evaluation"""
     logger.info(
-        "Running pipeline 2b: match resume's responsibilities to job postings' Requirements \
+        "Running pipeline 2c: match resume's responsibilities to job postings' requirements \
                 to generate similarity related metrics."
     )
 
@@ -136,38 +171,105 @@ def run_pipeline_2b():
     run_resume_comparison_pipeline(mapping_file)
 
     logger.info(
-        "Finished running pipeline 2b: match resume's responsibilities to job postings' \
-                Requirements to generate similarity related metrics"
+        "Finished running pipeline 2c: match resume's responsibilities to job postings' \
+                requirements to generate similarity related metrics"
     )
 
 
-def run_pipeline_2c():
+def run_pipeline_2d():
     """Mini-Pipeline for adding indices to metrics files"""
-    logger.info("Running pipeline 2b: adding indices to metrics csv files")
+    logger.info("Running pipeline 2d: adding indices to metrics csv files")
 
     csv_files_dir = SIMILARITY_METRICS_ITERATE_0_DIR
     # Run pipeline for each url
     run_adding_multivariate_indices_mini_pipeline(csv_files_dir)
-    logger.info("Finished running pipeline 2b: adding indices to metrics csv files.")
+    logger.info("Finished running pipeline 2d: adding indices to metrics csv files.")
 
 
-def run_pipeline_3():
-    """Pipeline to modify all responsibility files in the given directory."""
-
-    # Define your directories and file paths
-    responsibilities_dir = FLAT_RESPS_FILES_ITERATE_0_DIR
-    # requirements_flat_json_file = FLAT
-    # modified_resps_output_dir = Path("path/to/modified_responsibilities")
+def run_pipeline_2e():
+    """Exclude certain responsibilities from eval and optimization"""
+    logger.info("Running pipeline 2e: excluding certain responsibilities")
 
     mapping_file_path = ITERATE_0_DIR / mapping_file_name
 
+    run_excluding_responsibilities_mini_pipeline(mapping_file_path)
+    logger.info("Finished running pipeline 2e: excluding certain responsibilities")
+
+
+def run_pipeline_2f():
+    """Prune responsibilities"""
+    logger.info(
+        "Running pipeline 2e: prune resume responsibilities based on its alignment scores \
+            with requirements"
+    )
+
+    # Run pipeline
+
+    # File location of the mapping file (url: dir name: file names...)
+    mapping_file = ITERATE_0_DIR / mapping_file_name
+
+    #
+    elbow_curve_plot_file = ITERATE_0_DIR / elbow_curve_plot_file_name
+    elbow_method_specific_params = {
+        "max_k": 15,
+        "S": 12.0,
+        "elbow_curve_plot_file": elbow_curve_plot_file,
+    }
+    run_resume_pruning_pipeline(
+        mapping_file=mapping_file,
+        pruning_method="elbow",
+        group_by_responsibility=False,
+        **elbow_method_specific_params,
+    )
+
+    logger.info(
+        "Finished running pipeline 2e: prune resume responsibilities based on its alignment scores \
+        with requirements."
+    )
+    return
+
+
+def run_pipeline_3a():
+    """Pipeline to set up I/O folders, files, and file names for Iteration 0"""
+
+    logger.info("Running pipeline 3a: setting up I/O for iteration 0.")
+
+    run_new_iteration_IO_setup_pipeline(
+        previous_flat_reqs_output_files_dir=FLAT_REQS_FILES_ITERATE_0_DIR,
+        job_descriptions_file=job_descriptions_json_file,
+        flat_reqs_output_files_dir=FLAT_REQS_FILES_ITERATE_1_DIR,
+        flat_resps_output_files_dir=FLAT_RESPS_FILES_ITERATE_1_DIR,
+        sim_metrics_output_files_dir=SIMILARITY_METRICS_ITERATE_1_DIR,
+        pruned_resps_output_files_dir=PRUNED_FLAT_RESPS_FILES_ITERATE_1_DIR,
+        mapping_file_dir=ITERATE_1_DIR,
+        mapping_file_name=mapping_file_name,
+    )
+
+    logger.info("Finished running pipeline 3a: setting up I/O for iteration 0.")
+
+
+def run_pipeline_3b():
+
+    logger.info("Running pipeline 3b: modifying repsonsibilties based on requirments.")
+
     # Run the pipeline for all responsibilities files
+
+    mapping_file_path_curr = ITERATE_1_DIR / mapping_file_name
+    mapping_file_path_prev = ITERATE_0_DIR / mapping_file_name
+
     run_resume_editting_pipeline(
-        mapping_file=mapping_file_path, model="openai", model_id="gpt-4-turbo"
+        mapping_file_prev=mapping_file_path_prev,
+        mapping_file_curr=mapping_file_path_curr,
+        model="openai",
+        model_id="gpt-4-turbo",
+    )
+
+    logger.info(
+        "Finished running pipeline 3b: modifying repsonsibilties based on requirments."
     )
 
 
-def run_pipeline_4():
+def run_pipeline_4c():
     """Pipeline for re-run resume evaluation"""
     logger.info("Running pipeline 4...")
     re_run_resume_comparison_pipeline(
@@ -214,7 +316,7 @@ async def run_pipeline_1_async():
         )
 
 
-async def run_pipeline_2b_async():
+async def run_pipeline_2c_async():
     """Asynchronous pipeline for resume evaluation"""
     logger.info(
         "Running pipeline 2b: match resume's responsibilities to job postings' Requirements \
@@ -236,11 +338,11 @@ async def run_pipeline_2b_async():
     )
 
 
-async def run_pipeline_2c_async():
+async def run_pipeline_2d_async():
     """Asynchronous Mini-Pipeline for adding indices to metrics files."""
     logger.info("Running pipeline 2b: adding indices to metrics csv files")
 
-    csv_files_dir = METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0"
+    csv_files_dir = SIMILARITY_METRICS_ITERATE_0_DIR
     # Run pipeline for each url
     await run_adding_multivariate_indices_mini_pipeline_async(csv_files_dir)
     logger.info("Finished running pipeline 2b: adding indices to metrics csv files.")
@@ -258,10 +360,10 @@ async def main_async():
     """main to run the pipelines asynchronously"""
     await run_pipeline_1_async()
     run_pipeline_2a()
-    await run_pipeline_2b_async()
+    await run_pipeline_2c_async()
 
 
 if __name__ == "__main__":
     # asyncio.run(main_async())
     # main()
-    run_pipeline_2c()
+    run_pipeline_2e()

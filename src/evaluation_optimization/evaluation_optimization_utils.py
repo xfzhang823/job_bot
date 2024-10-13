@@ -366,7 +366,7 @@ def process_and_save_requirements_by_url(
 
     # Save the flattened requirements to a JSON file
     save_to_json_file(reqs_flat, requirements_flat_json_file)
-    logger.info(f"Requirements flattened and saved to {requirements_flat_json_file}")
+    logger.info(f"requirements flattened and saved to {requirements_flat_json_file}")
 
 
 def process_and_save_responsibilities_from_resume(

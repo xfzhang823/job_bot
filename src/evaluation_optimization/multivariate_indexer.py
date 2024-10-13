@@ -39,9 +39,9 @@ class MultivariateIndexer:
     df: pd.DataFrame
         The input DataFrame containing data for a single iteration of analysis.
     resp_key : str
-        Column name representing the unique key for responsibilities (default is "Responsibility_Key").
+        Column name representing the unique key for responsibilities (default is "responsibility_key").
     req_key : str
-        Column name representing the unique key for requirements (default is "Requirement_Key").
+        Column name representing the unique key for requirements (default is "requirement_key").
     metrics : list
         List of metric column names to analyze. If not provided, default metrics are used.
     max_word_movers : float
@@ -74,8 +74,8 @@ class MultivariateIndexer:
     def __init__(
         self,
         df: pd.DataFrame,
-        resp_key: str = "Responsibility_Key",
-        req_key: str = "Requirement_Key",
+        resp_key: str = "responsibility_key",
+        req_key: str = "requirement_key",
         metrics: list = None,
         max_word_movers: float = 1.0,
         composite_weights: dict = None,
