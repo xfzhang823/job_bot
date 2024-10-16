@@ -5,8 +5,10 @@ import json
 import logging
 import logging_config
 from pathlib import Path
-import pandas as pd
 from typing import Union
+import pandas as pd
+import shutil
+from typing import Union, List, Dict
 from utils.get_file_names import get_file_names
 
 # Setup logger
@@ -92,6 +94,76 @@ def add_to_json_file(new_data: Union[list, dict], file_path: str, key: str = Non
     except Exception as e:
         logger.error(f"Unexpected error adding data to {file_path}: {e}")
         raise
+
+
+def copy_files_btw_directories(src_folder: str, dest_folder: str, src_file: str = ""):
+    """
+    Copies a single file or all files from the source folder to the destination folder.
+
+    Args:
+        * src_folder (str): The path to the source folder where files are located.
+        * dest_folder (str): The path to the destination folder where files will be copied.
+        * src_file (str, optional):
+            - The path to a specific file (can be a full path or just the file name).
+            - If None, all files in the source folder will be copied.
+
+    Raises:
+        FileNotFoundError: If the source file or folder does not exist.
+        Exception: For any general errors during file copying.
+
+    Returns:
+        None
+
+    Example:
+        # To copy a specific file (just the file name):
+        copy_files('/path/to/source/folder', '/path/to/destination/folder', \
+            'example.txt')
+
+        # To copy a specific file (using the full path):
+        copy_files('/path/to/source/folder', '/path/to/destination/folder', \
+            '/path/to/source/folder/example.txt')
+
+        # To copy all files from the source folder:
+        copy_files('/path/to/source/folder', '/path/to/destination/folder')
+    """
+    # Ensure destination folder exists
+    if not os.path.exists(dest_folder):
+        os.makedirs(dest_folder)
+
+    # Copy a single file if src_file is provided
+    if src_file:
+        # Check if src_file is an absolute path, if not, combine it with src_folder
+        if not os.path.isabs(src_file):
+            full_src_file_path = os.path.join(src_folder, src_file)
+        else:
+            full_src_file_path = src_file
+
+        # Ensure the file is actually present
+        if os.path.isfile(full_src_file_path):
+            dest_file_path = os.path.join(dest_folder, os.path.basename(src_file))
+            try:
+                shutil.copy2(full_src_file_path, dest_file_path)
+                print(f"Copied: {full_src_file_path} to {dest_file_path}")
+            except Exception as e:
+                print(f"Error occurred while copying file {full_src_file_path}: {e}")
+        else:
+            print(f"File '{src_file}' not found at location: {full_src_file_path}")
+
+    # Copy all files if src_file is None
+    else:
+        for file_name in os.listdir(src_folder):
+            full_src_file_path = os.path.join(src_folder, file_name)
+            dest_file_path = os.path.join(dest_folder, file_name)
+
+            # Only copy if it's a file (not a subdirectory)
+            if os.path.isfile(full_src_file_path):
+                try:
+                    shutil.copy2(full_src_file_path, dest_file_path)
+                    print(f"Copied: {file_name} to {dest_folder}")
+                except Exception as e:
+                    print(
+                        f"Error occurred while copying file {full_src_file_path}: {e}"
+                    )
 
 
 def check_json_file(file_path: str):
@@ -205,9 +277,6 @@ def find_project_root(starting_path=None, marker=".git"):
             return parent
 
     return None  # Return None if the marker is not found
-
-
-import json
 
 
 def get_company_and_job_title_from_json(job_posting_url, json_data):
@@ -324,12 +393,14 @@ def pretty_print_json(data):
         print("The provided data is not a valid JSON object (dict or list).")
 
 
-def read_from_json_file(json_file, key=None):
+def read_from_json_file(
+    json_file: Union[str, Path], key: str = ""
+) -> Union[Dict, List, None]:
     """
     Loads data from a master JSON file and extracts specific sections or values.
 
     Args:
-        json_file (str): The path to the master JSON file.
+        json_file (str or Path): The path to the master JSON file.
         key (str, optional): If provided, extracts the data under this specific key.
 
     Returns:
@@ -341,15 +412,17 @@ def read_from_json_file(json_file, key=None):
         FileNotFoundError: If the JSON file is not found.
         JSONDecodeError: If there is an error decoding the JSON data.
     """
-    # Check directory exist or not
-    directory_name = os.path.dirname(json_file)  # Fixed reference to json_file
-    if not os.path.exists(directory_name):
+    # Ensure json_file is a Path object
+    json_file = Path(json_file)
+
+    # Check if directory exists
+    if not json_file.parent.exists():
         raise FileNotFoundError(
-            f"Directory '{directory_name}' does not exist. Please create the directory first."
+            f"Directory '{json_file.parent}' does not exist. Please create the directory first."
         )
 
-    # Check if the file exists; if not, return an empty dictionary to handle the creation
-    if not os.path.exists(json_file):
+    # Check if file exists; if not, return an empty dictionary
+    if not json_file.exists():
         logger.info(f"File {json_file} not found. It will be created.")
         return {}
 
@@ -357,7 +430,6 @@ def read_from_json_file(json_file, key=None):
         with open(json_file, "r", encoding="utf-8") as f:
             master_data = json.load(f)
 
-        # Debugging: Log the loaded data structure
         logger.info(f"Loaded data from {json_file}")
 
         # If a key is provided, extract data under that key
@@ -370,9 +442,6 @@ def read_from_json_file(json_file, key=None):
         else:
             return master_data  # Return the entire JSON data if no key is provided
 
-    except FileNotFoundError:
-        print(f"File {json_file} not found.")
-        return None
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from {json_file}: {e}")
         raise
@@ -432,3 +501,59 @@ def save_to_json_file(data: Union[dict, list], file_path: str):
 
     except FileNotFoundError as e:
         logger.error(f"File path not found: {file_path} - Error: {e}")
+
+
+def validate_json_file(file: Path):
+    if not file.exists():
+        logger.error(f"File not found: {file}")
+        return False
+    if not file.suffix == ".json":
+        logger.error(f"Invalid file format (expected .json): {file}")
+        return False
+    return True
+
+
+def verify_file(file_path: Path) -> bool:
+    """
+    Verify if the file exists and is accessible.
+
+    Args:
+        file_path (Path): The path to the file to be checked.
+
+    Returns:
+        bool: True if the file exists, False otherwise.
+    """
+    if file_path.exists() and file_path.is_file():
+        return True
+    logger.error(f"File does not exist or is not a valid file: {file_path}")
+    return False
+
+
+def verify_dir(dir_path: Path, create_dir: bool = False) -> bool:
+    """
+    Verify if the directory exists and is accessible. Create the directory
+    if it doesn't exist.
+
+    Args:
+        dir_path (Path): The path to the directory to be checked.
+        create_dir (bool): Create the directory if it doesn't exist.
+        Defaults to False.
+        logger (Logger): Logger instance. Defaults to the root logger.
+
+    Returns:
+        bool: True if the directory exists (or was created), False otherwise.
+    """
+    if dir_path.exists() and dir_path.is_dir():
+        return True
+
+    try:
+        if create_dir:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Directory created: {dir_path}")
+            return True
+        else:
+            logger.error(f"Directory: {dir_path} does not exist.")
+            return False
+    except OSError as e:
+        logger.error(f"Failed to create directory: {dir_path}. Error: {e}")
+        return False

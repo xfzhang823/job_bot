@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 # Helper function to create standardized file names
 def create_file_name(
-    company: str, job_title: str, suffix: str = None, ext: str = ".json"
-):
+    company: str, job_title: str, suffix: str = "", ext: str = ".json"
+) -> str | None:
     """
     Create a standardized file name from company and job title.
 
@@ -40,10 +40,12 @@ def create_file_name(
     Returns:
         str or None: A standardized file name, or None if both company and job title are missing.
     """
-    if not company and not job_title:
+    # Return None if both company and job title are empty
+    if not company.strip() and not job_title.strip():
         return None
-    if suffix:
-        suffix = f"_{suffix}"
+
+    # Add underscore prefix to suffix if it's not empty
+    suffix = f"_{suffix}" if suffix else ""
 
     # Clean up company and job title names (remove/replace invalid characters)
     illegal_chars = r"[^\w\s-]"  # Remove everything except alphanumeric characters, spaces, dashes, and underscores
@@ -51,6 +53,10 @@ def create_file_name(
     job_title = re.sub(illegal_chars, "_", job_title or "Unknown_Title").replace(
         " ", "_"
     )
+
+    # Handle empty strings
+    suffix = suffix or ""
+    ext = ext or ".json"
 
     # Ensure there are no double periods or trailing periods
     clean_file_name = f"{company}_{job_title}{suffix}.{ext}".replace("..", ".")

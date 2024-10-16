@@ -1,8 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib
 
-
-plt.use("Agg")
+matplotlib.use("Agg")
 
 
 def plot_histograms(self, bins=20):

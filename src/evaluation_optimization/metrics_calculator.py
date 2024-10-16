@@ -195,6 +195,36 @@ def categorize_scores_for_df(df, metrics=None):
     return df
 
 
+def calculate_text_similarity_metrics(
+    optimized_text: str, requirement_text: str
+) -> dict:
+    """
+    Calculate all similarity scores between a single responsibility (optimized_text)
+    and a single requirement (requirement_text).
+
+    Args:
+        optimized_text (str): The optimized responsibility text.
+        requirement_text (str): The job requirement text.
+
+    Returns:
+        dict: A dictionary containing all calculated similarity scores.
+    """
+    # Instantiate the similarity calculator
+    text_similarity = AsymmetricTextSimilarity()
+
+    # Calculate the similarity metrics
+    similarity_scores = text_similarity.short_text_similarity_metrics(
+        optimized_text, requirement_text
+    )
+
+    return {
+        "bert_score_precision": similarity_scores["bert_score_precision"],
+        "soft_similarity": similarity_scores["soft_similarity"],
+        "word_movers_distance": similarity_scores["word_movers_distance"],
+        "deberta_entailment_score": similarity_scores["deberta_entailment_score"],
+    }
+
+
 def calculate_one_to_many_similarity_metrices(resps_flat, job_reqs_str):
     """
     Calculate text similarity metrics between resume responsibilities and job requirements,
@@ -253,8 +283,8 @@ def calculate_many_to_many_similarity_metrices(
     similarity_results = []
 
     # Debugging: Check length of responsibilities and requirements
-    print(f"Number of responsibilities: {len(responsibilities)}")
-    print(f"Number of requirements: {len(requirements)}")
+    logger.info(f"Number of responsibilities: {len(responsibilities)}")
+    logger.info(f"Number of requirements: {len(requirements)}")
 
     # Logging
     no_of_comparisons = len(responsibilities) * len(requirements)

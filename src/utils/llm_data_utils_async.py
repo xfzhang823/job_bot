@@ -13,7 +13,7 @@ import pandas as pd
 from io import StringIO
 from typing import Union
 from utils.llm_data_utils import get_openai_api_key, clean_and_extract_json
-from models.base_models import (
+from models.llm_response_models import (
     CodeResponse,
     JSONResponse,
     TabularResponse,
