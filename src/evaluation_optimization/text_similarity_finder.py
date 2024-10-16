@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Load spacy
 nlp = spacy.load("en_core_web_sm")
 spacy_stopwords = list(spacy.lang.en.stop_words.STOP_WORDS)  # spaCy stopwords
-
+spacy.language.
 
 def convert_dict_to_array(similarity_dict):
     """

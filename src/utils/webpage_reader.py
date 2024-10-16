@@ -29,7 +29,7 @@ from prompts.prompt_templates import (
     CONVERT_JOB_POSTING_TO_JSON_PROMPT,
 )
 from utils.llm_data_utils import call_openai_api
-from models.base_models import JobSiteResponseModel
+from models.llm_response_models import JobSiteResponseModel
 
 # Set up logging
 logger = logging.getLogger(__name__)

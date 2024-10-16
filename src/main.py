@@ -13,8 +13,8 @@ from pipelines.preprocessing_pipeline_async import (
 from pipelines.preprocessing_pipeline import (
     run_pipeline as run_preprocessing_pipeline,
 )
-from pipelines.upserting_mapping_pipeline import (
-    run_pipe_line as run_upserting_mapping_file_pipeline,
+from pipelines.upserting_mapping_mini_pipeline_iter0 import (
+    run_pipeline as run_upserting_mapping_file_pipeline_iter0,
 )
 from pipelines.flattened_resps_reqs_processing_mini_pipeline import (
     run_pipeline as run_flat_requirements_and_responsibilities_mini_pipeline,
@@ -31,14 +31,18 @@ from pipelines.exclude_responsibilities_mini_pipeline import (
 from pipelines.resume_pruning_pipeline import (
     run_pipeline as run_resume_pruning_pipeline,
 )
-from pipelines.new_iteration_IO_setup_pipeline import (
-    run_pipe_line as run_new_iteration_IO_setup_pipeline,
+from pipelines.pruned_resps_files_duplication_mini_pipeline import (
+    run_pipe_line as run_pruned_resps_files_duplication_mini_pipeline,
 )
+from pipelines.upserting_mapping_mini_pipeline_iter1 import (
+    run_pipeline as run_upserting_mapping_file_pipeline_iter1,
+)
+
 from pipelines.resume_editing_pipeline import (
     run_pipeline as run_resume_editting_pipeline,
 )
 from pipelines.resume_eval_pipeline import (
-    re_processing_metrics_pipeline as re_run_resume_comparison_pipeline,
+    metrics_reprocessing_pipeline as re_run_resume_comparison_pipeline,
 )
 from pipelines.resume_eval_pipeline_async import (
     metrics_processing_pipeline_async as run_resume_comparison_pipeline_async,
@@ -47,27 +51,29 @@ from pipelines.resume_eval_pipeline_async import (
     multivariate_indices_processing_mini_pipeline_async as run_adding_multivariate_indices_mini_pipeline_async,
 )
 
+# Add logging before imports
+logging.info("Trying to import config...")
 from config import (
     resume_json_file,
     job_posting_urls_file,
     job_descriptions_json_file,
     job_requirements_json_file,
-    modified_resps_flat_iter_1_json_file,
-    modified_resps_flat_iter_2_json_file,
+    # modified_resps_flat_iter_1_json_file,
+    # modified_resps_flat_iter_2_json_file,
     mapping_file_name,
-    elbow_curve_plot_file_name,
     ITERATE_0_DIR,
-    FLAT_REQS_FILES_ITERATE_0_DIR,
-    FLAT_RESPS_FILES_ITERATE_0_DIR,
-    PRUNED_FLAT_RESPS_FILES_ITERATE_0_DIR,
+    REQS_FILES_ITERATE_0_DIR,
+    RESPS_FILES_ITERATE_0_DIR,
+    PRUNED_RESPS_FILES_ITERATE_0_DIR,
     SIMILARITY_METRICS_ITERATE_0_DIR,
     ITERATE_1_DIR,
-    FLAT_REQS_FILES_ITERATE_1_DIR,
-    FLAT_RESPS_FILES_ITERATE_1_DIR,
+    REQS_FILES_ITERATE_1_DIR,
+    RESPS_FILES_ITERATE_1_DIR,
     SIMILARITY_METRICS_ITERATE_1_DIR,
-    PRUNED_FLAT_RESPS_FILES_ITERATE_1_DIR,
+    PRUNED_RESPS_FILES_ITERATE_1_DIR,
 )
 
+logging.info("Successfully imported config")
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -122,13 +128,10 @@ def run_pipeline_2a():
     """
     logger.info("Running pipeline 2a: creating/updating the mapping file.")
 
-    run_upserting_mapping_file_pipeline(
+    run_upserting_mapping_file_pipeline_iter0(
         job_descriptions_file=job_descriptions_json_file,
-        flat_reqs_output_files_dir=FLAT_REQS_FILES_ITERATE_0_DIR,
-        flat_resps_output_files_dir=FLAT_RESPS_FILES_ITERATE_0_DIR,
-        sim_metrics_output_files_dir=SIMILARITY_METRICS_ITERATE_0_DIR,
-        pruned_resps_output_files_dir=PRUNED_FLAT_RESPS_FILES_ITERATE_0_DIR,
-        mapping_file_dir=ITERATE_0_DIR,
+        iteration=0,
+        iteration_dir=ITERATE_0_DIR,
         mapping_file_name=mapping_file_name,
     )
     logger.info("Finished running pipeline 2a: creating/updating the mapping file.")
@@ -216,7 +219,7 @@ def run_pipeline_2f():
         "elbow_curve_plot_file": elbow_curve_plot_file,
     }
     run_resume_pruning_pipeline(
-        mapping_file=mapping_file,
+        mapping_file=str(mapping_file),
         pruning_method="elbow",
         group_by_responsibility=False,
         **elbow_method_specific_params,
@@ -229,28 +232,45 @@ def run_pipeline_2f():
     return
 
 
-def run_pipeline_3a():
+def run_pipeline_2g():
     """Pipeline to set up I/O folders, files, and file names for Iteration 0"""
 
     logger.info("Running pipeline 3a: setting up I/O for iteration 0.")
 
-    run_new_iteration_IO_setup_pipeline(
-        previous_flat_reqs_output_files_dir=FLAT_REQS_FILES_ITERATE_0_DIR,
-        job_descriptions_file=job_descriptions_json_file,
-        flat_reqs_output_files_dir=FLAT_REQS_FILES_ITERATE_1_DIR,
-        flat_resps_output_files_dir=FLAT_RESPS_FILES_ITERATE_1_DIR,
-        sim_metrics_output_files_dir=SIMILARITY_METRICS_ITERATE_1_DIR,
-        pruned_resps_output_files_dir=PRUNED_FLAT_RESPS_FILES_ITERATE_1_DIR,
-        mapping_file_dir=ITERATE_1_DIR,
-        mapping_file_name=mapping_file_name,
-    )
+    mapping_file = ITERATE_0_DIR / mapping_file_name
+    run_pruned_resps_files_duplication_mini_pipeline(mapping_file)
 
     logger.info("Finished running pipeline 3a: setting up I/O for iteration 0.")
 
 
-def run_pipeline_3b():
+def run_pipeline_3a():
+    """
+    Pipeline for creating/updating the mapping file:
+    - Copy requirements files from previous iteration directory
+    to the current iteration directory
+    - Create the mapping file for this iteration
+    """
+    logger.info("Running pipeline 2a: creating/updating the mapping file.")
 
-    logger.info("Running pipeline 3b: modifying repsonsibilties based on requirments.")
+    # Run pipeline
+    run_upserting_mapping_file_pipeline_iter1(
+        job_descriptions_file=job_descriptions_json_file,
+        iteration=1,
+        iteration_dir=ITERATE_1_DIR,
+        mapping_file_name=mapping_file_name,
+    )
+
+    logger.info("Finished running pipeline 2a: creating/updating the mapping file.")
+
+
+def run_pipeline_3b():
+    """
+    Pipeline for modifying responsibilities text based on requirements using LLM.
+    """
+    logger.info(
+        "Running pipeline 3a: modifying responsibilities text based on requirements \
+                with OpenAI API"
+    )
 
     # Run the pipeline for all responsibilities files
 
@@ -269,13 +289,13 @@ def run_pipeline_3b():
     )
 
 
-def run_pipeline_4c():
+def run_pipeline_4d():
     """Pipeline for re-run resume evaluation"""
     logger.info("Running pipeline 4...")
     re_run_resume_comparison_pipeline(
         requirements_file=requirements_flat_json_file,
         responsibilities_file=modified_resps_flat_iter_1_json_file,
-        csv_file=resp_req_sim_metrics_1_csv_file,
+        sim_metrics_file=resp_req_sim_metrics_1_csv_file,
     )
 
 
@@ -366,4 +386,4 @@ async def main_async():
 if __name__ == "__main__":
     # asyncio.run(main_async())
     # main()
-    run_pipeline_2e()
+    run_pipeline_2a()

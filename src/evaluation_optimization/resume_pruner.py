@@ -12,7 +12,9 @@ from scipy.spatial.distance import cdist
 from kneed import KneeLocator
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
+import matplotlib
 
+matplotlib.use("Agg")
 
 logger = logging.getLogger(__name__)
 

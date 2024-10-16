@@ -4,37 +4,88 @@ import logging
 from typing import Union
 from tqdm import tqdm
 from joblib import Parallel, delayed
+from src.models.resume_and_job_description_models import (
+    OptimizedText,
+    ResponsibilityMatch,
+    ResponsibilityMatches,
+    ResponsibilityInput,
+    RequirementsInput,
+)
 from evaluation_optimization.resume_editor import TextEditor
 from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
 from evaluation_optimization.metrics_calculator import categorize_scores
-from evaluation_optimization.evaluation_optimization_utils import (
-    get_new_urls_and_metrics_file_paths,
-    get_new_urls_and_flat_json_file_paths,
-    process_and_save_requirements_by_url,
-    process_and_save_responsibilities_from_resume,
-)
 from evaluation_optimization.resumes_editing import modify_multi_resps_based_on_reqs
-from utils.generic_utils import read_from_json_file, save_to_json_file
+from utils.generic_utils import (
+    read_from_json_file,
+    save_to_json_file,
+    verify_dir,
+    verify_file,
+)
 
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 
+def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict:
+    """
+    Check if the keys (URLs) in the previous and current mapping files are the same.
+
+    Args:
+        file_mapping_prev (dict): Dictionary loaded from the previous mapping file.
+        file_mapping_curr (dict): Dictionary loaded from the current mapping file.
+
+    Returns:
+        dict: A dictionary containing the keys that are only in the previous or only
+        in the current file.
+
+    Raises:
+        ValueError: If there are differences in the keys between the two mapping files.
+    """
+    prev_keys = set(file_mapping_prev.keys())
+    curr_keys = set(file_mapping_curr.keys())
+
+    # Find keys that are only in one of the mappings
+    missing_in_prev = curr_keys - prev_keys
+    missing_in_curr = prev_keys - curr_keys
+
+    if missing_in_prev or missing_in_curr:
+        error_message = (
+            f"Key mismatch detected:\n"
+            f"Missing in previous mapping: {missing_in_prev}\n"
+            f"Missing in current mapping: {missing_in_curr}"
+        )
+        raise ValueError(error_message)
+
+    return {
+        "missing_in_prev": missing_in_prev,
+        "missing_in_curr": missing_in_curr,
+    }
+
+
 def set_directory_paths(
     mapping_file_prev: Union[str, Path], mapping_file_curr: Union[str, Path]
 ) -> dict:
     """
-    Set up directory and file paths based on the mapping files from the previous and current iterations.
+    Run the pipeline to modify responsibilities based on the previous and current mapping files.
+    The pipeline uses joblib to process jobs in parallel.
 
     Args:
-        mapping_file_prev (Union[str, Path]): Path to the mapping file from the previous iteration.
+        mapping_file_prev (Union[str, Path]): Path to the mapping file for the previous iteration.
         mapping_file_curr (Union[str, Path]): Path to the mapping file for the current iteration.
+        model (str, optional): Model name to be used for modifications. Defaults to 'openai'.
+        model_id (str, optional): Specific model version to be used. Defaults to 'gpt-3.5-turbo'.
+        n_jobs (int, optional): Number of parallel jobs. Defaults to -1 (use all available).
 
     Returns:
-        dict: A dictionary containing paths for requirements, responsibilities, and output directories.
+        None: The function modifies responsibilities and saves the results to output files.
+        If the output file already exists for a URL, the function will skip processing
+        for that URL.
     """
+
     # Load the mapping files
+    mapping_file_curr = Path(mapping_file_curr)
+    mapping_file_prev = Path(mapping_file_prev)
     try:
         file_mapping_prev = read_from_json_file(mapping_file_prev)
         file_mapping_curr = read_from_json_file(mapping_file_curr)
@@ -50,6 +101,22 @@ def set_directory_paths(
         logger.error(f"Error loading mapping files: {e}")
         return {}
 
+    # Ensure both mapping files are valid dictionaries (not None)
+    if not isinstance(file_mapping_prev, dict) or not isinstance(
+        file_mapping_curr, dict
+    ):
+        logger.error(
+            "Failed to load one or both mapping files. They are not dictionaries."
+        )
+        return {}
+
+    # Check if the keys (URLs) are the same in both mappings
+    try:
+        check_mapping_keys(file_mapping_prev, file_mapping_curr)
+    except ValueError as e:
+        logger.error(f"Error during key validation: {e}")
+        return {}
+
     # Set directory paths using both the previous and current mapping files
     paths_dict = {}
     for url, prev_paths in file_mapping_prev.items():
@@ -61,15 +128,20 @@ def set_directory_paths(
 
         curr_paths = file_mapping_curr[url]
         paths_dict[url] = {
-            "reqs_flat": Path(prev_paths["reqs_flat"]),
-            "pruned_resps_flat": Path(prev_paths["pruned_resps_flat"]),
-            "resps_modified": Path(curr_paths["resps_flat"]).parent / "resps_modified",
+            "requirements_input": Path(prev_paths["reqs"]),
+            "responsibilities_input": Path(prev_paths["pruned_resps"]),
+            "responsibilities_output": Path(curr_paths["resps"]),
         }
 
-        # Ensure the output directory exists;
-        # exist_ok=True allows the mkdir function to proceed without any issue
-        # if the directory already exists.
-        paths_dict[url]["resps_modified"].mkdir(parents=True, exist_ok=True)
+        # Verify the file paths and directory paths
+        if not verify_file(paths_dict[url]["requirements_input"]):
+            logger.error(f"Missing requirements file for {url}. Skipping URL.")
+            continue
+        if not verify_file(paths_dict[url]["responsibilities_input"]):
+            logger.error(
+                f"Missing pruned responsibilities file for {url}. Skipping URL."
+            )
+            continue
 
     logger.info(f"Directory path dictionary:\n{paths_dict}")
     return paths_dict
@@ -96,7 +168,11 @@ def run_pipeline(
     Returns:
         None
     """
-    # Step 1: Set up directory and file paths
+    # Step 0: Ensure mapping file paths are Path objects
+    mapping_file_prev = Path(mapping_file_prev)
+    mapping_file_curr = Path(mapping_file_curr)
+
+    # Step 1: Setup directory and file paths
     paths_dict = set_directory_paths(mapping_file_prev, mapping_file_curr)
     if not paths_dict:
         logger.error("Failed to set up directory paths.")
@@ -106,10 +182,16 @@ def run_pipeline(
     for url, paths in paths_dict.items():
         logger.info(f"Processing job posting from {url}")
 
+        # *Early return if the output file already exists
+        output_file = paths["responsibilities_output"]
+        if output_file.exists():
+            logger.info(f"Output file already exists for {url}, skipping processing.")
+            continue  # Skip further processing for this URL
+
         try:
             # Extract file paths for requirements and pruned responsibilities
-            reqs_file = paths["reqs_flat"]
-            resps_file = paths["pruned_resps_flat"]
+            reqs_file = paths["requirements_input"]
+            resps_file = paths["responsibilities_input"]
 
             # Load responsibilities and requirements files
             if not reqs_file.exists() or not resps_file.exists():
@@ -121,6 +203,12 @@ def run_pipeline(
             if not responsibilities or not requirements:
                 raise ValueError(f"Files are empty for {url}")
 
+            # Use Pydantic for validation
+            validated_responsibilities = ResponsibilityInput(
+                responsibilities=responsibilities
+            )
+            validated_requirements = RequirementsInput(requirements=requirements)
+
         except (FileNotFoundError, ValueError) as error:
             logger.error(error)
             continue
@@ -130,68 +218,17 @@ def run_pipeline(
             total=len(responsibilities), desc=f"Modifying responsibilities for {url}"
         ) as pbar:
             modified_resps = modify_multi_resps_based_on_reqs(
-                responsibilities=responsibilities,
-                requirements=requirements,
+                responsibilities=validated_responsibilities.responsibilities,
+                requirements=validated_requirements.requirements,
                 model=model,
                 model_id=model_id,
                 n_jobs=n_jobs,
-            )
+            )  # the function returns a pyd object
             pbar.update(1)
 
         # Step 4: Save the modified responsibilities
-        output_file = paths["resps_modified"] / resps_file.name.replace(
-            "pruned_resps_flat", "modified_resps_flat"
-        )
-        save_to_json_file(modified_resps, output_file)
+        output_file = paths["resps_curr"]
+        save_to_json_file(modified_resps.model_dump(), output_file)
         logger.info(f"Modified responsibilities for {url} saved to {output_file}")
 
     logger.info("Pipeline execution completed.")
-
-
-# def run_pipeline(
-#     responsibilities_flat_json_file,
-#     requirements_flat_json_file,
-#     modified_resps_flat_json_file,
-# ):
-#     """Pipeline to modify resume"""
-
-#     # Step 1. Read responsibility vs requirement similarity metrics JSON files
-#     if not (
-#         os.path.exists(responsibilities_flat_json_file)
-#         and os.path.exists(requirements_flat_json_file)
-#     ):
-#         raise FileNotFoundError("One or both of the JSON files do not exist.")
-
-#     else:
-#         # Step 1. Read both dictionaries into
-#         resps_flat = read_from_json_file(responsibilities_flat_json_file)
-#         reqs_flat = read_from_json_file(requirements_flat_json_file)
-
-#         # Step 2. Exclude certain responsibilities from modification
-#         # (to be added back afterwards-factual statements like "promoted to ... in ...")
-
-
-#         # Step 3: Modify responsibility texts
-#         gpt3 = "gpt-3.5-turbo"
-#         gpt4 = "gpt-4-turbo"
-
-#         # modified_resps = modify_responsibilities_based_on_requirements(
-#         #     responsibilities=resps_flat,
-#         #     requirements=reqs_flat,
-#         #     TextEditor=TextEditor,  # Pass the class instance
-#         #     model="openai",
-#         #     model_id=gpt3,
-#         # )
-#         with tqdm(total=len(resps_flat), desc="Modifying Responsibilities") as pbar:
-#             modified_resps = modify_multi_resps_based_on_reqs(
-#                 responsibilities=resps_flat,
-#                 requirements=reqs_flat,
-#                 TextEditor=TextEditor,  # Pass your TextEditor class here
-#                 model="openai",
-#                 model_id="gpt-3.5-turbo",
-#                 n_jobs=-1,
-#             )
-#             pbar.update(1)  # Update progress bar
-
-#         # Step 4: Save modified responsibilities
-#         save_to_json_file(modified_resps, modified_resps_flat_json_file)

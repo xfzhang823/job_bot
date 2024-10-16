@@ -23,7 +23,8 @@ from utils.generic_utils_async import (
     save_to_csv_async,
 )
 from utils.generic_utils import pretty_print_json, get_company_and_job_title_from_json
-from config import job_descriptions_json_file
+
+# from config import job_descriptions_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
     get_new_urls_and_metrics_file_paths,
     get_new_urls_and_flat_json_file_paths,

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 import pandas as pd
 from pydantic import BaseModel, ValidationError
 from typing import Union
-from models.base_models import (
+from src.models.llm_response_models import (
     CodeResponse,
     JSONResponse,
     TabularResponse,

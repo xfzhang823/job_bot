@@ -21,7 +21,7 @@ from prompts.prompt_templates import (
 )
 from utils.llm_data_utils import get_openai_api_key, call_openai_api, call_llama3
 from utils.validation_utils import validate_json_response
-from models.base_models import EditingResponseModel
+from src.models.llm_response_models import EditingResponseModel
 
 # logging
 logger = logging.getLogger(__name__)
