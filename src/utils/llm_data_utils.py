@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 import pandas as pd
 from pydantic import BaseModel, ValidationError
 from typing import Union
-from src.models.llm_response_models import (
+import openai
+from openai import OpenAI
+import ollama
+from models.llm_response_models import (
     CodeResponse,
     JSONResponse,
     TabularResponse,
@@ -18,9 +21,7 @@ from src.models.llm_response_models import (
     EditingResponseModel,
     JobSiteResponseModel,
 )
-import openai
-from openai import OpenAI
-import ollama
+from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
 
 # Import necessary modules for OpenAI and similarity scoring
 # from openai_module import OpenAI, get_openai_api_key  # Ensure correct import paths
@@ -32,7 +33,7 @@ def call_openai_api(
     client=None,
     model_id="gpt-4-turbo",
     expected_res_type="str",
-    context_type: str = None,  # Use this to determine which JSON model to use
+    context_type: str = "",  # Use this to determine which JSON model to use
     temperature=0.4,
     max_tokens=1056,
 ) -> Union[
@@ -102,7 +103,7 @@ def call_openai_api(
         if expected_res_type == "str":
             # Return plain string wrapped in a Pydantic model
             parsed_response = TextResponse(content=response_content)
-            return parsed_response.content  # return as plain string instead the model
+            return parsed_response  # return as plain string instead the model
 
         elif expected_res_type == "json":
             try:
@@ -121,6 +122,7 @@ def call_openai_api(
 
                 elif context_type == "job_site":
                     return JobSiteResponseModel(
+                        url=response_dict.get("url"),
                         job_title=response_dict.get("job_title"),
                         company=response_dict.get("company"),
                         location=response_dict.get("location"),

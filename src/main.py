@@ -42,13 +42,16 @@ from pipelines.resume_editing_pipeline import (
     run_pipeline as run_resume_editting_pipeline,
 )
 from pipelines.resume_eval_pipeline import (
-    metrics_reprocessing_pipeline as re_run_resume_comparison_pipeline,
+    metrics_re_processing_pipeline as re_run_resume_comparison_pipeline,
 )
 from pipelines.resume_eval_pipeline_async import (
     metrics_processing_pipeline_async as run_resume_comparison_pipeline_async,
 )
 from pipelines.resume_eval_pipeline_async import (
     multivariate_indices_processing_mini_pipeline_async as run_adding_multivariate_indices_mini_pipeline_async,
+)
+from pipelines.resume_editing_pipeline_async import (
+    run_pipeline_async as run_resume_editting_pipeline_async,
 )
 
 # Add logging before imports
@@ -61,6 +64,7 @@ from config import (
     # modified_resps_flat_iter_1_json_file,
     # modified_resps_flat_iter_2_json_file,
     mapping_file_name,
+    elbow_curve_plot_file_name,
     ITERATE_0_DIR,
     REQS_FILES_ITERATE_0_DIR,
     RESPS_FILES_ITERATE_0_DIR,
@@ -190,16 +194,29 @@ def run_pipeline_2d():
 
 
 def run_pipeline_2e():
-    """Exclude certain responsibilities from eval and optimization"""
-    logger.info("Running pipeline 2e: excluding certain responsibilities")
+    """Pipeline to copy files & exlcude:
+    - copy fles in responsilities folder to pruned_responsibilities folder, and
+    - exclude certain responsibilities (not to be modified/analyzed but need
+    to add back in the final stage)
+    """
 
-    mapping_file_path = ITERATE_0_DIR / mapping_file_name
+    logger.info(
+        "Running pipeline 2e: copying fles to pruned_responsibilities folder and exclude certain responsibilities."
+    )
 
-    run_excluding_responsibilities_mini_pipeline(mapping_file_path)
-    logger.info("Finished running pipeline 2e: excluding certain responsibilities")
+    mapping_file = ITERATE_0_DIR / mapping_file_name
+
+    # Copy files to the folder
+    run_pruned_resps_files_duplication_mini_pipeline(mapping_file)
+
+    # Exclude factual responsibilities text
+    run_excluding_responsibilities_mini_pipeline(mapping_file)
+    logger.info(
+        "Finished running pipeline 2e: copying fles to pruned_responsibilities folder and exclude certain responsibilities."
+    )
 
 
-def run_pipeline_2f():
+def run_pipeline_2f():  # for now do not run this - skip!!!!
     """Prune responsibilities"""
     logger.info(
         "Running pipeline 2e: prune resume responsibilities based on its alignment scores \
@@ -232,25 +249,12 @@ def run_pipeline_2f():
     return
 
 
-def run_pipeline_2g():
-    """Pipeline to set up I/O folders, files, and file names for Iteration 0"""
-
-    logger.info("Running pipeline 3a: setting up I/O for iteration 0.")
-
-    mapping_file = ITERATE_0_DIR / mapping_file_name
-    run_pruned_resps_files_duplication_mini_pipeline(mapping_file)
-
-    logger.info("Finished running pipeline 3a: setting up I/O for iteration 0.")
-
-
 def run_pipeline_3a():
+    pipe_num = "3a"
     """
-    Pipeline for creating/updating the mapping file:
-    - Copy requirements files from previous iteration directory
-    to the current iteration directory
-    - Create the mapping file for this iteration
+    Pipeline for creating/updating the mapping file.
     """
-    logger.info("Running pipeline 2a: creating/updating the mapping file.")
+    logger.info(f"Running pipeline {pipe_num}: creating/updating the mapping file.")
 
     # Run pipeline
     run_upserting_mapping_file_pipeline_iter1(
@@ -260,42 +264,69 @@ def run_pipeline_3a():
         mapping_file_name=mapping_file_name,
     )
 
-    logger.info("Finished running pipeline 2a: creating/updating the mapping file.")
+    logger.info(
+        f"Finished running pipeline {pipe_num}: creating/updating the mapping file."
+    )
 
 
 def run_pipeline_3b():
     """
     Pipeline for modifying responsibilities text based on requirements using LLM.
     """
+    pipe_num = "3b"
     logger.info(
-        "Running pipeline 3a: modifying responsibilities text based on requirements \
+        f"Running pipeline {pipe_num}: modifying responsibilities text based on requirements \
                 with OpenAI API"
     )
 
     # Run the pipeline for all responsibilities files
 
-    mapping_file_path_curr = ITERATE_1_DIR / mapping_file_name
-    mapping_file_path_prev = ITERATE_0_DIR / mapping_file_name
+    mapping_file_curr_path = ITERATE_1_DIR / mapping_file_name
+    mapping_file_prev_path = ITERATE_0_DIR / mapping_file_name
 
     run_resume_editting_pipeline(
-        mapping_file_prev=mapping_file_path_prev,
-        mapping_file_curr=mapping_file_path_curr,
+        mapping_file_prev=mapping_file_prev_path,
+        mapping_file_curr=mapping_file_curr_path,
         model="openai",
         model_id="gpt-4-turbo",
     )
 
     logger.info(
-        "Finished running pipeline 3b: modifying repsonsibilties based on requirments."
+        f"Finished running pipeline {pipe_num}: modifying responsibilities based on requirments."
     )
 
 
-def run_pipeline_4d():
-    """Pipeline for re-run resume evaluation"""
-    logger.info("Running pipeline 4...")
-    re_run_resume_comparison_pipeline(
-        requirements_file=requirements_flat_json_file,
-        responsibilities_file=modified_resps_flat_iter_1_json_file,
-        sim_metrics_file=resp_req_sim_metrics_1_csv_file,
+def run_pipeline_3c():
+    pipe_num = "3c"
+    logger.info(
+        f"Running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
+                to generate similarity related metrics."
+    )
+    mapping_file = ITERATE_1_DIR / mapping_file_name
+
+    logger.info("Running pipeline {pipe_num}: ...")
+    re_run_resume_comparison_pipeline(mapping_file)
+
+    logger.info(
+        f"Finish running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
+                to generate similarity related metrics."
+    )
+
+
+def run_pipeline_3d():
+    pipe_num = "3d"
+    logger.info(
+        f"Running pipeline {pipe_num}: adding multivariate indices to metrics files"
+    )
+
+    # Set data_directory
+    csv_files_dir = SIMILARITY_METRICS_ITERATE_1_DIR
+
+    # Run pipeline
+    run_adding_multivariate_indices_mini_pipeline(csv_files_dir)
+
+    logger.info(
+        f"Finish running pipeline {pipe_num}: adding multivariate indices to metrics files"
     )
 
 
@@ -368,12 +399,45 @@ async def run_pipeline_2d_async():
     logger.info("Finished running pipeline 2b: adding indices to metrics csv files.")
 
 
+async def run_pipeline_3b_async():
+    """
+    Pipeline for modifying responsibilities text based on requirements using LLM.
+    """
+    pipe_num = "3b async"
+    logger.info(
+        f"Running pipeline {pipe_num}: modifying responsibilities text based on requirements \
+                with OpenAI API"
+    )
+
+    # Run the pipeline for all responsibilities files
+
+    mapping_file_curr_path = ITERATE_1_DIR / mapping_file_name
+    mapping_file_prev_path = ITERATE_0_DIR / mapping_file_name
+
+    await run_resume_editting_pipeline_async(
+        mapping_file_prev=mapping_file_prev_path,
+        mapping_file_curr=mapping_file_curr_path,
+        model="openai",
+        model_id="gpt-4-turbo",
+    )
+
+    logger.info(
+        f"Finished running pipeline {pipe_num}: modifying responsibilities based on requirments."
+    )
+
+
 def main():
     """main to run the pipelines"""
-    run_pipeline_1()
-    run_pipeline_2a()
-    run_pipeline_2b()
-    run_pipeline_2c()
+    # run_pipeline_1()
+    # run_pipeline_2a()
+    # run_pipeline_2b()
+    # run_pipeline_2c()
+    # run_pipeline_2d()
+    # run_pipeline_2e()
+    # run_pipeline_3a()
+    asyncio.run(run_pipeline_3b_async())
+    run_pipeline_3c()
+    run_pipeline_3d()
 
 
 async def main_async():
@@ -385,5 +449,5 @@ async def main_async():
 
 if __name__ == "__main__":
     # asyncio.run(main_async())
-    # main()
-    run_pipeline_2a()
+    # run_pipeline_3a()
+    main()

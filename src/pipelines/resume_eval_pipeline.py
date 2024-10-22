@@ -5,8 +5,10 @@ import re
 import logging
 import logging_config
 import json
-from typing import Callable
-from pydantic import ValidationError
+import pandas as pd
+from pydantic import ValidationError, HttpUrl
+from typing import Callable, Union, Optional
+from models.resume_job_description_io_models import JobFileMappings
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 from evaluation_optimization.text_similarity_finder import TextSimilarity
@@ -16,13 +18,21 @@ from evaluation_optimization.metrics_calculator import (
     calculate_text_similarity_metrics,
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
+from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
 from utils.generic_utils import read_from_json_file, validate_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
     get_new_urls_and_file_names,
     get_new_urls_and_metrics_file_paths,
     get_files_wo_multivariate_indices,
 )
-from src.models.resume_and_job_description_models import ResponsibilityMatches
+from models.resume_job_description_io_models import (
+    ResponsibilityMatches,
+    Responsibilites,
+    Requirements,
+    SimilarityMetrics,
+    PipelineInput,
+)
+
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -63,64 +73,129 @@ def add_multivariate_indices(df):
 
 
 def generate_metrics_from_flat_json(
-    reqs_flat_file: Path, resps_flat_file: Path, metrics_csv_file: Path
+    reqs_flat_file: Path,
+    resps_flat_file: Path,
+    metrics_csv_file: Path,
+    calculate_metrics: Callable[
+        [dict, dict], pd.DataFrame
+    ] = calculate_many_to_many_similarity_metrices,
+    categorize_scores: Callable[
+        [pd.DataFrame], pd.DataFrame
+    ] = categorize_scores_for_df,
 ) -> None:
     """
     Generate similarity metrics between flattened responsibilities and requirements
-    and save to a CSV file.
+    and save them to a CSV file after validating the input data.
 
     Args:
         reqs_flat_file (Path): Path to the pre-flattened requirements JSON file.
         resps_flat_file (Path): Path to the pre-flattened responsibilities JSON file.
-        csv_file (Path): Path where the output CSV file should be saved.
+        metrics_csv_file (Path): Path where the output CSV file should be saved.
+        calculate_similarity (Callable[[dict, dict], pd.DataFrame], optional):
+            Function to calculate similarity metrics. Defaults to
+            calculate_many_to_many_similarity_metrices.
+        categorize_scores (Callable[[pd.DataFrame], pd.DataFrame], optional):
+            Function to categorize similarity scores. Defaults to
+            categorize_scores_for_df.
 
     Returns:
         None
+
+    Logs:
+        - Info messages for successful operations.
+        - Error messages for validation failures or processing issues.
     """
     # Step 1: Load flattened responsibilities from file
     try:
-        resps_flat = read_from_json_file(resps_flat_file)
-        reqs_flat = read_from_json_file(reqs_flat_file)
-
-        # Check if either responsibilities or requirements are empty
-        if not resps_flat or not reqs_flat:
-            logger.error(
-                "One of the required datasets (responsibilities or requirements) is empty."
-            )
-            return
-        if not isinstance(resps_flat, dict) or not isinstance(reqs_flat, dict):
-            logger.error(
-                f"Responsibilities or Requirements data is valid dictionary: {type(resps_flat), type(reqs_flat)}"
-            )
-            return
-    except FileNotFoundError as e:
-        logger.error(f"File not found: {e.filename}")
+        resps_flat_data = read_from_json_file(resps_flat_file)
+        validated_resps = Responsibilites(**resps_flat_data)
+        resps_flat = validated_resps.responsibilities
+        logger.info(f"Validated responsibilities from {resps_flat_file}")
+    except ValidationError as ve:
+        logger.error(f"Validated responsibilities validation error: {ve}")
+        return
+    except FileNotFoundError as fe:
+        logger.error(f"Responsibilities file not found: {fe.filename}")
         return
     except Exception as e:
-        logger.error(f"Error loading files: {e}")
+        logger.error(f"Unexpected error loading responsibilities: {e}")
+        return
+
+    # Step 2: Load and Validate Requirements
+    try:
+        reqs_flat_data = read_from_json_file(reqs_flat_file)
+        validated_reqs = Requirements(**reqs_flat_data)
+        reqs_flat = validated_reqs.requirements
+        logger.info(f"Validated requirements from {reqs_flat_file}")
+    except ValidationError as ve:
+        logger.error(f"Requirements validation error: {ve}")
+        return
+    except FileNotFoundError as fe:
+        logger.error(f"Requirements file not found: {fe.filename}")
+        return
+    except Exception as e:
+        logger.error(f"Unexpected error loading requirements: {e}")
+        return
+
+    # Step 3: Check for Empty Datasets
+    if not resps_flat or not reqs_flat:
+        logger.error(
+            "One of the required datasets (responsibilities or requirements) is empty."
+        )
         return
 
     # Step 4: Calculate similarity metrics - Segment by Segment
-    similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
-    logger.info("Similarity metrics calculated.")
+    try:
+        similarity_df = calculate_metrics(resps_flat, reqs_flat)
+        logger.info("Similarity metrics calculated.")
+    except Exception as e:
+        logger.error(f"Error calculating similarity metrics: {e}")
+        return
 
     # Step 5: Add score category values (high, mid, low)
-    similarity_df = categorize_scores_for_df(similarity_df)
-    logger.info("Similarity metrics score categories created.")
+    try:
+        categorized_df = categorize_scores(similarity_df)
+        logger.info("Similarity metrics score categories created.")
+    except Exception as e:
+        logger.error(f"Error categorizing similarity scores: {e}")
+        return
 
-    # Step 6: Clean up the data by removing newline characters from the DataFrame
-    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
+    # Step 6: Validate similarity metrics rows
+    try:
+        # Iterate through each row and validate using SimilarityMetrics model
+        validated_rows = []
+        for index, row in categorized_df.iterrows():
+            try:
+                similarity_metrics = SimilarityMetrics(**row.to_dict())
+                validated_rows.append(similarity_metrics.model_dump())
+            except ValidationError as ve:
+                logger.error(
+                    f"Similarity metrics validation error at row {index}: {ve}"
+                )
+                continue  # Skip invalid rows
 
-    # Step 7: Ensure the output directory exists and save the CSV file
-    df.to_csv(metrics_csv_file, index=False)
-    logger.info(f"Similarity metrics saved to file ({metrics_csv_file})")
+            # Convert validated rows back to DataFrame
+        if validated_rows:
+            final_df = pd.DataFrame(validated_rows)
+            logger.info("All similarity metrics rows validated successfully.")
+        else:
+            logger.error("No valid similarity metrics data to save.")
+            return
+    except Exception as e:
+        logger.error(f"Error during similarity metrics validation: {e}")
+        return
 
-    logger.info(
-        "Finished running responsibility/requirement alignment scoring pipeline."
-    )
+    # Step 7: Save the Validated Metrics to CSV
+    try:
+        # Ensure the output directory exists
+        metrics_csv_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Display the top rows of the DataFrame for verification
-    print(df.head(5))
+        # Save the DataFrame to CSV
+        final_df.to_csv(metrics_csv_file, index=False)
+        logger.info(f"Similarity metrics saved successfully to {metrics_csv_file}")
+    except Exception as e:
+        logger.error(f"Error saving similarity metrics to CSV: {e}")
+        return
 
 
 def generate_matching_metrics_from_nested_json(
@@ -270,44 +345,134 @@ def unpack_and_combine_json(nested_json, requirements_json):
     return results
 
 
-def multivariate_indices_processing_mini_pipeline(data_directory: str):
+def multivariate_indices_processing_mini_pipeline(
+    data_directory: Union[str, Path],
+    validate_input: bool = True,
+    add_indices_func: Callable[[pd.DataFrame], pd.DataFrame] = add_multivariate_indices,
+) -> None:
     """
     A mini pipeline that processes CSV files in a directory, adding multivariate indices
     (composite and PCA scores) to files that are missing them.
 
-    Parameters:
-    - data_directory: The directory containing the CSV files to process.
+    Args:
+        - data_directory (str | Path): The directory containing the CSV files to process.
+        - validate_input (bool, optional): Whether to validate the input directory. Defaults to True.
+        - add_indices_func (Callable[[pd.DataFrame], pd.DataFrame], optional):
+            Function to add multivariate indices to the DataFrame.
+            Defaults to add_multivariate_indices.
 
     Raises:
     - ValueError if the directory does not exist.
     """
-    if not os.path.exists(data_directory):
-        raise ValueError(f"The provided directory '{data_directory}' does not exist.")
+    # Step 1: Validate the Input Directory
+    if validate_input:
+        try:
+            pipeline_input = PipelineInput(data_directory=data_directory)
+            data_directory = pipeline_input.data_directory  # Now a Path object
+            logger.info(f"Validated data directory: {data_directory}")
+        except ValidationError as ve:
+            logger.error(f"Input validation error: {ve}")
+            raise ValueError(f"Invalid input directory: {ve}") from ve
+
     try:
-        # Find csv files in the right format (with metrics) but missing indices
+        # Step 2: Find CSV files missing multivariate indices
         files_need_to_process = get_files_wo_multivariate_indices(data_directory)
         logger.info(f"Files that need processing: {files_need_to_process}")
 
-        # Iterate to add composite and pca scores
+        # *Explicit Check for Empty List
+        if not files_need_to_process:
+            logger.info("No files require processing. Exiting pipeline.")
+            return  # Early exit
+
+        # Step 3: Iterate to add composite and PCA scores
         for file in files_need_to_process:
+            logger.info(f"Processing file: {file}")
             try:
                 df = pd.read_csv(file)
-                df_wt_indices = add_multivariate_indices(df)
-                df_wt_indices.to_csv(file, index=False)
-                logger.info(f"Successfully processed and saved {file}")
+
+                # Step 4.1: Validate Each Row in the DataFrame
+                validated_rows = []
+                for index, row in df.iterrows():
+                    try:
+                        # Convert the row to a dictionary
+                        row_dict = row.to_dict()
+                        # Validate the row using the SimilarityMetrics model
+                        validated_row = SimilarityMetrics(**row_dict)
+                        # Append the validated row as a dictionary
+                        validated_rows.append(validated_row.dict())
+                    except ValidationError as ve:
+                        logger.error(
+                            f"Validation error in file '{file}', row {index}: {ve}"
+                        )
+                        continue  # Skip invalid rows
+
+                if not validated_rows:
+                    logger.warning(
+                        f"No valid data to process in file '{file}'. Skipping."
+                    )
+                    continue  # Skip to the next file
+
+                # Convert validated rows back to a DataFrame
+                validated_df = pd.DataFrame(validated_rows)
+                logger.info(f"Validated data for file '{file}'.")
+
+                # Step 4.2: Add Multivariate Indices
+                updated_df = add_indices_func(validated_df)
+                logger.info(f"Added multivariate indices to file '{file}'.")
+
+                # Step 4.3: Save the Updated DataFrame to CSV
+                updated_df.to_csv(file, index=False)
+                logger.info(f"Successfully processed and saved '{file}'.")
+
+            except FileNotFoundError as fe:
+                logger.error(f"File not found: {fe.filename}. Skipping.")
+                continue
+            except pd.errors.EmptyDataError:
+                logger.error(f"No data found in file '{file}'. Skipping.")
+                continue
             except Exception as e:
-                logger.error(f"Error processing {file}: {e}")
+                logger.error(f"Unexpected error processing file '{file}': {e}")
+                continue
 
     except Exception as e:
         logger.error(f"Error during pipeline processing: {e}")
+        raise  # Re-raise the exception after logging
 
     logger.info(
-        f"Successfully added multivariate indices to {len(files_need_to_process)} files."
+        f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
     )
 
+    # try:
+    #     # Step 3: Find CSV files missing multivariate indices
+    #     files_need_to_process = get_files_wo_multivariate_indices(data_directory)
+    #     logger.info(f"Files that need processing: {files_need_to_process}")
 
+    #     # Step 4: Iterate to add composite and PCA scores
+    #     for file in files_need_to_process:
+    #         logger.info(f"Processing file: {file}")
+    #         try:
+    #             df = pd.read_csv(file)
+    #     # Iterate to add composite and pca scores
+    #     for file in files_need_to_process:
+    #         try:
+    #             df = pd.read_csv(file)
+    #             df_wt_indices = add_multivariate_indices(df)
+    #             df_wt_indices.to_csv(file, index=False)
+    #             logger.info(f"Successfully processed and saved {file}")
+    #         except Exception as e:
+    #             logger.error(f"Error processing {file}: {e}")
+
+    # except Exception as e:
+    #     logger.error(f"Error during pipeline processing: {e}")
+
+    # logger.info(
+    #     f"Successfully added multivariate indices to {len(files_need_to_process)} files."
+    # )
+
+
+# Running pipeline with pydantic model validation
 def metrics_processing_pipeline(
-    mapping_file: str,
+    mapping_file: Union[str, Path],
     generate_metrics: Callable[
         [Path, Path, Path], None
     ] = generate_metrics_from_flat_json,
@@ -324,27 +489,25 @@ def metrics_processing_pipeline(
     """
     logger.info("Start running responsibility/requirement alignment scoring pipeline.")
 
-    # Step 1.0: Read the mapping file
-    try:
-        # Step 1: Read and validate the mapping file
-        file_mapping = read_from_json_file(mapping_file)
-        if not isinstance(file_mapping, dict):
-            raise ValueError(f"Expected a dictionary but got {type(file_mapping)}")
+    # Ensure that mapping_file is turned into Path obj (if not)
+    mapping_file = Path(mapping_file)
 
-        logger.info(f"Loaded and validated mapping file from {mapping_file}")
+    # Step 1: Read and validate the mapping file
+    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+        mapping_file
+    )
 
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Error with mapping file {mapping_file}: {e}")
+    if file_mappings_model is None:
+        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
         return
-    except Exception as e:
-        logger.error(f"Unexpected error loading mapping file: {e}")
-        return
+
+    file_mappings_dict = file_mappings_model.root
 
     # Step 2: Check if all sim_metrics files exist
     missing_metrics = {
-        url: mapping["sim_metrics"]
-        for url, mapping in file_mapping.items()
-        if not Path(mapping["sim_metrics"]).exists()
+        url: mapping.sim_metrics
+        for url, mapping in file_mappings_dict.items()
+        if not Path(mapping.sim_metrics).exists()
     }
 
     # *Check if metrics are already processed (no missing files)
@@ -357,8 +520,11 @@ def metrics_processing_pipeline(
         logger.info(f"Processing missing metrics for {url}")
 
         # Load the requirements and responsibilities files from the mapping
-        reqs_file = Path(file_mapping[url]["reqs"])
-        resps_file = Path(file_mapping[url]["resps"])
+        reqs_file = Path(file_mappings_dict[url].reqs)
+        resps_file = Path(file_mappings_dict[url].resps)
+
+        # Convert sim_metrics_file to Path object if it's not already
+        sim_metrics_file = Path(sim_metrics_file)
 
         # Step 3.1: Check if reqs and resps files exist
         if not reqs_file.exists() or not resps_file.exists():
@@ -374,44 +540,41 @@ def metrics_processing_pipeline(
     logger.info("Finished processing all missing sim_metrics files.")
 
 
-# Pipeline to process eval for modified responsibilities
-def metrics_reprocessing_pipeline(
+# Pipeline to process eval again for modified responsibilities
+def metrics_re_processing_pipeline(
     mapping_file,
     generate_metrics: Callable[
         [Path, Path, Path], None
     ] = generate_matching_metrics_from_nested_json,
 ) -> None:
     """
-    Re-run pipeline to process and create missing sim_metrics files by reading from
-    the mapping file.
+    Re-run the pipeline to process and create missing sim_metrics files by reading from the mapping file.
 
     Args:
-        mapping_file (str or Path): Path to the JSON mapping file.
-        generate_metrics_func (Callable[[Path, Path, Path], None]): Function to generate
-        the metrics CSV file.
+        mapping_file (str | Path): Path to the JSON mapping file.
+        generate_metrics (Callable[[Path, Path, Path], None], optional):
+            Function to generate the metrics CSV file. Defaults to
+            generate_matching_metrics_from_nested_json.
 
     Returns:
         None
     """
-    try:
-        file_mapping = read_from_json_file(mapping_file)
-        if not isinstance(file_mapping, dict):
-            raise ValueError(f"Expected a dictionary but got {type(file_mapping)}")
+    # Step 1: Read / Validate file mapping
+    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+        mapping_file
+    )
 
-        logger.info(f"Loaded and validated mapping file from {mapping_file}")
+    if file_mappings_model is None:
+        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
+        return
 
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Error with mapping file {mapping_file}: {e}")
-        return
-    except Exception as e:
-        logger.error(f"Unexpected error loading mapping file: {e}")
-        return
+    file_mappings_dict = file_mappings_model.root
 
     # Step 2: Check if all sim_metrics files exist
     missing_metrics = {
-        url: mapping["sim_metrics"]
-        for url, mapping in file_mapping.items()
-        if not Path(mapping["sim_metrics"]).exists()
+        url: mapping.sim_metrics
+        for url, mapping in file_mappings_dict.items()
+        if not Path(mapping.sim_metrics).exists()
     }
 
     if not missing_metrics:
@@ -422,12 +585,15 @@ def metrics_reprocessing_pipeline(
     for url, sim_metrics_file in missing_metrics.items():
         logger.info(f"Processing missing metrics for {url}")
 
+        # Convert sim_metrics_file to Path object if it's not already
+        sim_metrics_file = Path(sim_metrics_file)
+
         # Load the requirements and responsibilities files from the mapping
-        reqs_file = Path(file_mapping[url]["reqs"])
-        resps_file = Path(file_mapping[url]["resps"])
+        reqs_file = Path(file_mappings_dict[url].reqs)
+        resps_file = Path(file_mappings_dict[url].resps)
 
         # Step 3.1: Check if reqs and resps files exist and are valid JSON files
-        if not validate_json_file(reqs_file) or not validate_json_file(resps_file):
+        if not reqs_file.exists() or not resps_file.exists():
             logger.error(f"Skipping {url} due to invalid files.")
             continue
 
@@ -436,95 +602,3 @@ def metrics_reprocessing_pipeline(
         logger.info(f"Generated metrics for {url} and saved to {sim_metrics_file}")
 
     logger.info("Finished processing all missing sim_metrics files.")
-
-
-# def metrics_preprocessing_mini_pipeline(job_descriptions_file, output_dir):
-#     """
-#     Preprocess job descriptions for evaluation by identifying new URLs to process.
-
-#     Args:
-#         job_descriptions_file (str or Path): Path to the JSON file containing job descriptions.
-#         output_dir (str or Path, optional): Directory where output files are stored.
-#             Defaults to METRICS_OUTPUTS_CSV_FILES_DIR / "iteration_0".
-
-#     Returns:
-#         Dict: A dictionary of new URLs that need to be processed and their file paths to be saved.
-#     """
-#     job_descriptions = read_from_json_file(job_descriptions_file)
-#     if not job_descriptions:
-#         logger.error("No job descriptions loaded. Exiting.")
-#         return {}
-
-#     new_urls_and_f_names = get_new_urls_and_metrics_file_paths(
-#         job_descriptions, output_dir
-#     )
-#     logger.info(f"Found {len(new_urls_and_f_names)} new URLs to process.")
-#     return new_urls_and_f_names  # a dict
-
-
-# def metrics_processing_pipeline(
-#     url: str, requirements_json_file: str, resume_json_file: str, csv_file: str
-# ):
-
-#     logger.info("Start running responsibility/requirement alignment scoring pipeline.")
-
-#     # Step 1: Parse and flatten responsibilities from resume (as a dict)
-#     resume_parser = ResumeParser(resume_json_file)
-#     resps_flat = resume_parser.extract_and_flatten_responsibilities()  # dict
-
-#     # Step 2: Parse and flatten job requirements (as a dict) or
-#     # parse/flatten/concatenate into a single string
-#     job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
-#     reqs_flat = job_reqs_parser.extract_flatten_reqs()  # dict
-
-#     # Check if either responsibilities or requirements are empty
-#     if not resps_flat or not reqs_flat:
-#         logger.error(
-#             "One of the required datasets (responsibilities or requirements) is empty."
-#         )
-#         return
-
-#     # Step 3. Calculate and display similarity metrics - Segment by Segment
-#     similarity_df = calculate_many_to_many_similarity_metrices(resps_flat, reqs_flat)
-#     logger.info("Similarity metrics calculated.")  # Changed to logger
-
-#     # Step 4. Add score category values (high, mid, low)
-#     # Translate DataFrame columns to match expected column names
-#     similarity_df = categorize_scores_for_df(similarity_df)
-#     logger.info("Similarity metrics score categories created.")
-
-#     # Step 5. Clean up the data by removing newline characters from the DataFrame
-#     df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-
-#     # Step 6. Ensure the output directory exists and save the CSV file
-#     df.to_csv(csv_file, index=False)  # Save to the correct path
-#     logger.info(f"Similarity metrics saved to file ({csv_file})")
-
-#     logger.info(
-#         "Finished running responsibility/requirement alignment scoring pipeline."
-#     )
-
-#     # Display the top rows of the DataFrame for verification
-#     print(df.head(5))  # Updated display to print for non-interactive environments
-#     logger.info(
-#         f"Finished running responsibility/requirement alignment scoring pipeline for {url}."
-#     )
-#     print("\n\n")
-
-
-# def get_metrics_file_paths(mapping_file, output_dir):
-#     """
-#     Get a dictionary of URLs and their corresponding metrics file paths.
-
-#     Args:
-#         mapping_file_path (str or Path): Path to the JSON mapping file.
-#         output_dir (str or Path): Directory where the new metrics files will be created.
-
-#     Returns:
-#         dict: A dictionary where keys are URLs and values are the paths to the metrics files.
-#     """
-
-#     sim_metrics_mapping_dict = {
-#         url: data["sim_metrics"] for url, data in mapping_dict.items()
-#     }
-#     return sim_metrics_mapping_dict

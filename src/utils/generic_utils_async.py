@@ -9,6 +9,7 @@ import aiofiles
 from pathlib import Path
 import pandas as pd
 from utils.get_file_names import get_file_names
+from utils.generic_utils import convert_keys_and_paths_to_str
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -207,9 +208,6 @@ def find_project_root(starting_path=None, marker=".git"):
     return None  # Return None if the marker is not found
 
 
-import json
-
-
 def get_company_and_job_title(job_posting_url, json_data):
     """
     Looks up the company and job title for a given job posting URL from the JSON data.
@@ -399,20 +397,73 @@ async def save_to_csv_async(df, filepath):
         await f.write(df.to_csv(index=False))
 
 
-def save_to_json(data, filename):
+import aiofiles
+import json
+from pathlib import Path
+from typing import Any, Union
+from pydantic import BaseModel
+import logging
+
+# Logging setup
+logger = logging.getLogger(__name__)
+
+
+async def save_to_json_file_async(data: Any, file_path: Union[str, Path]) -> None:
     """
-    Saves a Python dictionary or list to a JSON file.
+    Asynchronously saves a Python dictionary, list, or Pydantic model to a JSON file.
 
     Args:
-        data (dict or list): The data to be saved in JSON format.
-        filename (str): The path to the file where the data will be saved.
+        data (Any): The data to be saved in JSON format. Can be a dict, list, or Pydantic model.
+        file_path (str or Path): The full path to the file where the data will be saved.
+
+    Raises:
+        ValueError: If the data is not a dictionary, list, or Pydantic model.
+        FileNotFoundError: If the provided file path's directory does not exist.
+        Exception: For any general errors during file saving.
 
     Returns:
         None
     """
+    # Change file_path to Path if it's str.
+    file_path = Path(file_path)
+
     try:
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        logging.info(f"Data successfully saved to {filename}.")
+        # Validate file path
+        directory = file_path.parent
+        if not directory.exists():
+            raise FileNotFoundError(
+                f"Directory does not exist for the file path: {file_path}"
+            )
+
+        # Convert Pydantic models to dict
+        if isinstance(data, BaseModel):
+            data = data.model_dump()
+            logger.debug("Converted Pydantic model to dictionary.")
+
+        # Validate data type
+        if not isinstance(data, (dict, list)):
+            raise ValueError(
+                f"Invalid data type. Expected dict, list, or Pydantic model, got {type(data).__name__}"
+            )
+
+        # Convert all dict keys and Path objects to strings
+        serializable_data = convert_keys_and_paths_to_str(data)
+        logger.debug("Converted all dictionary keys and Path objects to strings.")
+
+        # Asynchronously write data to the JSON file
+        async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
+            await f.write(json.dumps(serializable_data, indent=4, ensure_ascii=False))
+        logger.info(f"Data successfully saved to {file_path}.")
+
+    except FileNotFoundError as e:
+        logger.error(f"File path not found: {file_path} - Error: {e}")
+        raise
+    except ValueError as e:
+        logger.error(f"ValueError: {e}")
+        raise
+    except TypeError as e:
+        logger.error(f"TypeError: {e}")
+        raise
     except Exception as e:
-        logging.info(f"Error saving data to {filename}: {e}")
+        logger.error(f"Failed to save JSON to {file_path}: {e}")
+        raise

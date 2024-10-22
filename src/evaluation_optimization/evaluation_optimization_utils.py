@@ -8,7 +8,7 @@ import os
 import re
 import logging
 import logging_config
-from typing import List
+from typing import List, Union
 import pandas as pd
 import json
 from utils.generic_utils import read_from_json_file
@@ -44,11 +44,16 @@ def create_file_name(
     if not company.strip() and not job_title.strip():
         return None
 
-    # Add underscore prefix to suffix if it's not empty
-    suffix = f"_{suffix}" if suffix else ""
+    # Check if suffix exists; underscore prefix to suffix if it doesn't already start with one
+    if suffix and not suffix.startswith("_"):
+        suffix = f"_{suffix}"
+    # If suffix starts with "_", leave it as is
+    else:
+        suffix = suffix or ""
 
     # Clean up company and job title names (remove/replace invalid characters)
-    illegal_chars = r"[^\w\s-]"  # Remove everything except alphanumeric characters, spaces, dashes, and underscores
+    illegal_chars = r"[^\w\s-]"  # Remove everything except alphanumeric
+    # characters, spaces, dashes, and underscores
     company = re.sub(illegal_chars, "_", company or "Unknown_Company").replace(" ", "_")
     job_title = re.sub(illegal_chars, "_", job_title or "Unknown_Title").replace(
         " ", "_"
@@ -78,7 +83,7 @@ def check_file_existence(file_path):
 
 
 def get_files_wo_multivariate_indices(
-    data_directory: str, indices: list = None
+    data_directory: Union[str, Path], indices: list = None
 ) -> list:
     """
     Find .csv files in the specified directory that contain the required metrics
@@ -92,6 +97,9 @@ def get_files_wo_multivariate_indices(
     Returns:
     - List of full file paths to .csv files without the specified multivariate indices.
     """
+    # Change data_directory to Path obj if it's str.
+    data_directory = Path(data_directory)
+
     if indices is None:
         indices = ["composite_score", "pca_score"]
     if not os.path.exists(data_directory):

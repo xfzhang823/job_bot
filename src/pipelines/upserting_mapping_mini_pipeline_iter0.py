@@ -21,14 +21,14 @@ def customize_mapping_config(
     """
     Customize the mapping configuration for a specific iteration.
 
-    This function generates a `MappingConfig` object tailored for a specific iteration
+    This function generates a 'MappingConfig' object tailored for a specific iteration
     of the pipeline by adjusting file names and directory paths accordingly.
 
     Args:
-        iteration (float): The iteration number for the current run (e.g., 0, 1, 2).
-        iteration_dir (Union[str, Path]): The directory path where the iteration files
+        - iteration (float): The iteration number for the current run (e.g., 0, 1, 2).
+        - iteration_dir (Union[str, Path]): The directory path where the iteration files
             will be stored.
-        mapping_file_name (str): The name of the mapping file for the current iteration.
+        - mapping_file_name (str): The name of the mapping file for the current iteration.
 
     Returns:
         MappingConfig: A customized configuration object with paths and suffixes
@@ -110,6 +110,7 @@ def run_pipeline(
 
     # Load job descriptions -> dict
     job_descriptions = read_from_json_file(job_descriptions_file)
+
     if job_descriptions is None:
         raise ValueError("Failed to load job descriptions")
 

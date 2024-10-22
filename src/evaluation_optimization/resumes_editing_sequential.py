@@ -7,15 +7,18 @@ import os
 from pathlib import Path
 import logging
 from joblib import Parallel, delayed
+from typing import Any
 from tqdm import tqdm
+from openai import OpenAI
 from evaluation_optimization.resume_editor import TextEditor
 from utils.generic_utils import save_to_json_file
-from src.models.resume_and_job_description_models import (
+from utils.llm_data_utils import get_openai_api_key
+from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
-    ResponsibilityInput,
-    RequirementsInput,
+    Responsibilites,
+    Requirements,
 )
 
 
@@ -27,6 +30,8 @@ def modify_resp_based_on_reqs(
     resp_key: str, resp: str, reqs: dict, model: str, model_id: str
 ) -> ResponsibilityMatch:
     """
+    This is the Sequential version of the modify_resps_based_on_reqs function.
+
     Modify a single responsibility text by aligning it with multiple job requirements.
 
     This function modifies one responsibility (`resp`) by matching it against multiple
@@ -66,8 +71,13 @@ def modify_resp_based_on_reqs(
                 model_id="gpt-3.5-turbo"
             )
     """
-    # Instantiate TextEditor class
-    text_editor = TextEditor(model=model, model_id=model_id, max_tokens=1024)
+    # Instantiate the client within the function for each responsibility
+    openai_api_key = get_openai_api_key()  # Fetch the API key
+    client = OpenAI(api_key=openai_api_key)  # Instantiate the OpenAI client here
+
+    text_editor = TextEditor(
+        model=model, model_id=model_id, client=client, max_tokens=1024
+    )
 
     local_modifications = {}
 
@@ -108,41 +118,45 @@ def modify_resp_based_on_reqs(
             # Store the modification for this requirement
             local_modifications[req_key] = optimized_text.model_dump()
 
-        # Validate the entire set of modifications for this repsonsiblity
+        # Validate the entire set of modifications for this responsibility
         validated_modifications = ResponsibilityMatch(
             optimized_by_requirements=local_modifications
         )
+
     except Exception as e:
         logger.error(f"Failed to modify responsibility {resp_key}: {e}")
         # Ensure a fallback for this responsibility in case of an error
         local_modifications[req_key] = OptimizedText(optimized_text=resp)
 
-    return (resp_key, validated_modifications)  # Returns a pyd obj
+    return (resp_key, validated_modifications)  # Returns a Pydantic object
 
 
 def modify_multi_resps_based_on_reqs(
     responsibilities: dict[str, str],
     requirements: dict[str, str],
-    # TextEditor: callable,  # Add TextEditor as an argument here
     model: str = "openai",
     model_id: str = "gpt-3.5-turbo",
-    n_jobs: int = -1,
 ) -> ResponsibilityMatches:
     """
-    Modify multiple responsibilities by aligning them with multiple job requirements in parallel.
+    This is the Sequential version of the modify_multi_resps_based_on_reqs function.
+
+    Modify multiple responsibilities by aligning them with multiple job requirements.
 
     This function processes multiple responsibilities by aligning each responsibility
     with multiple job requirements. It uses the `TextEditor` class to perform the
-    modifications and executes the processing in parallel using `joblib` to speed up
+    modifications and executes the processing in parallel using 'joblib' to speed up
     the process, especially when dealing with large datasets.
 
     Each responsibility undergoes a three-step modification process:
-    1. Semantic Alignment**: Ensures that the responsibility text matches the meaning of the
+    1. Semantic Alignment: Ensures that the responsibility text matches the meaning of the
        job requirement.
     2. Entailment Alignment: Ensures that the responsibility text can be logically inferred
        from the job requirement.
     3. Dependency Parsing Alignment (DP): Ensures that the structure of the responsibility
        text is preserved while aligning it with the job requirement.
+
+    *Becasue we are using concurrency, OpenAI API must be instantiated here
+    *(at the higher level).
 
     Args:
         -responsibilities (dict): A dictionary of responsibility texts, where keys are
@@ -177,41 +191,36 @@ def modify_multi_resps_based_on_reqs(
     logger.info(f"Number of responsibilities: {len(responsibilities)}")
     logger.info(f"Number of requirements: {len(requirements)}")
 
-    # Validate the input resonsibilities using pydantic models
-    validated_responsibilities = ResponsibilityInput(responsibilities=responsibilities)
-    validated_requirements = RequirementsInput(requirements=requirements)
+    # Validate the input responsibilities using Pydantic models
+    validated_responsibilities = Responsibilites(responsibilities=responsibilities)
+    validated_requirements = Requirements(requirements=requirements)
 
     # Initialize the result dictionary
     modified_responsibilities = {}
 
-    # Progress bar setup
-    total = len(responsibilities)
-    with tqdm(total=total, desc="Modifying Responsibilities") as pbar:
-        # Run the processing in parallel using joblib's Parallel
-        results = list(
-            Parallel(n_jobs=n_jobs)(
-                delayed(modify_resp_based_on_reqs)(
-                    resp_key, resp, validated_requirements.requirements, model, model_id
-                )
-                for resp_key, resp in validated_responsibilities.responsibilities.items()
+    # Sequential processing of responsibilities
+    for resp_key, resp in validated_responsibilities.responsibilities.items():
+        try:
+            # Call the function to modify a single responsibility based on the requirements
+            result = modify_resp_based_on_reqs(
+                resp_key=resp_key,
+                resp=resp,
+                reqs=validated_requirements.requirements,
+                model=model,
+                model_id=model_id,
             )
-        )
-        # Update the progress bar after all results are gathered
-        pbar.update(len(results))
 
-    # Aggregate the results
-    for result in results:
-        if result is not None and isinstance(result, tuple):
-            resp_key, modifications = result
-            if modifications is not None:
-                modified_responsibilities[resp_key] = modifications
+            # If the result is a valid tuple (resp_key, modifications), add it to the output dictionary
+            if result and isinstance(result, tuple):
+                modified_responsibilities[result[0]] = result[1]
+
+        except Exception as e:
+            logger.error(f"Error processing responsibility {resp_key}: {e}")
 
     # Validate the entire output with ResponsibilityMatches model
-    # and return as pyd object
     validated_output = ResponsibilityMatches(responsibilities=modified_responsibilities)
 
+    # Log the number of requirements for debugging
     logger.info(f"Number of requirements: {len(requirements)}")
 
-    # returns a pyd obj (Pydantic models are picklable, so they will serialize
-    # and deserialize correctly when passed between processes. )
     return validated_output
