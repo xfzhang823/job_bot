@@ -58,8 +58,8 @@ def run_pipeline(mapping_file):
         logger.info(f"Processing job posting from {url}")
 
         # Step 2.1: Extract file paths for responsibilities and requirements
-        resps_file = Path(paths["resps_flat"])
-        pruned_file = Path(paths["pruned_resps_flat"])
+        resps_file = Path(paths["resps"])
+        pruned_file = Path(paths["pruned_resps"])
 
         # Read responsibilities JSON, exclude keys, and save the pruned data
         resps_json = read_from_json_file(resps_file)

@@ -3,6 +3,7 @@ from pathlib import Path
 import logging
 from typing import Union
 from tqdm import tqdm
+import asyncio
 
 # from joblib import Parallel, delayed
 from models.resume_job_description_io_models import (
@@ -18,17 +19,17 @@ from evaluation_optimization.metrics_calculator import categorize_scores
 
 # Import from non parallell version for now!
 # from evaluation_optimization.resumes_editing import modify_multi_resps_based_on_reqs
-from evaluation_optimization.resumes_editing_sequential import (
-    modify_multi_resps_based_on_reqs,
+from evaluation_optimization.resumes_editing_async import (
+    modify_multi_resps_based_on_reqs_async,
 )
 
 from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
 from utils.generic_utils import (
     read_from_json_file,
-    save_to_json_file,
     verify_dir,
     verify_file,
 )
+from utils.generic_utils_async import save_to_json_file_async
 
 
 # Set up logging
@@ -206,7 +207,7 @@ def verify_directory_paths(mapping_file_prev, mapping_file_curr) -> bool:
     return all_valid
 
 
-def run_pipeline(
+async def run_pipeline_async(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
     model: str = "openai",
@@ -247,6 +248,7 @@ def run_pipeline(
     logger.info(f"paths_dict:\n{paths_dict}")
 
     # Step 2: Process each job posting URL and modify responsibilities
+    # Use async.gather
     for url, paths in paths_dict.items():
         logger.info(f"Processing job posting from {url}")
 
@@ -285,7 +287,7 @@ def run_pipeline(
         with tqdm(
             total=len(responsibilities), desc=f"Modifying responsibilities for {url}"
         ) as pbar:
-            modified_resps = modify_multi_resps_based_on_reqs(
+            modified_resps = await modify_multi_resps_based_on_reqs_async(
                 responsibilities=validated_responsibilities.responsibilities,
                 requirements=validated_requirements.requirements,
                 model=model,
@@ -296,7 +298,7 @@ def run_pipeline(
 
         # Step 4: Save the modified responsibilities
         output_file = paths["responsibilities_output"]
-        save_to_json_file(modified_resps.model_dump(), output_file)
+        await save_to_json_file_async(modified_resps, output_file)
         logger.info(f"Modified responsibilities for {url} saved to {output_file}")
 
     logger.info("Pipeline execution completed.")

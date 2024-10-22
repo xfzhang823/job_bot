@@ -88,19 +88,15 @@ class CodeResponse(BaseResponseModel):
 
 # Example job-specific response inheriting from JSONResponse (for job processing pipelines)
 class JobSiteResponseModel(JSONResponse):
-    url: Optional[str] = None
-    job_title: Optional[str] = None
-    company: Optional[str] = None
-    location: Optional[str] = None
-    salary_info: Optional[str] = None
-    posted_date: Optional[str] = None
+    url: Optional[str] = Field(None, description="Job posting URL")
+    job_title: Optional[str] = Field(None, description="Job title")
+    company: Optional[str] = Field(None, description="Company name")
+    location: Optional[str] = Field(None, description="Job location")
+    salary_info: Optional[str] = Field(None, description="Salary information")
+    posted_date: Optional[str] = Field(None, description="Job posting date")
     content: Optional[dict] = Field(
-        default=None,
-        example={
-            "description": "Job description here.",
-            "responsibilities": "Job responsibilities here.",
-            "qualifications": "Job qualifications here.",
-        },
+        None,
+        description="Dictionary containing job description, responsibilities, and qualifications",
     )
 
     class Config:
@@ -125,9 +121,7 @@ class JobSiteResponseModel(JSONResponse):
 
 # Editing Response Model (inherits from JSONResponse)
 class EditingResponseModel(JSONResponse):
-    optimized_text: (
-        str  # Required for editing-related tasks, ensuring the text is optimized
-    )
+    optimized_text: Optional[str] = None
 
     class Config:
         json_schema_extra = {

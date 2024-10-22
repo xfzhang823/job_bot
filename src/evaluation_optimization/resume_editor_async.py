@@ -20,7 +20,8 @@ from prompts.prompt_templates import (
     SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
-from utils.llm_data_utils import get_openai_api_key, call_openai_api, call_llama3
+from utils.llm_data_utils import get_openai_api_key
+from utils.llm_data_utils_async import call_openai_api_async, call_llama3_async
 from utils.validation_utils import validate_json_response
 from models.llm_response_models import EditingResponseModel
 
@@ -40,8 +41,9 @@ LLM_RES_JSON_SCHEMA = {
 }
 
 
-class TextEditor:
+class TextEditor_async:
     """
+    * Async version of class TextEditor
     A class to edit and optimize a text, given another text to "match" to, using language models
     like OpenAI GPT-4 or LLaMA3.
 
@@ -113,8 +115,10 @@ class TextEditor:
             logger.error(f"Error formatting prompt: {e}")
             raise
 
-    def call_llm(self, prompt, model="openai", temperature=None):
+    async def call_llm_async(self, prompt, model="openai", temperature=None):
         """
+        *Async version of the method.
+
         Call the specified LLM API (OpenAI or LLaMA3) with the provided prompt and return the response.
 
         Args:
@@ -128,7 +132,7 @@ class TextEditor:
 
         if model == "openai":
             # Call OpenAI API
-            response_pyd_obj = call_openai_api(
+            response_pyd_obj = await call_openai_api_async(
                 client=self.client,
                 model_id=self.model_id,
                 prompt=prompt,
@@ -150,7 +154,7 @@ class TextEditor:
 
         elif model == "llama3":
             # Call LLaMA3 API
-            response_pyd_obj = call_llama3(
+            response_pyd_obj = await call_llama3_async(
                 prompt, expected_res_type="json", temperature=temperature
             )
 
@@ -176,10 +180,12 @@ class TextEditor:
             logger.error(f"JSON schema validation failed: {e}")
             raise ValueError(f"Invalid JSON format: {e}")
 
-    def edit_for_dp(
+    async def edit_for_dp_async(
         self, target_text, source_text, text_id=None, model=None, temperature=None
     ):
         """
+        *Async version of the method
+
         Re-edit the target text to better align w/t source text's dependency parsing (DP),
         leveraging the OpenAI API.
 
@@ -208,7 +214,7 @@ class TextEditor:
         """
         text_id = self.generate_text_id(text_id)
         prompt = self.format_prompt(STRUCTURE_TRANSFER_PROMPT, target_text, source_text)
-        response_dict = self.call_llm(
+        response_dict = await self.call_llm_async(
             prompt, model=model if model else self.model, temperature=temperature
         )
         self.validate_response(response_dict)
@@ -216,7 +222,7 @@ class TextEditor:
         logger.info(f"Results updated: \n{result}")
         return result
 
-    def edit_for_entailment(
+    async def edit_for_entailment_async(
         self,
         premise_text,
         hypothesis_text,
@@ -225,6 +231,8 @@ class TextEditor:
         temperature=None,
     ):
         """
+        *Async version of the method.
+
         Re-edit the target text to strengthen its entailment with the source text.
         Entailment is directional and its order is often the reverse of other comparisons':
         - Premise is to be transformed.
@@ -255,7 +263,7 @@ class TextEditor:
         prompt = self.format_prompt(
             ENTAILMENT_ALIGNMENT_PROMPT, premise_text, hypothesis_text
         )
-        response_dict = self.call_llm(
+        response_dict = await self.call_llm_async(
             prompt,
             model=model if model else self.model,
             temperature=temperature,
@@ -265,7 +273,7 @@ class TextEditor:
         logger.info(f"Results updated: \n{result}")
         return result
 
-    def edit_for_semantics(
+    async def edit_for_semantics_async(
         self,
         candidate_text,
         reference_text,
@@ -274,6 +282,8 @@ class TextEditor:
         temperature=None,
     ):
         """
+        *Async version of the method.
+
         Re-edit the target text to better align w/t source text's semantics, leveraging LLMs.
 
         Example:
@@ -301,7 +311,7 @@ class TextEditor:
         prompt = self.format_prompt(
             SEMANTIC_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
-        response_dict = self.call_llm(
+        response_dict = await self.call_llm_async(
             prompt,
             model=model if model else self.model,
             temperature=temperature,
@@ -311,7 +321,7 @@ class TextEditor:
         logger.info(f"Results updated: \n{result}")
         return result
 
-    def edit_for_semantics_and_entailment(
+    async def edit_for_semantics_and_entailment_async(
         self,
         candidate_text,
         reference_text,
@@ -320,6 +330,8 @@ class TextEditor:
         temperature=None,
     ):
         """
+        *Async version of the method.
+
         Re-edit the target text to better align w/t source text's semantics and strengthen
         the entailment relationships between the two texts, leveraging LLMs.
 
@@ -340,7 +352,7 @@ class TextEditor:
         prompt = self.format_prompt(
             SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
-        response_dict = self.call_llm(
+        response_dict = await self.call_llm_async(
             prompt,
             model=model if model else self.model,
             temperature=temperature,
@@ -349,33 +361,3 @@ class TextEditor:
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
-
-
-# Function to modify resume w/t ChatGPT (unfinished...)
-def modify_resume_responsibilities(
-    section_json, requirements, model_id="gpt-3.5-turbo"
-):
-    """
-    Modifies a specific section of the resume to better align with job requirements.
-
-    Args:
-        section_json (dict): The JSON object containing the resume section details.
-        requirements (dict): The extracted requirements from the job description.
-        model_id (str): The model ID for OpenAI (default is gpt-3.5-turbo).
-
-    Returns:
-        dict: Modified resume section.
-    """
-    prompt = (
-        f"Modify the following resume section in JSON format to better align with the job requirements. "
-        f"Make it more concise and impactful while highlighting relevant skills and experiences:\n\n"
-        f"Current Section JSON:\n{section_json}\n\n"
-        f"Job Requirements JSON:\n{requirements}\n\n"
-        "Return the modified section in JSON format."
-    )
-
-    response = openai.chat.completions.create(
-        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.7
-    )
-
-    return json.loads(response["choices"][0]["message"]["content"])

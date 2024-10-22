@@ -9,11 +9,12 @@ import os
 from typing import List, Union, Optional
 
 import os
+from pathlib import Path
 from typing import List, Union, Optional
 
 
 def get_file_names(
-    directory_path: str,
+    directory_path: Union[str, Path],
     full_path: bool = False,
     recursive: bool = False,
     file_types: Optional[Union[str, List[str]]] = None,
@@ -23,7 +24,7 @@ def get_file_names(
     Collects and returns file names in a given directory filtered by file types.
 
     Args:
-        directory_path (str): The target directory to list files from.
+        directory_path (str or Path): The target directory to list files from.
         full_path (bool): Whether to return the full path of the files.
         file_types (str or list): File extension or list of extensions to filter by
         (e.g., '.txt' or ['.txt', '.csv']).

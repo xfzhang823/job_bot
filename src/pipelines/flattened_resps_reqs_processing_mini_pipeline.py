@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Union
+from typing import Union, Callable
 import json
 import logging
 import logging_config
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def process_files(
     file_paths_dict: dict,
-    process_func: callable,
+    process_func: Callable,
     file_type: str,
     source_json_file: Union[str, Path],
 ):

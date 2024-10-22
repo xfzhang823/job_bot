@@ -6,8 +6,12 @@ from pathlib import Path
 import logging
 import logging_config
 from dataclasses import dataclass
+from typing import Optional, Union, Dict, cast, Any
+from pydantic import ValidationError, HttpUrl
+from models.resume_job_description_io_models import JobFileMappings
 from utils.generic_utils import save_to_json_file, read_from_json_file
 from evaluation_optimization.evaluation_optimization_utils import create_file_name
+from models.resume_job_description_io_models import JobFileMappings, JobFilePaths
 
 
 logger = logging.getLogger(__name__)
@@ -38,16 +42,18 @@ class MappingConfig:
     resps_dir_name: str = "responsibilities"
     metrics_dir_name: str = "similarity_metrics"
     pruned_resps_dir_name: str = "pruned_responsibilities"
-    reqs_suffix: str = "_reqs"
-    resps_suffix: str = "_resps"
-    metrics_suffix: str = "_sim_metrics"
-    pruned_resps_suffix: str = "_pruned_resps"
+    reqs_suffix: str = "reqs"
+    resps_suffix: str = "resps"
+    metrics_suffix: str = "sim_metrics"
+    pruned_resps_suffix: str = "pruned_resps"
     metrics_ext: str = "csv"
 
 
-def create_mapping_entry(config: MappingConfig, company: str, job_title: str) -> dict:
+def create_mapping_entry(
+    config: MappingConfig, company: str, job_title: str
+) -> JobFilePaths:
     """
-    Create a mapping entry for a job description.
+    Create a mapping entry for a job description with Pydantic validation.
 
     Args:
         config (MappingConfig): Configuration for mapping file.
@@ -55,10 +61,14 @@ def create_mapping_entry(config: MappingConfig, company: str, job_title: str) ->
         job_title (str): Job title.
 
     Returns:
-        dict: Mapping entry.
-    """
-    base_dir = Path(config.base_output_dir)
+        JobFilePaths: Validated mapping entry (Pydantic object).
 
+    Raises:
+        ValueError: If filename generation fails or validation fails.
+    """
+
+    # Defining file dir structure
+    base_dir = Path(config.base_output_dir)
     reqs_dir = (base_dir) / config.reqs_dir_name
     resps_dir = (base_dir) / config.resps_dir_name
     metrics_dir = (base_dir) / config.metrics_dir_name
@@ -80,25 +90,91 @@ def create_mapping_entry(config: MappingConfig, company: str, job_title: str) ->
 
     # If any of the file names are None, handle that scenario
     if not reqs_file or not resps_file or not metrics_file or not pruned_resps_file:
+        logger.error("File name generation failed, received None.")
         raise ValueError("File name generation failed, received None.")
 
-    # Construct file paths using Pathlib and convert them to strings
-    return {
-        "reqs": str(reqs_dir / reqs_file),
-        "resps": str(resps_dir / resps_file),
-        "sim_metrics": str(metrics_dir / metrics_file),
-        "pruned_resps": str(pruned_resps_dir / pruned_resps_file),
-    }
+    # # Construct file paths using Pathlib and convert them to strings
+    # entry = {
+    #     "reqs": str(reqs_dir / reqs_file),
+    #     "resps": str(resps_dir / resps_file),
+    #     "sim_metrics": str(metrics_dir / metrics_file),
+    #     "pruned_resps": str(pruned_resps_dir / pruned_resps_file),
+    # }
+
+    try:
+        # Create a validated JobFilePaths Pydantic model
+        job_file_paths_model = JobFilePaths(
+            reqs=reqs_dir / reqs_file,
+            resps=resps_dir / resps_file,
+            sim_metrics=metrics_dir / metrics_file,
+            pruned_resps=pruned_resps_dir / pruned_resps_file,
+        )
+
+        logger.debug(
+            f"Creating mapping entry for {company}, {job_title}: {job_file_paths_model}"
+        )
+
+    except ValidationError as ve:
+        logger.error(f"Pydantic validation error for entry {entry}: {ve}")
+        raise ValueError(f"Pydantic validation error: {ve}")
+
+    return job_file_paths_model  # Return the validated JobFilePaths instance
+
+
+def load_mappings_model_from_json(
+    mapping_file: Union[str, Path]
+) -> Optional[JobFileMappings]:
+    """
+    Load job file mappings from a JSON file using the JobFileMappings model.
+
+    Args:
+        mapping_file (str | Path): Path to the JSON mapping file.
+
+    Returns:
+        Optional[JobFileMappings]: Job file mappings model or None if validation fails.
+
+    Logs:
+        - Information about loading and validation success.
+        - Errors encountered during validation or file processing.
+    """
+    try:
+        # Read the JSON file without specifying a key to get the entire data
+        file_mapping = read_from_json_file(mapping_file, key=None)
+
+        # Ensure the data is a dictionary
+        if not isinstance(file_mapping, dict):
+            logger.error(
+                f"Mapping file {mapping_file} does not contain a valid JSON object."
+            )
+            return None
+
+        # Initialize the Pydantic model with the entire mapping
+        job_file_mappings_model = JobFileMappings.model_validate(file_mapping)
+
+        logger.info(f"Loaded and validated mapping file from {mapping_file}")
+        return job_file_mappings_model
+
+    except ValidationError as e:
+        logger.error(f"Validation error in mapping file {mapping_file}: {e}")
+        return None
+    except FileNotFoundError as e:
+        logger.error(f"Mapping file not found: {mapping_file}. Error: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decoding failed for file {mapping_file}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error loading mapping file {mapping_file}: {e}")
+        return None
 
 
 def load_existing_or_create_new_mapping(
     job_descriptions: dict,
     config: MappingConfig,
-) -> dict:
+) -> JobFileMappings:
     """
-    Load the existing mapping file:
-    - if it exists, compare URLs with job descriptions, and update if necessary.
-    - if no mapping file exists, create a new mapping and save it.
+    Load the existing mapping file, validate it, and update it with new entries if necessary.
+    If the mapping file does not exist, create a new one.
 
     Each iteration has a mapping file - it serves as the ultimate reference file for
     I/O (input/output) folders and files during each responsibilities to requirements
@@ -110,8 +186,11 @@ def load_existing_or_create_new_mapping(
         -config (dataclass): configuration of folder and file names.
 
     Returns:
-        dict: The updated or newly created mapping file. However, the function is mainly
-        used to create or update the mapping file.
+        JobFileMappings: The updated or newly created mapping file, returned as
+        a Pydantic model.
+
+        However, the function is mainly used to create or update the mapping file in
+        each iteration folder.
 
     Raises:
         ValueError: If the mapping file contains more URLs than the job descriptions.
@@ -158,222 +237,91 @@ def load_existing_or_create_new_mapping(
             }
         }
     """
-    # Define the paths for each directory
-    mapping_file = config.mapping_file
 
+    mapping_file = config.mapping_file
     job_urls = set(job_descriptions.keys())
 
-    # *Update mapping file
+    # *Update existing mapping file
     if os.path.exists(mapping_file):
         # Load existing mapping
-        existing_mapping = read_from_json_file(mapping_file)
-        if not existing_mapping:
-            raise ValueError("Failed to load mapping file.")
-        logger.info(f"Loading existing mapping file: {mapping_file}")
+        file_mappings_model = load_mappings_model_from_json(
+            mapping_file
+        )  # Returns a Pydantic obj.
+        if not file_mappings_model:
+            raise ValueError("Failed to load and validate the existing mapping file.")
+        logger.info(
+            f"Existing mapping file '{mapping_file}' loaded and validated successfully."
+        )
 
-        # Check for discrepancies
-        mapped_urls = set(existing_mapping.keys())
-        job_urls = set(job_descriptions.keys())
-        # No need to list(set(..)) b/c "==" works on sets: they are designed for set operations
-        # such as comparing for equality or finding differences.
+        # Extract the underlying dictionary from the Pydantic model
+        mapped_urls = file_mappings_model.root.keys()
 
-        # Mapping file is up to date - do nothing and skip
+        # *No newe URLs need to be added (nothing to update) - skip the process
         if mapped_urls == job_urls:
             logger.info("The mapping file is up-to-date. No new URLs to add.")
-            return existing_mapping
+            return file_mappings_model
 
-        # Mapping file has more than the master job descriptions file
-        # - raise error and exist
-        elif mapped_urls > job_urls:
+        elif set(mapped_urls) > job_urls:
             logger.error(
-                "The mapping file contains more URLs than the job descriptions. Exiting."
+                "The mapping file contains more URLs than the job descriptions."
             )
             raise ValueError(
                 "The mapping file contains URLs that do not exist in the job descriptions."
             )
-        # Mapping file misses some urls: need to update the mapping file with
-        # newly added urls
+
         else:
             logger.info("The mapping file has fewer URLs. Adding new entries...")
-            missing_urls = job_urls - mapped_urls
+            missing_urls = job_urls - set(mapped_urls)
+
+            # Extract existing mapping dictionary from the root
+            existing_mapping = file_mappings_model.root
 
             # Add missing URLs to the mapping
             for url in missing_urls:
                 company = job_descriptions[url].get("company")
                 job_title = job_descriptions[url].get("job_title")
-                existing_mapping[url] = create_mapping_entry(config, company, job_title)
+                new_entry = create_mapping_entry(config, company, job_title)
+                existing_mapping[url] = new_entry
 
             logger.info(f"Added {len(missing_urls)} new entries to the mapping file.")
-            with open(mapping_file, "w") as f:
-                json.dump(existing_mapping, f, indent=4)
-                logger.info(f"Updated mapping file saved to {mapping_file}")
 
-            return existing_mapping
+            # Re-validate the updated mapping using Pydantic
+            try:
+                file_mappings_model = JobFileMappings.model_validate(existing_mapping)
+                logger.info("Pydantic validation successful for the updated mapping.")
+            except ValidationError as ve:
+                logger.error(f"Pydantic validation error in updated mapping: {ve}")
+                raise ValueError(f"Pydantic validation error: {ve}")
 
+            # Save the updated and validated mapping to JSON
+            save_to_json_file(
+                data=file_mappings_model.model_dump(), file_path=mapping_file
+            )
+            logger.info(f"Updated mapping file saved to '{mapping_file}'.")
+
+            return file_mappings_model
     else:
         logger.info(
-            f"No existing mapping file found at {mapping_file}. Creating a new one."
+            f"No existing mapping file found at '{mapping_file}'. Creating a new one."
         )
         new_mapping = {}
 
-        # Create a new mapping for all job descriptions
+        # Create new mapping entries for all job descriptions
         for url, info in job_descriptions.items():
             company = info.get("company")
             job_title = info.get("job_title")
             new_mapping[url] = create_mapping_entry(config, company, job_title)
 
+        # Validate the new mapping using Pydantic
+        try:
+            file_mappings_model = JobFileMappings.model_validate(new_mapping)
+            logger.info("Validation successful for the new mapping.")
+        except ValidationError as ve:
+            logger.error(f"Validation error in new mapping: {ve}")
+            raise ValueError(f"Validation error in new mapping: {ve}")
+
         # Save the newly created mapping file
-        save_to_json_file(data=new_mapping, file_path=mapping_file)
-        logger.info(f"New mapping file saved to {mapping_file}")
+        save_to_json_file(data=file_mappings_model.model_dump(), file_path=mapping_file)
+        logger.info(f"New mapping file saved to '{mapping_file}'.")
 
-        return new_mapping
-
-
-# # load_existing_or_create_new_mapping(job_descriptions, config)
-# def load_existing_or_create_new_mapping_old_version(
-#     mapping_file: str,
-#     job_descriptions: dict,
-#     reqs_output_dir: str,
-#     resps_output_dir: str,
-#     metrics_output_dir: str,
-#     pruned_resps_output_dir: str,
-# ) -> dict:
-#     """
-#     Load the existing mapping file:
-#     - if it exists, compare URLs with job descriptions, and update if necessary.
-#     - if no mapping file exists, create a new mapping and save it.
-
-#     Args:
-#         -mapping_file (str or Path): Path to the mapping file.
-#         -job_descriptions (dict): Job descriptions is the source JSON file that
-#         contains job posting information for generating.
-#         -reqs_output_dir (str or Path): Directory where requirements files will be saved.
-#         -resps_output_dir (str or Path): Directory where responsibilities files will be saved.
-#         -metrics_output_dir (str or Path): Directory where similarity metrics files will be saved.
-#         -pruned_resps_output_dir (str or Path): Directory where pruned responsibilities files
-#         will be saved.
-
-#     Returns:
-#         dict: The updated or newly created mapping file.
-
-#     Raises:
-#         ValueError: If the mapping file contains more URLs than the job descriptions.
-
-#     Example:
-#         >>> job_descriptions = {
-#                 "https://www.amazon.jobs/...": {
-#                     "company": "Amazon",
-#                     "job_title": "Product Manager, Artificial General Intelligence - Data Services"
-#                 },
-#                 "https://jobs.microsoft.com/...": {
-#                     "company": "Microsoft",
-#                     "job_title": "Head of Partner Intelligence and Strategy"
-#                 }
-#             }
-#         >>> reqs_output_dir = "path/to/requirements_flat/"
-#         >>> resps_output_dir = "path/to/responsibilities_flat/"
-#         >>> metrics_output_dir = "path/to/similarity_metrics/"
-#         >>> pruned_resps_output_dir = "path/to/pruned_responsibilities_flat/"
-#         >>> mapping_file_path = "path/to/mapping_file.json"
-#         >>> mapping = load_existing_or_create_new_mapping(
-#                 mapping_file_path,
-#                 job_descriptions,
-#                 reqs_output_dir,
-#                 resps_output_dir
-#             )
-#         >>> print(mapping)
-#         {
-#             "https://www.amazon.jobs/...": {
-#                 "reqs_flat": "path/to/requirements_flat/Amazon_Product_Manager__Artificial_General_Intelligence_-_Data_Services_reqs_flat.json",
-#                 "resps_flat": "path/to/responsibilities_flat/Amazon_Product_Manager__Artificial_General_Intelligence_-_Data_Services_resps_flat.json",
-#                 "sim_metrics": "path/to/requirements_flat/Amazon_Product_Manager__Artificial_General_Intelligence_-_Data_Services_sim_metrics.csv",
-#                 "pruned_resps_flat": "path/to/pruned_responsibilities_flat/Amazon_Product_Manager__Artificial_General_Intelligence_-_Data_Services_resps_flat.json"
-#             },
-#             "https://jobs.microsoft.com/...": {
-#                 "reqs_flat": "path/to/requirements_flat/Microsoft_Head_of_Partner_Intelligence_and_Strategy_reqs_flat.json",
-#                 "resps_flat": "path/to/responsibilities_flat/Microsoft_Head_of_Partner_Intelligence_and_Strategy_resps_flat.json",
-#                 "sim_metrics": "path/to/requirements_flat/Microsoft_Head_of_Partner_Intelligence_and_Strategy_sim_metrics.csv",
-#                 "pruned_resps_flat": "path/to/requirempruned_responsibilities_flat/Microsoft_Head_of_Partner_Intelligence_and_Strategy_resps_flat.json"
-#             }
-#         }
-#     """
-
-#     def create_mapping_entry(company, job_title):
-#         """Helper function to create file paths using the create_file_name function."""
-#         return {
-#             "reqs_flat": str(
-#                 Path(reqs_output_dir)  # assigns to requirements directory
-#                 / create_file_name(company, job_title, "reqs_flat")
-#             ),
-#             "resps_flat": str(
-#                 Path(resps_output_dir)  # assigns to responsibilities directory
-#                 / create_file_name(company, job_title, "resps_flat")
-#             ),
-#             "sim_metrics": str(
-#                 Path(metrics_output_dir)
-#                 / create_file_name(company, job_title, "sim_metrics", ext="csv")
-#             ),  # set ext to "csv" b/c create_file_name function defaults to JSON for file type
-#             "pruned_resps_flat": str(
-#                 Path(
-#                     pruned_resps_output_dir
-#                 )  # assigns to pruned responsibilities directory
-#                 / create_file_name(company, job_title, "resps_flat")
-#             ),
-#         }
-
-#     job_urls = set(job_descriptions.keys())
-
-#     if os.path.exists(mapping_file):
-#         # Load existing mapping
-#         existing_mapping = read_from_json_file(mapping_file)
-#         logger.info(f"Loading existing mapping file: {mapping_file}")
-
-#         mapped_urls = set(existing_mapping.keys())
-#         # No need to list(set(..)) b/c "==" works on sets: they are designed for set operations
-#         # such as comparing for equality or finding differences.
-
-#         # Check for discrepancies
-#         if mapped_urls == job_urls:
-#             logger.info("The mapping file is up-to-date. No new URLs to add.")
-#             return existing_mapping
-#         elif mapped_urls > job_urls:
-#             logger.error(
-#                 "The mapping file contains more URLs than the job descriptions. Exiting."
-#             )
-#             raise ValueError(
-#                 "The mapping file contains URLs that do not exist in the job descriptions."
-#             )
-#         else:
-#             logger.info("The mapping file has fewer URLs. Adding new entries...")
-#             missing_urls = job_urls - mapped_urls
-
-#             # Add missing URLs to the mapping
-#             for url in missing_urls:
-#                 company = job_descriptions[url].get("company")
-#                 job_title = job_descriptions[url].get("job_title")
-#                 existing_mapping[url] = create_mapping_entry(company, job_title)
-
-#             logger.info(f"Added {len(missing_urls)} new entries to the mapping file.")
-#             with open(mapping_file, "w") as f:
-#                 json.dump(existing_mapping, f, indent=4)
-#                 logger.info(f"Updated mapping file saved to {mapping_file}")
-
-#             return existing_mapping
-
-#     else:
-#         logger.info(
-#             f"No existing mapping file found at {mapping_file}. Creating a new one."
-#         )
-#         new_mapping = {}
-
-#         # Create a new mapping for all job descriptions
-#         for url, info in job_descriptions.items():
-#             company = info.get("company")
-#             job_title = info.get("job_title")
-#             new_mapping[url] = create_mapping_entry(company, job_title)
-
-#         # Save the newly created mapping file
-#         save_to_json_file(new_mapping, mapping_file)
-#         logger.info(f"New mapping file saved to {mapping_file}")
-
-#         return new_mapping
+        return file_mappings_model

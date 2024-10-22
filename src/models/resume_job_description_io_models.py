@@ -3,21 +3,26 @@ Module name: resume_job_description_io_models.py
 Last updated on: 2024-10-16
 """
 
+# Import dependencies
 from pathlib import Path
-from typing import Dict, Optional
-from pydantic import BaseModel, Field, HttpUrl
+from typing import Dict, Optional, Union
+from pydantic import (
+    BaseModel,
+    Field,
+    HttpUrl,
+    field_validator,
+    DirectoryPath,
+    RootModel,
+)
+import logging
+import logging_config
 
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Model to validate the initial output: optimized text for a single responsibility
 # to requirement match
-class Requirement(BaseModel):
-    req_key: str = Field(..., description="Unique key for the requirement")
-    req_text: str = Field(..., description="Text of the requirement")
-
-
-class Responsibility(BaseModel):
-    resp_key: str = Field(..., description="Unique key for the responsibility")
-    resp_text: str = Field(..., description="Text of the responsibility")
 
 
 class OptimizedText(BaseModel):
@@ -112,12 +117,44 @@ class ResponsibilityMatches(BaseModel):
 
 
 # Model to validate responsibility input
-class ResponsibilityInput(BaseModel):
+class Responsibilites(BaseModel):
+    """
+    Usage example:
+    responsibilities_input = {
+        "0.responsibilities.0": "Provided strategic insights to a major global IT vendor...",
+        "0.responsibilities.1": "Assisted a U.S.-based international services provider...",
+        # more responsibilities...
+    }
+
+    # Load the input data into Pydantic models for validation
+    validated_responsibilities = ResponsibilityInput(
+        responsibilities=responsibilities_input
+    )
+
+    # Accessing validated data
+    print(validated_responsibilities.responsibilities["0.responsibilities.0"])
+    """
+
     responsibilities: Dict[str, str]
 
 
 # Model to validate requirement input
-class RequirementsInput(BaseModel):
+class Requirements(BaseModel):
+    """
+    Usage example:
+    requirements_input = {
+    "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS...",
+    "0.pie_in_the_sky.1": "Ph.D. in Data Science...",
+    # more requirements...
+    }
+
+    # Load the input data into Pydantic models for validation
+    validated_requirements = RequirementsInput(requirements=requirements_input)
+
+    # Accessing validated data
+    print(validated_requirements.requirements["0.pie_in_the_sky.0"])
+    """
+
     requirements: Dict[str, str]
 
 
@@ -225,130 +262,122 @@ class SimilarityMetrics(BaseModel):
     composite_score: Optional[float] = Field(None, description="Composite score")
     pca_score: Optional[float] = Field(None, description="PCA score")
 
+    @field_validator("*", mode="before", check_fields=False)
+    def clean_strings(cls, v):
+        """
+        Clean string fields by removing newline characters and stripping whitespace.
+        """
+        if isinstance(v, str):
+            return v.replace("\n", " ").strip()
+        return v
+
 
 # Inner model for the file paths associated with each job posting URL
 class JobFilePaths(BaseModel):
-    reqs: Path = Field(..., description="Path to the flattened requirements JSON file")
-    resps: Path = Field(
+    """Inner model as part of the JobFileMappings class"""
+
+    reqs: Union[str, Path] = Field(
+        ..., description="Path to the flattened requirements JSON file"
+    )
+    resps: Union[str, Path] = Field(
         ..., description="Path to the flattened responsibilities JSON file"
     )
-    sim_metrics: Path = Field(
+    sim_metrics: Union[str, Path] = Field(
         ..., description="Path to the similarity metrics CSV file"
     )
-    pruned_resps: Path = Field(
+    pruned_resps: Union[str, Path] = Field(
         ..., description="Path to the pruned responsibilities JSON file"
     )
 
 
 # *Outer model for the mapping of job URLs to JobFilePaths
-class JobFileMappings(BaseModel):
+class JobFileMappings(RootModel[Dict[HttpUrl, JobFilePaths]]):
     """
     Pydantic model for validating a mapping of job URLs to associated file paths for
     requirements, responsibilities, and metrics.
 
-    This model is used to validate the structure of a nested JSON format
-    where job URLs map to file paths for related data, such as
-    requirements, responsibilities, similarity metrics, and pruned responsibilities.
+    This model maps job URLs directly to their corresponding file paths without relying on the `__root__` attribute,
+    using a dictionary structure where job posting URLs are keys, and the associated file paths are values validated by the `JobFilePaths` model.
 
     Structure Overview:
-    - The top-level keys represent job URLs (e.g., URLs to job postings).
-    - The values for each URL are dictionaries containing paths to:
+    - The top-level keys represent job URLs (validated as `HttpUrl`).
+    - The values for each URL are instances of the `JobFilePaths` model containing:
       - 'reqs': The JSON file containing flattened job requirements.
       - 'resps': The JSON file with (flattened or nested) job responsibilities.
       - 'sim_metrics': The CSV file containing similarity metrics between responsibilities
-      and requirements.
+        and requirements.
       - 'pruned_resps': The JSON file containing pruned job responsibilities.
 
     Example JSON Structure:
     ```json
     {
         "https://www.example.com/job/123": {
-            "reqs_flat": "C:\\path\\to\\requirements.json",
-            "resps_flat": "C:\\path\\to\\responsibilities.json",
+            "reqs": "C:\\path\\to\\requirements.json",
+            "resps": "C:\\path\\to\\responsibilities.json",
             "sim_metrics": "C:\\path\\to\\similarity_metrics.csv",
-            "pruned_resps_flat": "C:\\path\\to\\pruned_responsibilities.json"
+            "pruned_resps": "C:\\path\\to\\pruned_responsibilities.json"
         },
         "https://www.anotherexample.com/job/456": {
-            "reqs_flat": "C:\\path\\to\\another_requirements.json",
-            "resps_flat": "C:\\path\\to\\another_responsibilities.json",
+            "reqs": "C:\\path\\to\\another_requirements.json",
+            "resps": "C:\\path\\to\\another_responsibilities.json",
             "sim_metrics": "C:\\path\\to\\another_similarity_metrics.csv",
-            "pruned_resps_flat": "C:\\path\\to\\another_pruned_responsibilities.json"
+            "pruned_resps": "C:\\path\\to\\another_pruned_responsibilities.json"
         }
     }
     ```
 
     Attributes:
-    - files (Dict[HttpUrl, JobFilePaths]):
-      A dictionary mapping job posting URLs (validated as `HttpUrl`) to file paths.
-      The file paths are represented by the `JobFilePaths` model, which validates the paths
-      to requirements, responsibilities, similarity metrics, and pruned responsibilities.
+    - A dictionary mapping job posting URLs (validated as `HttpUrl`) to file paths.
+      Each file path dictionary is represented by the `JobFilePaths` model,
+      which validates the paths to requirements, responsibilities, similarity metrics,
+      and pruned responsibilities.
 
     Example Usage:
     ```python
     from pydantic import ValidationError, HttpUrl
-    import json
     from pathlib import Path
 
-    # Example JSON structure (mocked as a Python dictionary here)
+    # Example data
     example_data = {
         "https://www.example.com/job/123": {
-            "reqs_flat": "C:\\path\\to\\requirements.json",
-            "resps_flat": "C:\\path\\to\\responsibilities.json",
+            "reqs": "C:\\path\\to\\requirements.json",
+            "resps": "C:\\path\\to\\responsibilities.json",
             "sim_metrics": "C:\\path\\to\\similarity_metrics.csv",
-            "pruned_resps_flat": "C:\\path\\to\\pruned_responsibilities.json"
+            "pruned_resps": "C:\\path\\to\\pruned_responsibilities.json"
         },
         "https://www.anotherexample.com/job/456": {
-            "reqs_flat": "C:\\path\\to\\another_requirements.json",
-            "resps_flat": "C:\\path\\to\\another_responsibilities.json",
+            "reqs": "C:\\path\\to\\another_requirements.json",
+            "resps": "C:\\path\\to\\another_responsibilities.json",
             "sim_metrics": "C:\\path\\to\\another_similarity_metrics.csv",
-            "pruned_resps_flat": "C:\\path\\to\\another_pruned_responsibilities.json"
+            "pruned_resps": "C:\\path\\to\\another_pruned_responsibilities.json"
         }
     }
 
     try:
-        # Validate the data using the JobMappings model
-        validated_data = JobMappings(jobs=example_data)
+        # Validate the data using the JobFileMappings model
+        validated_data = JobFileMappings.parse_obj(example_data)
         print("Validation successful:", validated_data)
-
     except ValidationError as e:
         print(f"Validation error: {e}")
     ```
 
     Models:
-    - JobFilePaths:
-        This model validates the file paths for requirements, responsibilities, similarity metrics,
-        and pruned responsibilities.
-        Each field is a `Path` object, ensuring that the values provided are valid file paths.
-    - HttpUrl:
-        The job posting URLs are validated as `HttpUrl` to ensure they are valid and properly formatted.
+    - **JobFilePaths**:
+        This model validates the file paths for requirements, responsibilities,
+        similarity metrics, and pruned responsibilities.
+        It supports both `str` and `Path` types for flexibility.
+    - **HttpUrl**:
+        The job posting URLs are validated as `HttpUrl` to ensure they are properly
+        formatted and valid.
 
-    This model provides a convenient way to validate mappings of job URLs to their associated file paths,
-    ensuring the data conforms to the expected structure and types.
+    This model provides a structured way to validate mappings of job URLs to their
+    associated file paths, ensuring the data conforms to the expected structure and types.
     """
 
-    files: Dict[HttpUrl, JobFilePaths] = Field(
-        ..., description="Mapping from job posting URLs to their associated file paths"
-    )
+    pass  # RootModel does not require additional fields
 
 
-# # Example usage:
-# responsibilities_input = {
-#     "0.responsibilities.0": "Provided strategic insights to a major global IT vendor...",
-#     "0.responsibilities.1": "Assisted a U.S.-based international services provider...",
-#     # more responsibilities...
-# }
+class PipelineInput(BaseModel):
+    """Validate file and directory paths - if exist(s)"""
 
-# requirements_input = {
-#     "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS...",
-#     "0.pie_in_the_sky.1": "Ph.D. in Data Science...",
-#     # more requirements...
-# }
-
-# # Load the input data into Pydantic models for validation
-# validated_responsibilities = ResponsibilityInput(
-#     responsibilities=responsibilities_input
-# )
-# validated_requirements = RequirementsInput(requirements=requirements_input)
-
-# # Accessing validated data
-# print(validated_responsibilities.responsibilities["0.responsibilities.0"])
+    data_directory: DirectoryPath

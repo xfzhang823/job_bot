@@ -56,6 +56,7 @@ responsibilities_dir_name = "responsibilities"
 pruned_responsibilities_dir_name = "pruned_responsibilities"
 similarity_metrics_dir_name = "similarity_metrics"
 mapping_file_name = "url_to_file_mapping.json"
+elbow_curve_plot_file_name = "elbow_curve_plot.png"
 
 # Iteration 0
 # logging.info("Setting up iteration 0 directories")

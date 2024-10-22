@@ -2,13 +2,13 @@
 
 import os
 import json
+import shutil
 import logging
 import logging_config
 from pathlib import Path
-from typing import Union
+from typing import Union, Dict, List, Any, overload, Optional
+from pydantic import BaseModel
 import pandas as pd
-import shutil
-from typing import Union, List, Dict
 from utils.get_file_names import get_file_names
 
 # Setup logger
@@ -393,9 +393,19 @@ def pretty_print_json(data):
         print("The provided data is not a valid JSON object (dict or list).")
 
 
+@overload
 def read_from_json_file(
-    json_file: Union[str, Path], key: str = ""
-) -> Union[Dict, List, None]:
+    json_file: Union[str, Path], key: None = ...
+) -> Dict[str, Any]: ...
+
+
+@overload
+def read_from_json_file(json_file: Union[str, Path], key: str) -> Any: ...
+
+
+def read_from_json_file(
+    json_file: Union[str, Path], key: Optional[str] = None
+) -> Union[Dict[str, Any], Any]:
     """
     Loads data from a master JSON file and extracts specific sections or values.
 
@@ -404,15 +414,13 @@ def read_from_json_file(
         key (str, optional): If provided, extracts the data under this specific key.
 
     Returns:
-        dict or list: The extracted data from the JSON file.
-        None: If the file does not exist or is empty.
+        dict or Any: The extracted data from the JSON file.
 
     Raises:
         KeyError: If the specified key is not found in the JSON data.
         FileNotFoundError: If the JSON file is not found.
         JSONDecodeError: If there is an error decoding the JSON data.
     """
-    # Ensure json_file is a Path object
     json_file = Path(json_file)
 
     # Check if directory exists
@@ -464,43 +472,123 @@ def replace_spaces_in_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def save_to_json_file(data: Union[dict, list], file_path: str):
+# Function to support save_to_json_file function
+def convert_keys_to_str(obj: Any) -> Any:
     """
-    Saves a Python dictionary or list to a JSON file.
+    Recursively convert all dictionary keys in the given object to strings.
 
     Args:
-        data (Union[dict, list]): The data to be saved in JSON format.
+        obj (Any): The object to process.
+
+    Returns:
+        Any: The processed object with string keys.
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for key, value in obj.items():
+            new_key = str(key)
+            new_value = convert_keys_to_str(value)
+            new_dict[new_key] = new_value
+        return new_dict
+    elif isinstance(obj, list):
+        return [convert_keys_to_str(item) for item in obj]
+    elif isinstance(obj, BaseModel):
+        return convert_keys_to_str(obj.model_dump())
+    else:
+        return obj
+
+
+# Function to support save to json file function
+def convert_keys_and_paths_to_str(obj: Any) -> Any:
+    """
+    Recursively convert all dictionary keys to strings and Path objects to strings.
+
+    Args:
+        obj (Any): The object to process.
+
+    Returns:
+        Any: The processed object with string keys and string values where necessary.
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for key, value in obj.items():
+            # Convert key to string if it's not already
+            new_key = str(key) if not isinstance(key, str) else key
+            # Recursively process the value
+            new_value = convert_keys_and_paths_to_str(value)
+            new_dict[new_key] = new_value
+        return new_dict
+    elif isinstance(obj, list):
+        return [convert_keys_and_paths_to_str(item) for item in obj]
+    elif isinstance(obj, Path):
+        # Convert Path object to string
+        return str(obj)
+    elif isinstance(obj, BaseModel):
+        # Convert Pydantic model to dict and process recursively
+        return convert_keys_and_paths_to_str(obj.model_dump())
+    else:
+        return obj
+
+
+def save_to_json_file(data: Any, file_path: Union[str, Path]) -> None:
+    """
+    Saves a Python dictionary, list, or Pydantic model to a JSON file.
+
+    Args:
+        data (Any): The data to be saved in JSON format. Can be a dict, list, or Pydantic model.
         file_path (str): The full path to the file where the data will be saved.
 
     Raises:
-        ValueError: If the data is not a dictionary or a list.
-        FileNotFoundError: If the provided file path does not exist.
+        ValueError: If the data is not a dictionary, list, or Pydantic model.
+        FileNotFoundError: If the provided file path's directory does not exist.
         Exception: For any general errors during file saving.
 
     Returns:
         None
     """
+    # Change file_path to Path if it's str.
+    file_path = Path(file_path)
+
     try:
         # Validate file path
-        directory = os.path.dirname(file_path)
-        if not os.path.exists(directory):
+        directory = Path(file_path).parent
+        if not directory.exists():
             raise FileNotFoundError(
                 f"Directory does not exist for the file path: {file_path}"
             )
 
+        # Convert Pydantic models to dict
+        if isinstance(data, BaseModel):
+            data = data.model_dump()
+            logger.debug("Converted Pydantic model to dictionary.")
+
         # Validate data type
         if not isinstance(data, (dict, list)):
             raise ValueError(
-                f"Invalid data type. Expected dict or list, got {type(data).__name__}"
+                f"Invalid data type. Expected dict, list, or Pydantic model, got {type(data).__name__}"
             )
+
+        # Convert all dict keys and Path objects to strings
+        serializable_data = convert_keys_and_paths_to_str(data)
+        logger.debug("Converted all dictionary keys and Path objects to strings.")
 
         # Attempt to write data to the JSON file
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+            json.dump(serializable_data, f, indent=4, ensure_ascii=False)
         logger.info(f"Data successfully saved to {file_path}.")
 
     except FileNotFoundError as e:
         logger.error(f"File path not found: {file_path} - Error: {e}")
+        raise
+    except ValueError as e:
+        logger.error(f"ValueError: {e}")
+        raise
+    except TypeError as e:
+        logger.error(f"TypeError: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to save JSON to {file_path}: {e}")
+        raise
 
 
 def validate_json_file(file: Path):
@@ -513,7 +601,7 @@ def validate_json_file(file: Path):
     return True
 
 
-def verify_file(file_path: Path) -> bool:
+def verify_file(file_path: Union[str, Path]) -> bool:
     """
     Verify if the file exists and is accessible.
 
@@ -523,13 +611,14 @@ def verify_file(file_path: Path) -> bool:
     Returns:
         bool: True if the file exists, False otherwise.
     """
+    file_path = Path(file_path)
     if file_path.exists() and file_path.is_file():
         return True
     logger.error(f"File does not exist or is not a valid file: {file_path}")
     return False
 
 
-def verify_dir(dir_path: Path, create_dir: bool = False) -> bool:
+def verify_dir(dir_path: Union[str, Path], create_dir: bool = False) -> bool:
     """
     Verify if the directory exists and is accessible. Create the directory
     if it doesn't exist.
@@ -543,6 +632,8 @@ def verify_dir(dir_path: Path, create_dir: bool = False) -> bool:
     Returns:
         bool: True if the directory exists (or was created), False otherwise.
     """
+    dir_path = Path(dir_path)
+
     if dir_path.exists() and dir_path.is_dir():
         return True
 
