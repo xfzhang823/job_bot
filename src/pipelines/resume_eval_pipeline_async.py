@@ -1,33 +1,56 @@
+"""
+Filename: resume_eval_pipeline_async.py
+
+Async version of pipelines to create matching metrics between responsibilities 
+and requirements.
+"""
+
+# Import dependencies
 import os
 from pathlib import Path
 import pandas as pd
 import json
 import logging
 import logging_config
-
 import asyncio
 import aiofiles
+from typing import Any, Callable, Coroutine, Optional, Union
+import pandas as pd
+from pydantic import ValidationError
 
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
-from evaluation_optimization.text_similarity_finder import TextSimilarity
+from models.resume_job_description_io_models import (
+    JobFileMappings,
+    Requirements,
+    ResponsibilityMatches,
+    SimilarityMetrics,
+)
+
+from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
 from evaluation_optimization.metrics_calculator import (
     calculate_many_to_many_similarity_metrices,
     categorize_scores_for_df,
     SimilarityScoreCalculator,
+    calculate_text_similarity_metrics,
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
+from evaluation_optimization.text_similarity_finder import TextSimilarity
+
+
+from utils.generic_utils import (
+    read_from_json_file,
+    save_to_json_file,
+)
 from utils.generic_utils_async import (
     read_from_json_async,
     read_from_csv_async,
     save_to_csv_async,
+    save_to_json_file_async,
 )
-from utils.generic_utils import pretty_print_json, get_company_and_job_title_from_json
 
 # from config import job_descriptions_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
-    get_new_urls_and_metrics_file_paths,
-    get_new_urls_and_flat_json_file_paths,
     get_files_wo_multivariate_indices,
 )
 
@@ -95,72 +118,214 @@ async def generate_matching_metrics_async(reqs_file, resps_file, sim_metrics_fil
     logger.info(f"Metrics saved to {sim_metrics_file}")
 
 
-def unpack_and_combine_json(nested_json, requirements_json):
+async def generate_matching_metrics_from_nested_json_async(
+    reqs_file: Union[Path, str],
+    resps_file: Union[Path, str],
+    metrics_csv_file: Union[Path, str],
+) -> None:
     """
-    Unpacks the nested responsibilities JSON and combines it with matching requirement texts
-    from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
+    Generate similarity metrics between nested responsibilities and requirements
+    and save to a CSV file asynchronously.
 
     Args:
-        nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
-        requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
+        reqs_file (Path or str): Path to the requirements JSON file.
+        resps_file (Path or str): Path to the nested responsibilities JSON file.
+        metrics_csv_file (Path or str): Path where the output CSV file should be saved.
 
     Returns:
-        list: A list of dictionaries containing responsibility_keys, requirement_keys,
-              responsibility texts, and matched requirement texts.
-
-    Error Handling:
-        - If a requirement_key is not found in the requirements JSON, it will skip that entry.
-        - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
-        - Logs warnings for missing fields and unmatched keys for better traceability.
+        None
     """
-    results = []
+    # Step 0: Ensure inputs are Path objects.
+    reqs_file = Path(reqs_file)
+    resps_file = Path(resps_file)
+    metrics_csv_file = Path(metrics_csv_file)
 
-    for resp_key, values in nested_json.items():  # Unpack the 1st level
-        if not isinstance(values, dict):
-            logger.info(
-                f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
+    # Step 1: Load and validate responsibilities and requirements using Pydantic models asynchronously
+    try:
+        resps_data = await asyncio.to_thread(read_from_json_file, resps_file)
+        validated_resps_data = ResponsibilityMatches.model_validate(resps_data)
+
+        reqs_data = await asyncio.to_thread(read_from_json_file, reqs_file)
+        validated_reqs_data = Requirements.model_validate(reqs_data)
+
+        if not validated_resps_data or not validated_reqs_data:
+            logger.error(
+                "One of the required datasets (responsibilities or requirements) is empty."
             )
-            continue
+            return
 
-        for req_key, sub_value in values.items():  # Unpack the 2nd level
-            if not isinstance(sub_value, dict):
-                logger.info(
-                    f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e.filename}")
+        return
+    except ValidationError as ve:
+        logger.error(f"Validation error when parsing JSON files: {ve}")
+        return
+    except Exception as e:
+        logger.error(f"Error loading files: {e}")
+        return
+
+    validated_rows = []
+
+    # Step 2: Iterate through the responsibilities and requirements
+    for (
+        responsibility_key,
+        responsibility_match,
+    ) in validated_resps_data.responsibilities.items():
+        for (
+            requirement_key,
+            optimized_text_obj,
+        ) in responsibility_match.optimized_by_requirements.items():
+            responsibility_text = optimized_text_obj.optimized_text
+
+            # Access the corresponding requirement using the Pydantic model
+            try:
+                requirement_text = validated_reqs_data.requirements[requirement_key]
+            except KeyError:
+                logger.warning(
+                    f"No matching requirement found for requirement_key: {requirement_key}"
                 )
                 continue
 
-            # Extract the optimized_text
-            if "optimized_text" in sub_value:
-                optimized_text = sub_value["optimized_text"]
-            else:
-                logger.info(
-                    f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
-                )
-                continue
-
-            # Perform the lookup in the requirements JSON
-            requirement_text = requirements_json.get(req_key)
-            if requirement_text is None:
-                logger.info(
-                    f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
-                )
-                continue
-
-            # Append results to a list for further processing
-            results.append(
-                {
-                    "responsibility_key": resp_key,
-                    "requirement_key": req_key,
-                    "responsibility_text": optimized_text,
-                    "requirement_text": requirement_text,
-                }
+            # Step 3: Calculate similarity metrics asynchronously
+            similarity_metrics = await asyncio.to_thread(
+                calculate_text_similarity_metrics, responsibility_text, requirement_text
             )
 
-    return results
+            # Step 4: Validate using SimilarityMetrics model
+            try:
+                similarity_metrics_model = SimilarityMetrics(
+                    responsibility_key=responsibility_key,
+                    responsibility=responsibility_text,
+                    requirement_key=requirement_key,
+                    requirement=requirement_text,
+                    bert_score_precision=similarity_metrics[
+                        "bert_score_precision"
+                    ],  # Explicit mapping
+                    soft_similarity=similarity_metrics[
+                        "soft_similarity"
+                    ],  # Explicit mapping
+                    word_movers_distance=similarity_metrics[
+                        "word_movers_distance"
+                    ],  # Explicit mapping
+                    deberta_entailment_score=similarity_metrics[
+                        "deberta_entailment_score"
+                    ],  # Explicit mapping
+                    # Optional fields (if present in similarity metrics)
+                    bert_score_precision_cat=similarity_metrics.get(
+                        "bert_score_precision_cat"
+                    ),
+                    soft_similarity_cat=similarity_metrics.get("soft_similarity_cat"),
+                    word_movers_distance_cat=similarity_metrics.get(
+                        "word_movers_distance_cat"
+                    ),
+                    deberta_entailment_score_cat=similarity_metrics.get(
+                        "deberta_entailment_score_cat"
+                    ),
+                    scaled_bert_score_precision=similarity_metrics.get(
+                        "scaled_bert_score_precision"
+                    ),
+                    scaled_deberta_entailment_score=similarity_metrics.get(
+                        "scaled_deberta_entailment_score"
+                    ),
+                    scaled_soft_similarity=similarity_metrics.get(
+                        "scaled_soft_similarity"
+                    ),
+                    scaled_word_movers_distance=similarity_metrics.get(
+                        "scaled_word_movers_distance"
+                    ),
+                    composite_score=similarity_metrics.get("composite_score"),
+                    pca_score=similarity_metrics.get("pca_score"),
+                )
+                validated_rows.append(similarity_metrics_model.model_dump())
+
+            except ValidationError as ve:
+                logger.error(
+                    f"Validation error for responsibility {responsibility_key}: {ve}"
+                )
+                continue
+
+    # Step 5: Convert validated results to a DataFrame and categorize scores
+    if validated_rows:
+        final_df = await asyncio.to_thread(pd.DataFrame, validated_rows)
+        final_df = await asyncio.to_thread(categorize_scores_for_df, final_df)
+
+        # Step 6: Save the validated metrics to a CSV file asynchronously
+        await asyncio.to_thread(final_df.to_csv, metrics_csv_file, index=False)
+        logger.info(f"Similarity metrics saved successfully to {metrics_csv_file}")
+    else:
+        logger.error("No valid similarity metrics data to save.")
+        return
+
+    # Display the top rows of the DataFrame for verification
+    print(final_df.head(5))
+
+
+# def unpack_and_combine_json(nested_json, requirements_json):
+#     """
+#     Unpacks the nested responsibilities JSON and combines it with matching requirement texts
+#     from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
+
+#     Args:
+#         nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
+#         requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
+
+#     Returns:
+#         list: A list of dictionaries containing responsibility_keys, requirement_keys,
+#               responsibility texts, and matched requirement texts.
+
+#     Error Handling:
+#         - If a requirement_key is not found in the requirements JSON, it will skip that entry.
+#         - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
+#         - Logs warnings for missing fields and unmatched keys for better traceability.
+#     """
+#     results = []
+
+#     for resp_key, values in nested_json.items():  # Unpack the 1st level
+#         if not isinstance(values, dict):
+#             logger.info(
+#                 f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
+#             )
+#             continue
+
+#         for req_key, sub_value in values.items():  # Unpack the 2nd level
+#             if not isinstance(sub_value, dict):
+#                 logger.info(
+#                     f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
+#                 )
+#                 continue
+
+#             # Extract the optimized_text
+#             if "optimized_text" in sub_value:
+#                 optimized_text = sub_value["optimized_text"]
+#             else:
+#                 logger.info(
+#                     f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
+#                 )
+#                 continue
+
+#             # Perform the lookup in the requirements JSON
+#             requirement_text = requirements_json.get(req_key)
+#             if requirement_text is None:
+#                 logger.info(
+#                     f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
+#                 )
+#                 continue
+
+#             # Append results to a list for further processing
+#             results.append(
+#                 {
+#                     "responsibility_key": resp_key,
+#                     "requirement_key": req_key,
+#                     "responsibility_text": optimized_text,
+#                     "requirement_text": requirement_text,
+#                 }
+#             )
+
+#     return results
 
 
 async def metrics_processing_pipeline_async(
-    mapping_file: str, generate_metrics: callable = generate_matching_metrics_async
+    mapping_file: str, generate_metrics: Callable = generate_matching_metrics_async
 ):
     """
     Asynchronous version of the pipeline to process and create missing sim_metrics files by reading from the mapping file.
@@ -269,50 +434,77 @@ async def multivariate_indices_processing_mini_pipeline_async(data_directory: st
     )
 
 
-def re_processing_metrics_pipeline(requirements_file, responsibilities_file, csv_file):
+async def metrics_re_processing_pipeline_async(
+    mapping_file: Path,
+    generate_metrics: Callable[
+        [Path, Path, Path], Coroutine[Any, Any, None]
+    ] = generate_matching_metrics_from_nested_json_async,
+) -> None:
     """
-    Re-run pipeline to calculate revised responsibility vs (job) requirement alignment scores
+    Re-run the pipeline to process and create missing sim_metrics files by reading from the mapping file asynchronously.
+
+    Args:
+        mapping_file (str | Path): Path to the JSON mapping file.
+        generate_metrics (Callable[[Path, Path, Path], Coroutine[Any, Any, None]], optional):
+            Asynchronous function to generate the metrics CSV file. Defaults to
+            generate_matching_metrics_from_nested_json_async.
+
+    Returns:
+        None
     """
-
-    # Check if resps comparison csv file (the results) ALREADY exists
-    if os.path.exists(csv_file):
-        df = pd.read_csv(csv_file)
-
-        print(f"Similarity Metrics Dataframe: {df.head(10)}")
-
-        logger.info("Output already exists, skipping pipeline.")
-        return  # Early exit if output exists
-
-    logger.info("Start running responsibility/requirement alignment scoring pipeline.")
-
-    # Step 1: Read JSON files
-    resps_dict = read_from_json_async(responsibilities_file)  # Nested dictionary
-    reqs_dict = read_from_json_async(requirements_file)
-
-    # Step 2: parse and combine 2 into a single list/dict
-    combined_list = unpack_and_combine_json(
-        nested_json=resps_dict, requirements_json=reqs_dict
+    # Step 1: Read / Validate file mapping
+    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+        mapping_file
     )
 
-    # Step 3. Iterate through the Calculate and display similarity metrices - Segment by Segment
-    similarity_calculator = SimilarityScoreCalculator()
-    similarity_df = similarity_calculator.one_to_one(combined_list)
+    if file_mappings_model is None:
+        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
+        return
 
-    logger.info("Similarity metrics calcuated.")
+    file_mappings_dict = file_mappings_model.root
 
-    # Step 4. Add score category values (high, mid, low)
-    # Translate DataFrame columns to match expected column names**
-    similarity_df = categorize_scores_for_df(similarity_df)
-    logger.info("Similarity metrics score categories created.")
+    # Step 2: Check if all sim_metrics files exist
+    missing_metrics = {
+        url: mapping.sim_metrics
+        for url, mapping in file_mappings_dict.items()
+        if not Path(mapping.sim_metrics).exists()
+    }
 
-    # Step 5. Clean and save to csv
-    # df_cleaned = bscore_p_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-    df = similarity_df.applymap(lambda x: str(x).replace("\n", " ").strip())
-    df.to_csv(csv_file, index=False)
+    if not missing_metrics:
+        logger.info("All sim_metrics files already exist. Exiting pipeline.")
+        return
 
-    logging.info(f"Similarity metrics saved to location {csv_file}.")
+    # Step 3: Process missing sim_metrics files asynchronously
+    tasks = []
+    for url, sim_metrics_file in missing_metrics.items():
+        logger.info(f"Processing missing metrics for {url}")
 
-    # Print out for debugging
-    print(f"Similarity Metrics Dataframe: {df.head(10)}")
+        # Convert sim_metrics_file to Path object if it's not already
+        sim_metrics_file = Path(sim_metrics_file)
 
-    logger.info(f"Similarity scores saved to csv file ({csv_file})")
+        # Load the requirements and responsibilities files from the mapping
+        reqs_file = Path(file_mappings_dict[url].reqs)
+        resps_file = Path(file_mappings_dict[url].resps)
+
+        # Step 3.1: Check if reqs and resps files exist and are valid JSON files
+        if not reqs_file.exists() or not resps_file.exists():
+            if not reqs_file.exists():
+                logger.error(f"Skipping {url}: Missing requirements file {reqs_file}")
+            if not resps_file.exists():
+                logger.error(
+                    f"Skipping {url}: Missing responsibilities file {resps_file}"
+                )
+            continue
+
+        # Step 3.2: Generate the metrics file asynchronously
+        tasks.append(generate_metrics(reqs_file, resps_file, sim_metrics_file))
+        logger.info(
+            f"Queued metrics generation for {url} to be saved to {sim_metrics_file}"
+        )
+
+    # Run all the tasks concurrently
+    if tasks:
+        await asyncio.gather(*tasks)
+        logger.info("Finished processing all missing sim_metrics files.")
+    else:
+        logger.info("No valid files were found to process.")

@@ -6,6 +6,7 @@ from openai import OpenAI, AsyncOpenAI
 import asyncio
 import logging
 import logging_config
+import httpx
 import aiohttp
 import json
 from pydantic import ValidationError
@@ -47,12 +48,6 @@ logger = logging.getLogger(__name__)
 #     except Exception as e:
 #         logger.error(f"LLaMA 3 call failed: {e}")
 #         raise
-
-
-import httpx
-import json
-
-import httpx
 
 
 async def call_openai_api_async(

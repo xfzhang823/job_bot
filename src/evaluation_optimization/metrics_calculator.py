@@ -4,6 +4,7 @@
 import pandas as pd
 import logging
 import logging_config
+from typing import Dict
 from evaluation_optimization.text_similarity_finder import (
     compute_bertscore_precision,
     AsymmetricTextSimilarity,
@@ -186,11 +187,11 @@ def categorize_scores_for_df(df, metrics=None):
             "word_movers_distance",
             "deberta_entailment_score",
         ]
-    df = rename_df_columns(
-        df, COLUMN_NAMES_TO_VARS_MAPPING
-    )  # Uses default COLUMN_NAMES_TO_VARS_MAPPING from utils
 
-    # Apply high, mid, low categories to similarity metrics
+    # Step 1: Rename columns (if necessary)
+    df = rename_df_columns(df, COLUMN_NAMES_TO_VARS_MAPPING)
+
+    # Step 2: Apply categorization row by row
     df = df.apply(lambda row: categorize_scores_for_row(row, metrics), axis=1)
     return df
 
@@ -264,17 +265,15 @@ def calculate_one_to_many_similarity_metrices(resps_flat, job_reqs_str):
 
 
 def calculate_many_to_many_similarity_metrices(
-    responsibilities: dict[str, str], requirements: dict[str, str]
-):
+    responsibilities: Dict[str, str], requirements: Dict[str, str]
+) -> pd.DataFrame:
     """
-    Calculate text similarity metrics:
-    - between EACH resume responsibility and EACH job requirement;
-    - leveraging the AsymmetricTextSimilarity class due to the asymmetrical relationship
-    between experience/responsibilities and job requirements.
+    Calculate text similarity metrics between EACH resume responsibility and EACH job requirement,
+    leveraging the AsymmetricTextSimilarity class due to the asymmetrical relationship between experience/responsibilities and job requirements.
 
     Args:
-        responsibilities (dict of str): Dictionary of flattened responsibilities from the resume.
-        requirements (dict of str): Dictionary of flattened job requirements from the job posting.
+        responsibilities (Dict[str, str]): Dictionary of flattened responsibilities from the resume.
+        requirements (Dict[str, str]): Dictionary of flattened job requirements from the job posting.
 
     Returns:
         pd.DataFrame: DataFrame containing similarity metrics.
@@ -282,56 +281,44 @@ def calculate_many_to_many_similarity_metrices(
     text_similarity = AsymmetricTextSimilarity()
     similarity_results = []
 
-    # Debugging: Check length of responsibilities and requirements
+    # Log the number of responsibilities and requirements
     logger.info(f"Number of responsibilities: {len(responsibilities)}")
     logger.info(f"Number of requirements: {len(requirements)}")
 
-    # Logging
     no_of_comparisons = len(responsibilities) * len(requirements)
-    logging.info(f"Expected number of comparisons: {no_of_comparisons}")
+    logger.info(f"Expected number of comparisons: {no_of_comparisons}")
 
-    # Enumerate over responsibilities to capture both index and value
+    # Enumerate over responsibilities and requirements to calculate similarity
     for resp_key, resp in responsibilities.items():
-        # Enumerate over requirements to capture both index and value
         for req_key, req in requirements.items():
-
-            # Debugging
-            logger.info(f"Comparing responsibility: {resp} \nwith requirement: {req}")
-
-            # Compute BERTScore Precision (assuming compute_bertscore_precision is defined)
+            # Calculate similarity metrics
             similarity_dict = text_similarity.short_text_similarity_metrics(resp, req)
 
-            # Append results with responsibility index and value, and requirement index and value
+            # Append results
             similarity_results.append(
                 {
                     "responsibility_key": resp_key,
                     "responsibility": resp,
                     "requirement_key": req_key,
                     "requirement": req,
-                    "BERTScore Precision": similarity_dict["bert_score_precision"],
-                    "Soft Similarity": similarity_dict["soft_similarity"],
-                    "Word Mover's Distance": similarity_dict["word_movers_distance"],
-                    "Deberta Entailment Score": similarity_dict[
+                    "bert_score_precision": similarity_dict["bert_score_precision"],
+                    "soft_similarity": similarity_dict["soft_similarity"],
+                    "word_movers_distance": similarity_dict["word_movers_distance"],
+                    "deberta_entailment_score": similarity_dict[
                         "deberta_entailment_score"
                     ],
                 }
             )
 
-            # Debugging: Check similarity output
-            print(f"Similarity Metrics: {similarity_dict}")
-
-    # Convert results to DataFrame for easy analysis
+    # Convert results to DataFrame
     df_results = pd.DataFrame(similarity_results)
 
-    # Clean dataframe
+    # Clean DataFrame - remove newline characters in string fields
     df_results = df_results.applymap(
         lambda x: str(x).replace("\n", " ") if isinstance(x, str) else x
     )
 
-    # Display the full DataFrame content for debugging purposes
-    print("Complete DataFrame:")
-    print(df_results)
-
+    logger.info("Similarity metrics calculation completed.")
     return df_results
 
 

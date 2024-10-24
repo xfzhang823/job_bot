@@ -31,13 +31,15 @@ from pipelines.exclude_responsibilities_mini_pipeline import (
 from pipelines.resume_pruning_pipeline import (
     run_pipeline as run_resume_pruning_pipeline,
 )
-from pipelines.pruned_resps_files_duplication_mini_pipeline import (
-    run_pipe_line as run_pruned_resps_files_duplication_mini_pipeline,
+from pipelines.copying_resps_to_pruned_resps_dir_mini_pipeline import (
+    run_pipe_line as run_copying_resps_to_pruned_resps_mini_pipeline,
+)
+from pipelines.copying_reqs_to_next_iter_mini_pipeline import (
+    run_pipeline as run_copying_requirements_to_next_iteration_mini_pipeline,
 )
 from pipelines.upserting_mapping_mini_pipeline_iter1 import (
     run_pipeline as run_upserting_mapping_file_pipeline_iter1,
 )
-
 from pipelines.resume_editing_pipeline import (
     run_pipeline as run_resume_editting_pipeline,
 )
@@ -46,6 +48,9 @@ from pipelines.resume_eval_pipeline import (
 )
 from pipelines.resume_eval_pipeline_async import (
     metrics_processing_pipeline_async as run_resume_comparison_pipeline_async,
+)
+from pipelines.resume_eval_pipeline_async import (
+    metrics_re_processing_pipeline_async as re_run_resume_comparison_pipeline_async,
 )
 from pipelines.resume_eval_pipeline_async import (
     multivariate_indices_processing_mini_pipeline_async as run_adding_multivariate_indices_mini_pipeline_async,
@@ -207,7 +212,7 @@ def run_pipeline_2e():
     mapping_file = ITERATE_0_DIR / mapping_file_name
 
     # Copy files to the folder
-    run_pruned_resps_files_duplication_mini_pipeline(mapping_file)
+    run_copying_resps_to_pruned_resps_mini_pipeline(mapping_file)
 
     # Exclude factual responsibilities text
     run_excluding_responsibilities_mini_pipeline(mapping_file)
@@ -297,6 +302,26 @@ def run_pipeline_3b():
 
 
 def run_pipeline_3c():
+    """Run pipeline to copy requirements files from iter 0 to iter 1"""
+    pipe_num = "3c"
+    logger.info(
+        f"Running pipeline {pipe_num}: copying requirements from iteration 0 to iteration 1."
+    )
+    mapping_file_curr_path = ITERATE_1_DIR / mapping_file_name
+    mapping_file_prev_path = ITERATE_0_DIR / mapping_file_name
+
+    # *Run pipeline
+    run_copying_requirements_to_next_iteration_mini_pipeline(
+        mapping_file_prev=mapping_file_prev_path,
+        mapping_file_curr=mapping_file_curr_path,
+    )
+
+    logger.info(
+        f"Finish running pipeline {pipe_num}: copying requirements from iteration 0 to iteration 1."
+    )
+
+
+def run_pipeline_3d():
     pipe_num = "3c"
     logger.info(
         f"Running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
@@ -313,7 +338,7 @@ def run_pipeline_3c():
     )
 
 
-def run_pipeline_3d():
+def run_pipeline_3e():
     pipe_num = "3d"
     logger.info(
         f"Running pipeline {pipe_num}: adding multivariate indices to metrics files"
@@ -426,6 +451,23 @@ async def run_pipeline_3b_async():
     )
 
 
+async def run_pipeline_3d_async():
+    """Async version"""
+    pipe_num = "3d"
+    logger.info(
+        f"Running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
+                to generate similarity related metrics."
+    )
+    mapping_file = ITERATE_1_DIR / mapping_file_name
+
+    await re_run_resume_comparison_pipeline_async(mapping_file)
+
+    logger.info(
+        f"Finish running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
+                to generate similarity related metrics."
+    )
+
+
 def main():
     """main to run the pipelines"""
     # run_pipeline_1()
@@ -435,9 +477,11 @@ def main():
     # run_pipeline_2d()
     # run_pipeline_2e()
     # run_pipeline_3a()
-    asyncio.run(run_pipeline_3b_async())
-    run_pipeline_3c()
-    run_pipeline_3d()
+    # asyncio.run(run_pipeline_3b_async())
+    # run_pipeline_3b()
+    # run_pipeline_3c()
+    asyncio.run(run_pipeline_3d_async())
+    run_pipeline_3e()
 
 
 async def main_async():

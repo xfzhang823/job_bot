@@ -74,9 +74,8 @@ async def modify_resp_based_on_reqs_async(resp_key, resp, reqs, model, model_id)
     """
     # Initialize the async client here for OpenAI (replace with correct async client instantiation)
     openai_api_key = get_openai_api_key()
-    client = AsyncOpenAI(
-        api_key=openai_api_key
-    )  # Assuming you have an AsyncOpenAI client
+    client = AsyncOpenAI(api_key=openai_api_key)  # Use an AsyncOpenAI client
+    logger.info("OpenAI API initialized.")
 
     # Initialize the async text editor with the async client
     text_editor = TextEditor_async(

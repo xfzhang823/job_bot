@@ -24,6 +24,42 @@ from preprocessing.requirements_preprocessor import JobRequirementsParser
 logger = logging.getLogger(__name__)
 
 
+def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict:
+    """
+    Check if the keys (URLs) in the previous and current mapping files are the same.
+
+    Args:
+        file_mapping_prev (dict): Dictionary loaded from the previous mapping file.
+        file_mapping_curr (dict): Dictionary loaded from the current mapping file.
+
+    Returns:
+        dict: A dictionary containing the keys that are only in the previous or only
+        in the current file.
+
+    Raises:
+        ValueError: If there are differences in the keys between the two mapping files.
+    """
+    prev_keys = set(file_mapping_prev.keys())
+    curr_keys = set(file_mapping_curr.keys())
+
+    # Find keys that are only in one of the mappings
+    missing_in_prev = curr_keys - prev_keys
+    missing_in_curr = prev_keys - curr_keys
+
+    if missing_in_prev or missing_in_curr:
+        error_message = (
+            f"Key mismatch detected:\n"
+            f"Missing in previous mapping: {missing_in_prev}\n"
+            f"Missing in current mapping: {missing_in_curr}"
+        )
+        raise ValueError(error_message)
+
+    return {
+        "missing_in_prev": missing_in_prev,
+        "missing_in_curr": missing_in_curr,
+    }
+
+
 # Helper function to create standardized file names
 def create_file_name(
     company: str, job_title: str, suffix: str = "", ext: str = ".json"
