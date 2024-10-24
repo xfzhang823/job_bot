@@ -21,7 +21,7 @@ from evaluation_optimization.metrics_calculator import categorize_scores
 from evaluation_optimization.resumes_editing_sequential import (
     modify_multi_resps_based_on_reqs,
 )
-
+from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
 from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
 from utils.generic_utils import (
     read_from_json_file,
@@ -30,45 +30,8 @@ from utils.generic_utils import (
     verify_file,
 )
 
-
 # Set up logging
 logger = logging.getLogger(__name__)
-
-
-def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict:
-    """
-    Check if the keys (URLs) in the previous and current mapping files are the same.
-
-    Args:
-        file_mapping_prev (dict): Dictionary loaded from the previous mapping file.
-        file_mapping_curr (dict): Dictionary loaded from the current mapping file.
-
-    Returns:
-        dict: A dictionary containing the keys that are only in the previous or only
-        in the current file.
-
-    Raises:
-        ValueError: If there are differences in the keys between the two mapping files.
-    """
-    prev_keys = set(file_mapping_prev.keys())
-    curr_keys = set(file_mapping_curr.keys())
-
-    # Find keys that are only in one of the mappings
-    missing_in_prev = curr_keys - prev_keys
-    missing_in_curr = prev_keys - curr_keys
-
-    if missing_in_prev or missing_in_curr:
-        error_message = (
-            f"Key mismatch detected:\n"
-            f"Missing in previous mapping: {missing_in_prev}\n"
-            f"Missing in current mapping: {missing_in_curr}"
-        )
-        raise ValueError(error_message)
-
-    return {
-        "missing_in_prev": missing_in_prev,
-        "missing_in_curr": missing_in_curr,
-    }
 
 
 def set_directory_paths(

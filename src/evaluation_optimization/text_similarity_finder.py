@@ -36,10 +36,6 @@ import spacy
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Load spacy
-nlp = spacy.load("en_core_web_sm")
-spacy_stopwords = nlp.Defaults.stop_words  # spaCy stopwords
-
 
 def convert_dict_to_array(similarity_dict):
     """
@@ -545,8 +541,13 @@ class AsymmetricTextSimilarity:
         # There is something wrong with this model; I am swapping it out with deberta model for now!
     ):
         """
-        Initialize models and tokenizers for BERT, SBERT, and NLI.
+        Initialize models and tokenizers for BERT, SBERT, and DeBERTa models and move them to GPU if available.
         """
+
+        # Check if CUDA is available and set the device (move to GPU speed things up)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+
         # Load BERT tokenizer and model
         self.tokenizer = BertTokenizer.from_pretrained(bert_model_name)
         self.bert_model = BertModel.from_pretrained(bert_model_name)
@@ -567,6 +568,7 @@ class AsymmetricTextSimilarity:
             deberta_model_name
         )
         self.deberta_tokenizer = AutoTokenizer.from_pretrained(deberta_model_name)
+        self.nlp = spacy.load("en_core_web_md")
 
     def add_context(self, text1, text2, context):
         """Add context to each text if provided."""
@@ -574,6 +576,16 @@ class AsymmetricTextSimilarity:
             text1 = f"{context} {text1}"
             text2 = f"{context} {text2}"
         return text1, text2
+
+    def preprocess_text(self, text):
+        doc = self.nlp(text.lower())  # Convert to lowercase
+        # Remove stopwords, punctuation, and get lemmatized form
+        tokens = [
+            token.lemma_
+            for token in doc
+            if not token.is_stop and not token.is_punct and not token.is_space
+        ]
+        return " ".join(tokens)
 
     def bert_score_precision(self, candidate, reference, context=None):
         """
@@ -663,8 +675,8 @@ class AsymmetricTextSimilarity:
             text1, text2 = self.add_context(text1, text2, context)
 
         # Tokenize using spaCy and compute similarity metric
-        tokens1 = set(token.text.lower() for token in nlp(text1))
-        tokens2 = set(token.text.lower() for token in nlp(text2))
+        tokens1 = set(token.text.lower() for token in self.nlp(text1))
+        tokens2 = set(token.text.lower() for token in self.nlp(text2))
 
         intersection = tokens1.intersection(tokens2)
         union = tokens1.union(tokens2)
@@ -696,7 +708,8 @@ class AsymmetricTextSimilarity:
 
     def word_movers_distance(self, candidate, reference, context=None):
         """
-        Compute the Word Mover's Distance (WMD) between two texts.
+        Compute the Word Mover's Distance (WMD) between two texts -
+        using simple spaCy built in vector methods.
 
         Args:
         - candidate (str): The text representing the responsibility or experience.
@@ -709,18 +722,52 @@ class AsymmetricTextSimilarity:
         if context:
             candidate, reference = self.add_context(candidate, reference, context)
 
-        # Compute Word Mover's Distance
-        # Use spaCy's stopwords
-        vectorizer = CountVectorizer(stop_words=spacy_stopwords).fit(
-            [candidate, reference]
-        )
+        # Use self.nlp instead of creating new instance
+        processed_candidate = self.preprocess_text(candidate)
+        processed_reference = self.preprocess_text(reference)
 
-        vector1 = vectorizer.transform([candidate]).toarray()
-        vector2 = vectorizer.transform([reference]).toarray()
+        doc1 = self.nlp(processed_candidate)
+        doc2 = self.nlp(processed_reference)
 
-        # Calculate the Euclidean distance
+        vector1 = doc1.vector
+        vector2 = doc2.vector
+
+        # Calculate distance
         distance = np.linalg.norm(vector1 - vector2)
         return distance
+
+    # Swapped out this one b/c it was giving me errors.
+    # def word_movers_distance(self, candidate, reference, context=None):
+    #     """
+    #     Compute the Word Mover's Distance (WMD) between two texts.
+
+    #     Args:
+    #     - candidate (str): The text representing the responsibility or experience.
+    #     - reference (str): The text representing the requirement.
+    #     - context (str): Optional context to be added to both texts.
+
+    #     Returns:
+    #     - float: The Word Mover's Distance. A smaller distance indicates more similarity.
+    #     """
+    #     if context:
+    #         candidate, reference = self.add_context(candidate, reference, context)
+
+    #     # Compute Word Mover's Distance
+    #     # Use spaCy's stopwords
+    #     vectorizer = CountVectorizer(stop_words=list(spacy_stopwords)).fit(
+    #         [candidate, reference]
+    #     )
+
+    #     vector1 = vectorizer.transform([candidate])
+    #     vector2 = vectorizer.transform([reference])
+
+    #     # Convert the sparse matrices to dense format (numpy arrays)
+    #     vector1_dense = vector1.to_array()
+    #     vector2_dense = vector2.to_array()
+
+    #     # Calculate the Euclidean distance
+    #     distance = np.linalg.norm(vector1_dense - vector2_dense)
+    #     return distance
 
     def short_text_similarity_metrics(self, candidate, reference, context=None):
         """
@@ -738,18 +785,38 @@ class AsymmetricTextSimilarity:
             dict: A dictionary containing all computed similarity scores.
         """
         similarities = {}
-        similarities["bert_score_precision"] = self.bert_score_precision(
-            candidate, reference, context
-        )
-        similarities["soft_similarity"] = self.soft_similarity(
-            candidate, reference, context
-        )
-        similarities["word_movers_distance"] = self.word_movers_distance(
-            candidate, reference, context
-        )
-        similarities["deberta_entailment_score"] = self.deberta_entailment_score(
-            candidate, reference, context
-        )
+
+        try:
+            similarities["bert_score_precision"] = self.bert_score_precision(
+                candidate, reference, context
+            )
+        except Exception as e:
+            logger.error(f"Error in BERTScore precision: {e}")
+            similarities["bert_score_precision"] = None
+
+        try:
+            similarities["soft_similarity"] = self.soft_similarity(
+                candidate, reference, context
+            )
+        except Exception as e:
+            logger.error(f"Error in Soft Similarity: {e}")
+            similarities["soft_similarity"] = None
+
+        try:
+            similarities["word_movers_distance"] = self.word_movers_distance(
+                candidate, reference, context
+            )
+        except Exception as e:
+            logger.error(f"Error in Word Mover's Distance: {e}")
+            similarities["word_movers_distance"] = None
+
+        try:
+            similarities["deberta_entailment_score"] = self.deberta_entailment_score(
+                candidate, reference, context
+            )
+        except Exception as e:
+            logger.error(f"Error in DeBERTa Entailment Score: {e}")
+            similarities["deberta_entailment_score"] = None
 
         return similarities
 

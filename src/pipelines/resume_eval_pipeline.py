@@ -72,6 +72,7 @@ def add_multivariate_indices(df):
         print(f"An error occurred: {e}")
 
 
+# *Processing the dataframe first and then validate w/t pydantic
 def generate_metrics_from_flat_json(
     reqs_flat_file: Path,
     resps_flat_file: Path,
@@ -198,28 +199,43 @@ def generate_metrics_from_flat_json(
         return
 
 
+# *add metrics by processing each row of the dataframe, validate w/t pydantic
+# * and then append the rows to form the dataframe.
 def generate_matching_metrics_from_nested_json(
-    reqs_file: Path, resps_file: Path, metrics_csv_file: Path
+    reqs_file: Union[Path, str],
+    resps_file: Union[Path, str],
+    metrics_csv_file: Union[Path, str],
 ) -> None:
     """
-    Generate similarity metrics between nested responsibilities and requirements and save to a CSV file.
+    Generate similarity metrics between nested responsibilities and requirements
+    and save to a CSV file.
 
     Args:
-        reqs_file (Path): Path to the requirements JSON file.
-        resps_file (Path): Path to the nested responsibilities JSON file.
-        metrics_csv_file (Path): Path where the output CSV file should be saved.
+        reqs_file (Path or str): Path to the requirements JSON file.
+        resps_file (Path or str): Path to the nested responsibilities JSON file.
+        metrics_csv_file (Path or str): Path where the output CSV file should be saved.
 
     Returns:
         None
     """
+    # Step 0: Ensure inputs are Path obj.
+    reqs_file = Path(reqs_file)
+    resps_file = Path(resps_file)
+    metrics_csv_file = Path(metrics_csv_file)
+
     # Step 1: Load and validate responsibilities and requirements using Pydantic models
     try:
-        resps_data = ResponsibilityMatches.model_validate(resps_file)
+        # Read and validate responsibilities
+        resps_data = read_from_json_file(resps_file)
+        validated_resps_data = ResponsibilityMatches.model_validate(resps_data)
+
+        # Read and validate requirments
         reqs_data = read_from_json_file(
             reqs_file
         )  # Loading requirements directly as a dict
+        validated_reqs_data = Requirements.model_validate(reqs_data)
 
-        if not resps_data or not reqs_data:
+        if not validated_resps_data or not validated_reqs_data:
             logger.error(
                 "One of the required datasets (responsibilities or requirements) is empty."
             )
@@ -235,19 +251,23 @@ def generate_matching_metrics_from_nested_json(
         logger.error(f"Error loading files: {e}")
         return
 
-    similarity_results = []
+    validated_rows = []
 
     # Step 2: Iterate through the responsibilities and requirements
-    for responsibility_key, responsibility_match in resps_data.responsibilities.items():
+    for (
+        responsibility_key,
+        responsibility_match,
+    ) in validated_resps_data.responsibilities.items():
         for (
             requirement_key,
             optimized_text_obj,
         ) in responsibility_match.optimized_by_requirements.items():
-            optimized_text = optimized_text_obj.optimized_text
+            responsibility_text = optimized_text_obj.optimized_text
 
-            # Look up the corresponding requirement using the requirement_key
-            requirement_text = reqs_data.get(requirement_key)
-            if not requirement_text:
+            # Access the corresponding requirement using the Pydantic model
+            try:
+                requirement_text = validated_reqs_data.requirements[requirement_key]
+            except KeyError:
                 logger.warning(
                     f"No matching requirement found for requirement_key: {requirement_key}"
                 )
@@ -255,30 +275,76 @@ def generate_matching_metrics_from_nested_json(
 
             # Step 3: Calculate similarity metrics between responsibility and requirement
             similarity_metrics = calculate_text_similarity_metrics(
-                optimized_text, requirement_text
+                responsibility_text, requirement_text
             )
 
-            # Step 4: Store the result for this responsibility/requirement pair
-            similarity_results.append(
-                {
-                    "responsibility_key": responsibility_key,
-                    "requirement_key": requirement_key,
-                    "optimized_text": optimized_text,
-                    "requirement_text": requirement_text,
-                    "similarity_metrics": similarity_metrics,
-                }
-            )
+            # Step 4: Validate using SimilarityMetrics model
+            try:
+                similarity_metrics_model = SimilarityMetrics(
+                    responsibility_key=responsibility_key,
+                    responsibility=responsibility_text,
+                    requirement_key=requirement_key,
+                    requirement=requirement_text,
+                    bert_score_precision=similarity_metrics[
+                        "bert_score_precision"
+                    ],  # Explicit mapping
+                    soft_similarity=similarity_metrics[
+                        "soft_similarity"
+                    ],  # Explicit mapping
+                    word_movers_distance=similarity_metrics[
+                        "word_movers_distance"
+                    ],  # Explicit mapping
+                    deberta_entailment_score=similarity_metrics[
+                        "deberta_entailment_score"
+                    ],  # Explicit mapping
+                    # Optional fields (if present in similarity metrics)
+                    bert_score_precision_cat=similarity_metrics.get(
+                        "bert_score_precision_cat"
+                    ),
+                    soft_similarity_cat=similarity_metrics.get("soft_similarity_cat"),
+                    word_movers_distance_cat=similarity_metrics.get(
+                        "word_movers_distance_cat"
+                    ),
+                    deberta_entailment_score_cat=similarity_metrics.get(
+                        "deberta_entailment_score_cat"
+                    ),
+                    scaled_bert_score_precision=similarity_metrics.get(
+                        "scaled_bert_score_precision"
+                    ),
+                    scaled_deberta_entailment_score=similarity_metrics.get(
+                        "scaled_deberta_entailment_score"
+                    ),
+                    scaled_soft_similarity=similarity_metrics.get(
+                        "scaled_soft_similarity"
+                    ),
+                    scaled_word_movers_distance=similarity_metrics.get(
+                        "scaled_word_movers_distance"
+                    ),
+                    composite_score=similarity_metrics.get("composite_score"),
+                    pca_score=similarity_metrics.get("pca_score"),
+                )
+                validated_rows.append(similarity_metrics_model.model_dump())
 
-    # Step 5: Convert results to a DataFrame and categorize scores
-    similarity_df = pd.DataFrame(similarity_results)
-    similarity_df = categorize_scores_for_df(similarity_df)
+            except ValidationError as ve:
+                logger.error(
+                    f"Validation error for responsibility {responsibility_key}: {ve}"
+                )
+                continue
 
-    # Step 6: Save the results to a CSV file
-    similarity_df.to_csv(metrics_csv_file, index=False)
-    logger.info(f"Similarity metrics saved to file ({metrics_csv_file})")
+    # Step 5: Convert validated results to a DataFrame and categorize scores
+    if validated_rows:
+        final_df = pd.DataFrame(validated_rows)
+        final_df = categorize_scores_for_df(final_df)
+
+        # Step 6: Save the validated metrics to a CSV file
+        final_df.to_csv(metrics_csv_file, index=False)
+        logger.info(f"Similarity metrics saved successfully to {metrics_csv_file}")
+    else:
+        logger.error("No valid similarity metrics data to save.")
+        return
 
     # Display the top rows of the DataFrame for verification
-    print(similarity_df.head(5))
+    print(final_df.head(5))
 
 
 def unpack_and_combine_json(nested_json, requirements_json):
@@ -594,7 +660,12 @@ def metrics_re_processing_pipeline(
 
         # Step 3.1: Check if reqs and resps files exist and are valid JSON files
         if not reqs_file.exists() or not resps_file.exists():
-            logger.error(f"Skipping {url} due to invalid files.")
+            if not reqs_file.exists():
+                logger.error(f"Skipping {url}: Missing requirements file {reqs_file}")
+            if not resps_file.exists():
+                logger.error(
+                    f"Skipping {url}: Missing responsibilities file {resps_file}"
+                )
             continue
 
         # Step 3.2: Generate the metrics file

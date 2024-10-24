@@ -6,7 +6,7 @@ import shutil
 import logging
 import logging_config
 from pathlib import Path
-from typing import Union, Dict, List, Any, overload, Optional
+from typing import Union, Dict, List, Any, overload, Optional, Tuple
 from pydantic import BaseModel
 import pandas as pd
 from utils.get_file_names import get_file_names
@@ -166,7 +166,41 @@ def copy_files_btw_directories(src_folder: str, dest_folder: str, src_file: str 
                     )
 
 
-def check_json_file(file_path: str):
+def compare_keys_in_json_files(
+    file1: Union[Path, str], file2: Union[Path, str]
+) -> Tuple[List[str], List[str]]:
+    """
+    Compare the keys of two JSON files and return missing keys in both directions.
+
+    Args:
+        file1 (Union[Path, str]): Path to the first JSON file.
+        file2 (Union[Path, str]): Path to the second JSON file.
+
+    Returns:
+        Tuple[List[str], List[str]]: A tuple where the first list contains keys missing in file2 but present in file1,
+                                     and the second list contains keys missing in file1 but present in file2.
+    """
+    # Convert str to Path if necessary
+    file1 = Path(file1) if isinstance(file1, str) else file1
+    file2 = Path(file2) if isinstance(file2, str) else file2
+
+    # Load JSON data from both files
+    with file1.open("r") as f1, file2.open("r") as f2:
+        data1 = json.load(f1)
+        data2 = json.load(f2)
+
+    # Get the keys from both files
+    keys1 = set(data1.keys())
+    keys2 = set(data2.keys())
+
+    # Find missing keys in both directions
+    missing_in_file2 = keys1 - keys2  # Keys present in file1 but missing in file2
+    missing_in_file1 = keys2 - keys1  # Keys present in file2 but missing in file1
+
+    return list(missing_in_file2), list(missing_in_file1)
+
+
+def check_if_json(file_path: str):
     """
     Checks if the file path exists and its extension is .json.
 
@@ -343,7 +377,7 @@ def load_or_create_json(filepath, key=None):
             - is_existing (bool): True if the key exists in the JSON data, False otherwise.
     """
     # Check if the JSON file exists
-    if check_json_file(filepath):
+    if check_if_json(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
