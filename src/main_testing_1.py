@@ -1,22 +1,18 @@
 """ Temp for testing """
 
 import pandas as pd
-from evaluation_optimization.resume_pruner import ResponsibilitiesPruner
+from pydantic import ValidationError
+from models.resume_job_description_io_models import SimilarityMetrics
+from utils.validation_utils import validate_dataframe_with_pydantic
 
 
 def main():
+    f_path = r"C:\github\job_bot\input_output\evaluation_optimization\iteration_1\similarity_metrics\Amazon_Product_Manager__Artificial_General_Intelligence_-_Data_Services_sim_metrics_iter1.csv"
 
-    adjustment = 10
-    file_path = r"C:\github\job_bot\data\testing_pruner_data.csv"
-    # Create the DataFrame
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(f_path)
 
-    pruner = ResponsibilitiesPruner(df)
-    results = pruner.run_pruning_process(max_k=7, S=6)
-
-    print(f"S adjustment: {adjustment}")
-    print(f"original: {len(df)}")
-    print(f"after: {len(results)}")
+    validated_rows = validate_dataframe_with_pydantic(df)
+    print(validated_rows)
 
 
 if __name__ == "__main__":

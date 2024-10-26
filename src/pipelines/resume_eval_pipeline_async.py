@@ -93,6 +93,7 @@ def add_multivariate_indices(df):
         print(f"An error occurred: {e}")
 
 
+# ?This has mistakes... need to fix
 async def generate_matching_metrics_async(reqs_file, resps_file, sim_metrics_file):
     """
     Generate and save similarity metrics asynchronously.
@@ -258,70 +259,6 @@ async def generate_matching_metrics_from_nested_json_async(
 
     # Display the top rows of the DataFrame for verification
     print(final_df.head(5))
-
-
-# def unpack_and_combine_json(nested_json, requirements_json):
-#     """
-#     Unpacks the nested responsibilities JSON and combines it with matching requirement texts
-#     from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
-
-#     Args:
-#         nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
-#         requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
-
-#     Returns:
-#         list: A list of dictionaries containing responsibility_keys, requirement_keys,
-#               responsibility texts, and matched requirement texts.
-
-#     Error Handling:
-#         - If a requirement_key is not found in the requirements JSON, it will skip that entry.
-#         - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
-#         - Logs warnings for missing fields and unmatched keys for better traceability.
-#     """
-#     results = []
-
-#     for resp_key, values in nested_json.items():  # Unpack the 1st level
-#         if not isinstance(values, dict):
-#             logger.info(
-#                 f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
-#             )
-#             continue
-
-#         for req_key, sub_value in values.items():  # Unpack the 2nd level
-#             if not isinstance(sub_value, dict):
-#                 logger.info(
-#                     f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
-#                 )
-#                 continue
-
-#             # Extract the optimized_text
-#             if "optimized_text" in sub_value:
-#                 optimized_text = sub_value["optimized_text"]
-#             else:
-#                 logger.info(
-#                     f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
-#                 )
-#                 continue
-
-#             # Perform the lookup in the requirements JSON
-#             requirement_text = requirements_json.get(req_key)
-#             if requirement_text is None:
-#                 logger.info(
-#                     f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
-#                 )
-#                 continue
-
-#             # Append results to a list for further processing
-#             results.append(
-#                 {
-#                     "responsibility_key": resp_key,
-#                     "requirement_key": req_key,
-#                     "responsibility_text": optimized_text,
-#                     "requirement_text": requirement_text,
-#                 }
-#             )
-
-#     return results
 
 
 async def metrics_processing_pipeline_async(

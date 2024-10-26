@@ -339,7 +339,7 @@ def run_pipeline_3d():
 
 
 def run_pipeline_3e():
-    pipe_num = "3d"
+    pipe_num = "3e"
     logger.info(
         f"Running pipeline {pipe_num}: adding multivariate indices to metrics files"
     )
@@ -480,7 +480,7 @@ def main():
     # asyncio.run(run_pipeline_3b_async())
     # run_pipeline_3b()
     # run_pipeline_3c()
-    asyncio.run(run_pipeline_3d_async())
+    # asyncio.run(run_pipeline_3d_async())
     run_pipeline_3e()
 
 
