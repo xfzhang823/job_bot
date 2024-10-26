@@ -1,3 +1,8 @@
+"""
+Filename: resume_eval_pipeline.py
+Last updated: 2024 Oct 25
+"""
+
 import os
 from pathlib import Path
 import pandas as pd
@@ -38,7 +43,7 @@ from models.resume_job_description_io_models import (
 logger = logging.getLogger(__name__)
 
 
-def add_multivariate_indices(df):
+def add_multivariate_indices(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add multivariate indices to the DataFrame using the MultivariateIndexer.
 
@@ -65,11 +70,8 @@ def add_multivariate_indices(df):
         return df
 
     except ValueError as ve:
-        print(f"ValueError: {ve}")
-    except AttributeError as ae:
-        print(f"AttributeError: {ae}. Ensure MultivariateIndexer and its method exist.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"Error in multivariate index calculation: {ve}")
+        return df  # Return the original DataFrame if there's an error
 
 
 # *Processing the dataframe first and then validate w/t pydantic
@@ -347,68 +349,68 @@ def generate_matching_metrics_from_nested_json(
     print(final_df.head(5))
 
 
-def unpack_and_combine_json(nested_json, requirements_json):
-    """
-    Unpacks the nested responsibilities JSON and combines it with matching requirement texts
-    from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
+# def unpack_and_combine_json(nested_json, requirements_json):
+#     """
+#     Unpacks the nested responsibilities JSON and combines it with matching requirement texts
+#     from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
 
-    Args:
-        nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
-        requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
+#     Args:
+#         nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
+#         requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
 
-    Returns:
-        list: A list of dictionaries containing responsibility_keys, requirement_keys,
-              responsibility texts, and matched requirement texts.
+#     Returns:
+#         list: A list of dictionaries containing responsibility_keys, requirement_keys,
+#               responsibility texts, and matched requirement texts.
 
-    Error Handling:
-        - If a requirement_key is not found in the requirements JSON, it will skip that entry.
-        - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
-        - Logs warnings for missing fields and unmatched keys for better traceability.
-    """
-    results = []
+#     Error Handling:
+#         - If a requirement_key is not found in the requirements JSON, it will skip that entry.
+#         - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
+#         - Logs warnings for missing fields and unmatched keys for better traceability.
+#     """
+#     results = []
 
-    for resp_key, values in nested_json.items():  # Unpack the 1st level
-        if not isinstance(values, dict):
-            logger.info(
-                f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
-            )
-            continue
+#     for resp_key, values in nested_json.items():  # Unpack the 1st level
+#         if not isinstance(values, dict):
+#             logger.info(
+#                 f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
+#             )
+#             continue
 
-        for req_key, sub_value in values.items():  # Unpack the 2nd level
-            if not isinstance(sub_value, dict):
-                logger.info(
-                    f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
-                )
-                continue
+#         for req_key, sub_value in values.items():  # Unpack the 2nd level
+#             if not isinstance(sub_value, dict):
+#                 logger.info(
+#                     f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
+#                 )
+#                 continue
 
-            # Extract the optimized_text
-            if "optimized_text" in sub_value:
-                optimized_text = sub_value["optimized_text"]
-            else:
-                logger.info(
-                    f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
-                )
-                continue
+#             # Extract the optimized_text
+#             if "optimized_text" in sub_value:
+#                 optimized_text = sub_value["optimized_text"]
+#             else:
+#                 logger.info(
+#                     f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
+#                 )
+#                 continue
 
-            # Perform the lookup in the requirements JSON
-            requirement_text = requirements_json.get(req_key)
-            if requirement_text is None:
-                logger.info(
-                    f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
-                )
-                continue
+#             # Perform the lookup in the requirements JSON
+#             requirement_text = requirements_json.get(req_key)
+#             if requirement_text is None:
+#                 logger.info(
+#                     f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
+#                 )
+#                 continue
 
-            # Append results to a list for further processing
-            results.append(
-                {
-                    "responsibility_key": resp_key,
-                    "requirement_key": req_key,
-                    "responsibility_text": optimized_text,
-                    "requirement_text": requirement_text,
-                }
-            )
+#             # Append results to a list for further processing
+#             results.append(
+#                 {
+#                     "responsibility_key": resp_key,
+#                     "requirement_key": req_key,
+#                     "responsibility_text": optimized_text,
+#                     "requirement_text": requirement_text,
+#                 }
+#             )
 
-    return results
+#     return results
 
 
 def multivariate_indices_processing_mini_pipeline(
@@ -431,6 +433,7 @@ def multivariate_indices_processing_mini_pipeline(
     - ValueError if the directory does not exist.
     """
     # Step 1: Validate the Input Directory
+    data_directory = Path(data_directory)
     if validate_input:
         try:
             pipeline_input = PipelineInput(data_directory=data_directory)
@@ -440,73 +443,203 @@ def multivariate_indices_processing_mini_pipeline(
             logger.error(f"Input validation error: {ve}")
             raise ValueError(f"Invalid input directory: {ve}") from ve
 
-    try:
-        # Step 2: Find CSV files missing multivariate indices
-        files_need_to_process = get_files_wo_multivariate_indices(data_directory)
-        logger.info(f"Files that need processing: {files_need_to_process}")
+    # Step 2: Find CSV files missing multivariate indices
+    files_need_to_process = get_files_wo_multivariate_indices(data_directory)
+    if not files_need_to_process:
+        logger.info("No files require processing. Exiting pipeline.")
+        return
 
-        # *Explicit Check for Empty List
-        if not files_need_to_process:
-            logger.info("No files require processing. Exiting pipeline.")
-            return  # Early exit
+    for file in files_need_to_process:
+        try:
+            df = pd.read_csv(file)
 
-        # Step 3: Iterate to add composite and PCA scores
-        for file in files_need_to_process:
-            logger.info(f"Processing file: {file}")
-            try:
-                df = pd.read_csv(file)
+            # Verify required columns exist in the DataFrame before row-level validation
+            required_columns = {
+                "responsibility_key",
+                "responsibility",
+                "requirement_key",
+                "requirement",
+                "bert_score_precision",
+                "soft_similarity",
+                "word_movers_distance",
+                "deberta_entailment_score",
+            }
+            missing_columns = required_columns - set(df.columns)
+            if missing_columns:
+                logger.error(
+                    f"File '{file}' is missing required columns: {missing_columns}"
+                )
+                continue  # Skip files missing required columns
 
-                # Step 4.1: Validate Each Row in the DataFrame
-                validated_rows = []
-                for index, row in df.iterrows():
-                    try:
-                        # Convert the row to a dictionary
-                        row_dict = row.to_dict()
-                        # Validate the row using the SimilarityMetrics model
-                        validated_row = SimilarityMetrics(**row_dict)
-                        # Append the validated row as a dictionary
-                        validated_rows.append(validated_row.dict())
-                    except ValidationError as ve:
-                        logger.error(
-                            f"Validation error in file '{file}', row {index}: {ve}"
-                        )
-                        continue  # Skip invalid rows
+            # Step 3: Validate Each Row Using the Model
+            validated_rows = []
+            for index, row in df.iterrows():
+                try:
+                    validated_row = SimilarityMetrics(**row.to_dict())
+                    validated_rows.append(validated_row.model_dump())
+                except ValidationError as ve:
+                    logger.warning(f"Validation error in row {index} of '{file}': {ve}")
+                    continue
 
-                if not validated_rows:
-                    logger.warning(
-                        f"No valid data to process in file '{file}'. Skipping."
-                    )
-                    continue  # Skip to the next file
-
-                # Convert validated rows back to a DataFrame
-                validated_df = pd.DataFrame(validated_rows)
-                logger.info(f"Validated data for file '{file}'.")
-
-                # Step 4.2: Add Multivariate Indices
-                updated_df = add_indices_func(validated_df)
-                logger.info(f"Added multivariate indices to file '{file}'.")
-
-                # Step 4.3: Save the Updated DataFrame to CSV
-                updated_df.to_csv(file, index=False)
-                logger.info(f"Successfully processed and saved '{file}'.")
-
-            except FileNotFoundError as fe:
-                logger.error(f"File not found: {fe.filename}. Skipping.")
-                continue
-            except pd.errors.EmptyDataError:
-                logger.error(f"No data found in file '{file}'. Skipping.")
-                continue
-            except Exception as e:
-                logger.error(f"Unexpected error processing file '{file}': {e}")
+            # Convert validated rows to a DataFrame
+            validated_df = pd.DataFrame(validated_rows)
+            if validated_df.empty:
+                logger.warning(f"No valid data in file '{file}'. Skipping.")
                 continue
 
-    except Exception as e:
-        logger.error(f"Error during pipeline processing: {e}")
-        raise  # Re-raise the exception after logging
+            # Step 4: Apply Multivariate Indices Function
+            updated_df = add_indices_func(validated_df)
+            if updated_df is None:
+                logger.error(
+                    f"Function {add_indices_func.__name__} returned None for file '{file}'. Skipping."
+                )
+                continue
+
+            # Step 5: Save Updated DataFrame
+            updated_df.to_csv(file, index=False)
+            logger.info(f"Successfully processed and saved '{file}'.")
+
+        except FileNotFoundError:
+            logger.error(f"File not found: '{file}'. Skipping.")
+            continue
+        except pd.errors.EmptyDataError:
+            logger.error(f"No data found in file '{file}'. Skipping.")
+            continue
+        except Exception as e:
+            logger.error(f"Unexpected error processing file '{file}': {e}")
+            continue
 
     logger.info(
         f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
     )
+
+    # # Step 1: Validate the Input Directory
+    # data_directory = Path(data_directory)  # Ensure this param is Path
+    # if validate_input:
+    #     try:
+    #         pipeline_input = PipelineInput(data_directory=data_directory)
+    #         data_directory = pipeline_input.data_directory  # Now a Path object
+
+    #         logger.info(f"Validated data directory: {data_directory}")
+    #     except ValidationError as ve:
+    #         logger.error(f"Input validation error: {ve}")
+    #         raise ValueError(f"Invalid input directory: {ve}") from ve
+
+    # try:
+    #     # Step 2: Find CSV files missing multivariate indices
+    #     files_need_to_process = get_files_wo_multivariate_indices(data_directory)
+    #     logger.info(f"Files that need processing: {files_need_to_process}")
+
+    #     # *Explicit Check for Empty List
+    #     if not files_need_to_process:
+    #         logger.info("No files require processing. Exiting pipeline.")
+    #         return  # Early exit
+
+    #     # Step 3: Validate Each Row Using the Model
+    #     validated_rows = []
+    #     for index, row in df.iterrows():
+    #         try:
+    #             validated_row = SimilarityMetrics(**row.to_dict())
+    #             validated_rows.append(validated_row.dict())
+    #         except ValidationError as ve:
+    #             logger.warning(f"Validation error in row {index} of '{file}': {ve}")
+    #             continue
+
+    #     # Convert validated rows to a DataFrame
+    #     validated_df = pd.DataFrame(validated_rows)
+    #     if validated_df.empty:
+    #         logger.warning(f"No valid data in file '{file}'. Skipping.")
+    #         continue
+
+    #     # Step 3: Iterate to add composite and PCA scores
+    #     for file in files_need_to_process:
+    #         logger.info(f"Processing file: {file}")
+
+    #         try:
+    #             df = pd.read_csv(file)
+
+    #             # Verify required columns exist in the DataFrame before row-level validation
+    #             required_columns = {
+    #                 "responsibility_key",
+    #                 "responsibility",
+    #                 "requirement_key",
+    #                 "requirement",
+    #                 "bert_score_precision",
+    #                 "soft_similarity",
+    #                 "word_movers_distance",
+    #                 "deberta_entailment_score",
+    #             }
+    #             missing_columns = required_columns - set(df.columns)
+    #             if missing_columns:
+    #                 logger.error(
+    #                     f"File '{file}' is missing required columns: {missing_columns}"
+    #                 )
+    #                 continue  # Skip files missing required columns
+
+    #             # Step 4.1: Validate Each Row in the DataFrame
+    #             validated_rows = []
+    #             for index, row in df.iterrows():
+    #                 try:
+    #                     # Convert the row to a dictionary
+    #                     row_dict = row.to_dict()
+
+    #                     # Validate the row using the SimilarityMetrics model
+    #                     validated_row = SimilarityMetrics(**row_dict)
+
+    #                     # Append the validated row as a dictionary
+    #                     validated_rows.append(validated_row.model_dump())
+
+    #                 except ValidationError as ve:
+    #                     logger.error(
+    #                         f"Validation error in file '{file}', row {index}: {ve}"
+    #                     )
+    #                     continue  # Skip invalid rows
+
+    #             if not validated_rows:
+    #                 logger.warning(
+    #                     f"No valid data to process in file '{file}'. Skipping."
+    #                 )
+    #                 continue  # Skip to the next file
+
+    #             # Convert validated rows back to a DataFrame
+    #             validated_df = pd.DataFrame(validated_rows)
+    #             logger.info(f"Validated data for file '{file}'.")
+
+    #             # Step 4.2: Add Multivariate Indices
+    #             updated_df = add_indices_func(validated_df)
+
+    #             # Ensure add_indices_func returns a DataFrame
+    #             if updated_df is None:
+    #                 logger.error(
+    #                     f"Function {add_indices_func.__name__} returned None for file '{file}'. Skipping."
+    #                 )
+    #                 continue
+
+    #             logger.info(f"Added multivariate indices to file '{file}'.")
+
+    #             print(updated_df)  # Debugging
+
+    #             # Step 4.3: Save the Updated DataFrame to CSV
+    #             updated_df.to_csv(file, index=False)
+    #             logger.info(f"Successfully processed and saved '{file}'.")
+
+    #         except FileNotFoundError as fe:
+    #             logger.error(f"File not found: {fe.filename}. Skipping.")
+    #             continue
+    #         except pd.errors.EmptyDataError:
+    #             logger.error(f"No data found in file '{file}'. Skipping.")
+    #             continue
+    #         except Exception as e:
+    #             logger.error(f"Unexpected error processing file '{file}': {e}")
+    #             continue
+
+    # except Exception as e:
+    #     logger.error(f"Error during pipeline processing: {e}")
+    #     raise  # Re-raise the exception after logging
+
+    # logger.info(
+    #     f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
+    # )
 
     # try:
     #     # Step 3: Find CSV files missing multivariate indices

@@ -4,6 +4,7 @@
 import os
 import json
 import logging
+import logging_config
 import re
 from io import StringIO
 from dotenv import load_dotenv
@@ -13,6 +14,8 @@ from typing import Union
 import openai
 from openai import OpenAI
 import ollama
+from anthropic import Anthropic
+
 from models.llm_response_models import (
     CodeResponse,
     JSONResponse,
@@ -267,6 +270,146 @@ def call_llama3(
         raise
 
 
+def call_claude_api(
+    prompt,
+    client=None,
+    model_id="claude-3-5-sonnet-20241022",  # Changed default model
+    expected_res_type="str",
+    context_type: str = "",
+    temperature=0.4,
+    max_tokens=1056,
+) -> Union[
+    TextResponse,
+    JSONResponse,
+    TabularResponse,
+    CodeResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+]:
+    """
+    Handles API call to Anthropic Claude to generate responses based on a given prompt and expected response type.
+
+    Args:
+        - client: Anthropic API client instance (optional)
+        - model_id (str): Model ID to use for the Claude API call.
+        - prompt (str): The prompt to send to the API.
+        - expected_res_type (str): The expected type of response from the API
+        ('str', 'json', 'tabular', or 'code').
+        - context_type (str): Specifies whether to use a job-related JSON model or
+        an editing model for JSON ("editing" or "job_site")
+        - temperature (float): creativity of the response (0 to 1.0)
+        - max_tokens (int): Maximum tokens to be generated in response.
+    Returns:
+    - Union[str, JSONResponse, pd.DataFrame, CodeResponse]:
+    Response formatted according to the specified expected_response_type ()
+
+    - Union: A utility from Python's typing module
+    - str: plain text response
+    - JSONResponse: a custom Pydantic model for JSON response (e.g., inherited from pydantic.BaseModel).
+    - pd.DataFrame: pandas object; for tabular response
+    - CodeResponse: a custom Pydantic model for code response (e.g., inherited from pydantic.BaseModel).
+    """
+    if not client:
+        claude_api_key = get_claude_api_key()
+        client = Anthropic(api_key=claude_api_key)
+        logger.info("Anthropic API instantiated.")
+
+    try:
+        logger.info(f"Making API call with expected response type: {expected_res_type}")
+
+        # Define available models (moved outside the try block)
+        claude_opus = "claude-3-opus-20240229"
+        claude_sonnet = "claude-3-5-sonnet-20241022"
+        claude_haiku = "claude-3-haiku-20240307"
+
+        # Combine system messageand prompt into a single user message
+        # Claude doesn't have separate user/system setup - just one
+        system_instruction = "You are a helpful assistant who strictly adheres to \
+            the provided instructions."
+        full_prompt = system_instruction + prompt
+
+        # Single API call using messages endpoint
+        response = client.messages.create(
+            model=model_id,
+            max_tokens=max_tokens,
+            messages=[
+                {
+                    "role": "user",
+                    "content": full_prompt,
+                },
+            ],
+            temperature=temperature,
+        )
+
+        # Extract the content from the response
+        response_content = response.content[0].text.strip()
+        logger.info(f"Raw LLM Response: {response_content}")
+
+        # Check if the response is empty
+        if not response_content:
+            logger.error("Received an empty response from Claude API.")
+            raise ValueError("Received an empty response from Claude API.")
+
+        # Rest of the function remains the same since it's handling the response parsing
+        if expected_res_type == "str":
+            parsed_response = TextResponse(content=response_content)
+            return parsed_response
+
+        elif expected_res_type == "json":
+            try:
+                cleaned_response_content = clean_and_extract_json(response_content)
+                if not cleaned_response_content:
+                    logger.error("Received an empty response after cleaning.")
+                    raise ValueError("Received an empty response after cleaning.")
+
+                response_dict = json.loads(cleaned_response_content)
+
+                if context_type == "editing":
+                    return EditingResponseModel(
+                        optimized_text=response_dict.get("optimized_text")
+                    )
+                elif context_type == "job_site":
+                    return JobSiteResponseModel(
+                        url=response_dict.get("url"),
+                        job_title=response_dict.get("job_title"),
+                        company=response_dict.get("company"),
+                        location=response_dict.get("location"),
+                        salary_info=response_dict.get("salary_info"),
+                        posted_date=response_dict.get("posted_date"),
+                        content=response_dict.get("content"),
+                    )
+                else:
+                    return JSONResponse(data=response_dict)
+
+            except (json.JSONDecodeError, ValidationError) as e:
+                logger.error(f"Failed to parse JSON or validate with Pydantic: {e}")
+                raise ValueError("Invalid JSON format received from Claude API.")
+
+        elif expected_res_type == "tabular":
+            try:
+                df = pd.read_csv(StringIO(response_content))
+                parsed_response = TabularResponse(data=df)
+                return parsed_response
+            except Exception as e:
+                logger.error(f"Error parsing tabular data: {e}")
+                raise ValueError("Invalid tabular format received from Claude API.")
+
+        elif expected_res_type == "code":
+            parsed_response = CodeResponse(code=response_content)
+            return parsed_response
+
+        else:
+            logger.error(f"Unsupported expected_response_type: {expected_res_type}")
+            raise ValueError(f"Unsupported expected_response_type: {expected_res_type}")
+
+    except (json.JSONDecodeError, ValidationError) as e:
+        logger.error(f"Validation or parsing error: {e}")
+        raise ValueError(f"Invalid format received from Claude API: {e}")
+    except Exception as e:
+        logger.error(f"Claude API call failed: {e}")
+        raise
+
+
 def clean_and_extract_json(response_content):
     """Ensure that a response does not have text other than json"""
     # Use regex to extract the JSON block from the response
@@ -345,4 +488,16 @@ def get_openai_api_key():
     else:
         logging.error("OpenAI API key not found. Please set it in the .env file.")
         raise EnvironmentError("OpenAI API key not found.")
+    return api_key
+
+
+def get_claude_api_key():
+    """Returns claude api key as str"""
+    load_dotenv()  # Load environment variables from .env file
+    api_key = os.getenv("CLAUDE_API_KEY")  # Get the API key from environment variables
+    if api_key:
+        logging.info("Claude API key successfully loaded.")
+    else:
+        logging.error("Claude API key not found. Please set it in the .env file.")
+        raise EnvironmentError("Claude API key not found.")
     return api_key

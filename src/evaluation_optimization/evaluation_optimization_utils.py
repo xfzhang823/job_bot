@@ -8,7 +8,7 @@ import os
 import re
 import logging
 import logging_config
-from typing import List, Union
+from typing import List, Optional, Union
 import pandas as pd
 import json
 from utils.generic_utils import read_from_json_file
@@ -119,8 +119,8 @@ def check_file_existence(file_path):
 
 
 def get_files_wo_multivariate_indices(
-    data_directory: Union[str, Path], indices: list = None
-) -> list:
+    data_directory: Union[str, Path], indices: Optional[List[str]] = None
+) -> List:
     """
     Find .csv files in the specified directory that contain the required metrics
     but do not contain the specified multivariate indices.
@@ -137,7 +137,14 @@ def get_files_wo_multivariate_indices(
     data_directory = Path(data_directory)
 
     if indices is None:
-        indices = ["composite_score", "pca_score"]
+        indices = [
+            "scaled_bert_score_precision",
+            "scaled_deberta_entailment_score",
+            "scaled_soft_similarity",
+            "scaled_word_movers_distance",
+            "composite_score",
+            "pca_score",
+        ]
     if not os.path.exists(data_directory):
         raise ValueError(f"The provided directory '{data_directory}' does not exist.")
 
@@ -166,9 +173,15 @@ def get_files_wo_multivariate_indices(
             indexer.validate_metrics()
 
             # Check if any of the specified indices are missing in the columns
-            missing_indices = [index for index in indices if index not in df.columns]
-            if missing_indices:
-                logger.info(f"File {file_path} is missing indices: {missing_indices}")
+            missing_or_empty_indices = [
+                index
+                for index in indices
+                if index not in df.columns or df[index].dropna().empty
+            ]
+            if missing_or_empty_indices:
+                logger.info(
+                    f"File {file_path} is missing indices: {missing_or_empty_indices}"
+                )
                 files_without_indices.append(file_path)
             else:
                 logger.info(f"File {file_path} already has all the required indices.")
@@ -327,59 +340,6 @@ def get_new_urls_and_flat_json_file_paths(job_descriptions, output_dir):
             logger.warning(f"Skipping URL due to missing company and job title: {url}")
     logger.info("New urls found and flat JSON file paths created.")
     return new_urls_and_file_paths
-
-
-# def generate_and_save_file_mapping(
-#     job_descriptions, output_dir, output_file, suffixes=None, append=False
-# ):
-#     """
-#     Generate a mapping of URLs to file paths for requirements and responsibilities,
-#     and save it to a file. If append is True, it will add to the existing mapping file.
-
-#     Args:
-#         -job_descriptions (dict): A dictionary containing job descriptions with URLs as keys.
-#         -output_dir (Path): Directory where the files are stored.
-#         -output_file (Path): Path to the file where the mapping will be saved.
-#         -suffixes (list): List of suffixes for file names (e.g., 'reqs_flat', 'resps_flat').
-#         -append (bool): Whether to append to the existing file or overwrite it.
-#         Defaults to False (overwrite).
-
-#     Returns:
-#         None
-#     """
-#     # Safe default for suffixes
-#     if suffixes is None:
-#         suffixes = ["reqs_flat", "resps_flat", "sim_metrics"]
-
-#     file_mapping = {}
-
-#     # If appending, load the existing mapping if it exists
-#     if append and output_file.exists():
-#         with open(output_file, "r") as f:
-#             file_mapping = json.load(f)
-#         print(f"Loaded existing mapping from {output_file}")
-
-#     # Generate new mappings and add to the existing file_mapping
-#     for url, info in job_descriptions.items():
-#         company = info.get("company")
-#         job_title = info.get("job_title")
-
-#         # Generate file names for requirements, responsibilities, and metrics
-#         mapping_entry = {}
-#         for suffix in suffixes:
-#             ext = ".json" if "flat" in suffix else ".csv"
-#             file_name = f"{company}_{job_title}_{suffix}{ext}"
-#             file_path = output_dir / file_name
-#             mapping_entry[suffix] = str(file_path)  # Store the file path as a string
-
-#         # Add the new mapping to the existing file_mapping
-#         file_mapping[url] = mapping_entry
-
-#     # Save the updated mapping back to the file
-#     with open(output_file, "w") as f:
-#         json.dump(file_mapping, f, indent=4)
-
-#     print(f"Mapping saved to {output_file}")
 
 
 # Function to create and save job requirements JSON files

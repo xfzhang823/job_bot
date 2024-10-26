@@ -7,13 +7,18 @@ Last updated on:
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.decomposition import PCA
+from typing import List, Dict, Optional
+import logging
+import logging_config
 
+# Set logger
+logger = logging.getLogger(__name__)
 
 DEFAULT_COMPOSITE_WEIGHT = {
-    "deberta_entailment": 0.45,
-    "soft_similarity": 0.35,
-    "word_movers": 0.15,
-    "alberta_score": 0.05,
+    "deberta_entailment_score": 0.45,  # Match with the metric name
+    "soft_similarity": 0.35,  # Match with the metric name
+    "word_movers_distance": 0.15,  # Match with the metric name
+    "bert_score_precision": 0.05,  # Match with the metric name
 }
 
 DEFAULT_COMPOSITE_METRICS = [
@@ -76,9 +81,9 @@ class MultivariateIndexer:
         df: pd.DataFrame,
         resp_key: str = "responsibility_key",
         req_key: str = "requirement_key",
-        metrics: list = None,
+        metrics: Optional[List[str]] = None,
         max_word_movers: float = 1.0,
-        composite_weights: dict = None,
+        composite_weights: Optional[Dict[str, float]] = None,
         scaler_type: str = "minmax",
     ):
         """
@@ -116,7 +121,7 @@ class MultivariateIndexer:
             )
         return True
 
-    def scale_metrics(self):
+    def scale_and_add_metrics_to_df(self):
         """
         Scale the metrics in the DataFrame using the specified scaler.
 
@@ -139,8 +144,15 @@ class MultivariateIndexer:
             1 - scaled_df["scaled_word_movers_distance"]
         )
 
-        # Append scaled columns back to the original DataFrame
-        self.df = pd.concat([self.df, scaled_df], axis=1)
+        # Reindex just to ensure
+        scaled_df.index = self.df.index
+
+        # Add or update each scaled column
+        # (it avoids duplicates columns if the headers already exist)
+        for col in scaled_df.columns:
+            self.df[col] = scaled_df[col]
+
+        logger.info("Metrics scaled.")
 
     def calculate_composite_score(self, row):
         """
@@ -155,38 +167,40 @@ class MultivariateIndexer:
         deberta_entailment = row["scaled_deberta_entailment_score"]
         soft_similarity = row["scaled_soft_similarity"]
         word_movers = row["scaled_word_movers_distance"]
-        alberta_score = row["scaled_bert_score_precision"]
+        bert_score = row["scaled_bert_score_precision"]
 
         # Calculate the composite score using scaled and weighted values
         composite_score = (
-            deberta_entailment * self.composite_weights["deberta_entailment"]
+            deberta_entailment * self.composite_weights["deberta_entailment_score"]
             + soft_similarity * self.composite_weights["soft_similarity"]
             + word_movers
             * self.composite_weights[
-                "word_movers"
+                "word_movers_distance"
             ]  # Already reversed in scaling (do not reverse here again!)
-            + alberta_score * self.composite_weights["alberta_score"]
+            + bert_score * self.composite_weights["bert_score_precision"]
         )
 
         return composite_score
 
-    def add_composite_scores_to_df(self):
+    def calculate_add_composite_scores_to_df(self):
         """
         Calculate and insert the composite score into the DataFrame.
 
         This method adds a new column 'Composite_Score' to the DataFrame.
         """
         # Scale the metrics first
-        self.scale_metrics()
+        self.scale_and_add_metrics_to_df()
 
         # Apply composite score calculation row by row
         self.df["composite_score"] = self.df.apply(
             self.calculate_composite_score, axis=1
         )
 
+        logger.info("composite_score calculated and added/updated.")
+
         return self.df
 
-    def add_pca_scores_to_df(self):
+    def calculate_add_pca_scores_to_df(self):
         """
         Calculate the composite score using PCA based on the provided metrics.
 
@@ -209,6 +223,8 @@ class MultivariateIndexer:
         pca = PCA(n_components=1)
         self.df["pca_score"] = pca.fit_transform(scaled_values)
 
+        logger.info("pca_score calculated and added/updated.")
+
         return self.df
 
     def add_multivariate_indices_to_df(self):
@@ -218,6 +234,6 @@ class MultivariateIndexer:
         Returns:
         - DataFrame with composite score and PCA score added.
         """
-        self.add_composite_scores_to_df()
-        self.add_pca_scores_to_df()
+        self.calculate_add_composite_scores_to_df()
+        self.calculate_add_pca_scores_to_df()
         return self.df
