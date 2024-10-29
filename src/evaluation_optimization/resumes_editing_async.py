@@ -9,13 +9,15 @@ import os
 from pathlib import Path
 import logging
 from joblib import Parallel, delayed
-from typing import Any
+from typing import Any, Dict, Tuple
 from tqdm import tqdm
 import asyncio
 from openai import OpenAI, AsyncOpenAI
-from evaluation_optimization.resume_editor_async import TextEditor_async
+from anthropic import Anthropic
+
+from evaluation_optimization.resume_editor_async import TextEditorAsync
 from utils.generic_utils import save_to_json_file
-from utils.llm_data_utils import get_openai_api_key
+from utils.llm_api_utils import get_openai_api_key, get_claude_api_key
 from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
@@ -29,7 +31,9 @@ from models.resume_job_description_io_models import (
 logger = logging.getLogger(__name__)
 
 
-async def modify_resp_based_on_reqs_async(resp_key, resp, reqs, model, model_id):
+async def modify_resp_based_on_reqs_async(
+    resp_key: str, resp: str, reqs: Dict[str, str], llm_provider: str, model_id: str
+) -> Tuple[str, Dict[str, Dict[str, str]]]:
     """
     *This is the async version of the modify_resps_based_on_reqs function.
 
@@ -64,22 +68,35 @@ async def modify_resp_based_on_reqs_async(resp_key, resp, reqs, model, model_id)
               containing the final `optimized_text`.
 
     Example:
-        >>> modify_resp_based_on_reqs(
+        >>> await modify_resp_based_on_reqs_async(
                 resp_key="resp1",
                 resp="Managed a team of 5 developers",
                 reqs={"req1": "Experience leading software development teams."},
                 model="openai",
-                model_id="gpt-3.5-turbo"
+                model_id="gpt-4-turbo"
             )
     """
-    # Initialize the async client here for OpenAI (replace with correct async client instantiation)
-    openai_api_key = get_openai_api_key()
-    client = AsyncOpenAI(api_key=openai_api_key)  # Use an AsyncOpenAI client
-    logger.info("OpenAI API initialized.")
+    # Initialize the client based on llm_provider if needed
+    if llm_provider == "openai":
+        openai_api_key = get_openai_api_key()
+        client = AsyncOpenAI(api_key=openai_api_key)
+        logger.info("OpenAI API initialized.")
+
+    elif llm_provider == "claude":
+        claude_api_key = get_claude_api_key()
+        client = Anthropic(api_key=claude_api_key)
+        logger.info("Claude API initialized.")
+
+    elif llm_provider == "llama3":
+        client = None  # No client needed for local Llama3
+        logger.info("Using local Llama3 model.")
+
+    else:
+        raise ValueError(f"Unsupported LLM provider: {llm_provider}")
 
     # Initialize the async text editor with the async client
-    text_editor = TextEditor_async(
-        model=model, model_id=model_id, client=client, max_tokens=1024
+    text_editor = TextEditorAsync(
+        llm_provider=llm_provider, model_id=model_id, client=client, max_tokens=1024
     )
 
     local_modifications = {}
@@ -87,22 +104,26 @@ async def modify_resp_based_on_reqs_async(resp_key, resp, reqs, model, model_id)
     try:
         for req_key, req in reqs.items():
             logger.info(f"Modifying responsibility: {resp} \nwith requirement: {req}")
-            # Make asynchronous API calls
+
+            # Semantic alignment
             revised = await text_editor.edit_for_semantics_async(
                 candidate_text=resp, reference_text=req
             )
             revised_text_1 = revised["optimized_text"]
 
+            # Entailment alignment
             revised = await text_editor.edit_for_entailment_async(
                 premise_text=revised_text_1, hypothesis_text=req
             )
             revised_text_2 = revised["optimized_text"]
 
+            # Dependency Parsing alignment
             revised = await text_editor.edit_for_dp_async(
                 target_text=revised_text_2, source_text=resp
             )
             revised_text_3 = revised["optimized_text"]
 
+            # Store the optimized text
             optimized_text = OptimizedText(optimized_text=revised_text_3)
             local_modifications[req_key] = optimized_text.model_dump()
 
@@ -114,13 +135,13 @@ async def modify_resp_based_on_reqs_async(resp_key, resp, reqs, model, model_id)
 
 
 async def modify_multi_resps_based_on_reqs_async(
-    responsibilities, requirements, model, model_id
+    responsibilities, requirements, llm_provider, model_id
 ):
     tasks = []
     for resp_key, resp in responsibilities.items():
         tasks.append(
             modify_resp_based_on_reqs_async(
-                resp_key, resp, requirements, model, model_id
+                resp_key, resp, requirements, llm_provider, model_id
             )
         )
 

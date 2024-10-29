@@ -28,7 +28,7 @@ from prompts.prompt_templates import (
     CLEAN_JOB_PAGE_PROMPT,
     CONVERT_JOB_POSTING_TO_JSON_PROMPT,
 )
-from utils.llm_data_utils import call_openai_api
+from utils.llm_api_utils import call_openai_api
 from models.llm_response_models import JobSiteResponseModel
 
 # Set up logging
@@ -458,7 +458,9 @@ def read_webpages(urls: list):
     return content_dict
 
 
-def convert_to_json_wt_gpt(input_text, model_id="gpt-4-turbo", temperature=0.3):
+def convert_to_json_wt_gpt(
+    input_text: str, model_id: str = "gpt-4-turbo", temperature: floa = 0.3
+):
     """
     Parse and convert job posting content to JSON format using OpenAI API.
 
@@ -486,6 +488,7 @@ def convert_to_json_wt_gpt(input_text, model_id="gpt-4-turbo", temperature=0.3):
         context_type="job_site",
         temperature=temperature,
         max_tokens=2000,
+        # Omitting client, defaults to new client if none provided
     )
     logger.info(f"Raw LLM Response: {response_pyd_obj}")
 

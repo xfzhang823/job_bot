@@ -4,25 +4,42 @@ Author: Xiao-Fei Zhang
 Last updated: 2024 Sep 12
 """
 
-import logging
-from dotenv import load_dotenv
 import os
+import logging
+import uuid
 import json
 import openai
 import jsonschema
-import uuid
-from openai import OpenAI
+import pandas as pd
+from typing import Dict, Optional, Union
 import logging_config
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel
+from openai import OpenAI
+from anthropic import Anthropic
+
 from prompts.prompt_templates import (
     SEMANTIC_ALIGNMENT_PROMPT,
     ENTAILMENT_ALIGNMENT_PROMPT,
     SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
-from utils.llm_data_utils import get_openai_api_key, call_openai_api, call_llama3
+from utils.llm_api_utils import (
+    get_openai_api_key,
+    get_claude_api_key,
+    call_claude_api,
+    call_openai_api,
+    call_llama3,
+)
 from utils.validation_utils import validate_json_response
-from models.llm_response_models import EditingResponseModel
+from models.llm_response_models import (
+    EditingResponseModel,
+    JSONResponse,
+    TabularResponse,
+    TextResponse,
+    CodeResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+)
 
 # logging
 logger = logging.getLogger(__name__)
@@ -77,11 +94,11 @@ class TextEditor:
 
     def __init__(
         self,
-        model="openai",
-        model_id="gpt-4-turbo",
-        temperature=0.7,
-        max_tokens=1056,
-        client=None,
+        model: str = "openai",
+        model_id: str = "gpt-4-turbo",
+        temperature: float = 0.7,
+        max_tokens: int = 1056,
+        client: Optional[Union[OpenAI, Anthropic]] = None,
     ):
         self.model = model  # Default model ('openai')
         self.model_id = model_id
@@ -90,10 +107,15 @@ class TextEditor:
         self.client = client  # Store the passed client
 
         # Conditionally initialize the client based on model
+        if self.model == "claude" and not self.client:
+            claude_api_key = get_claude_api_key()
+            self.client = Anthropic(api_key=claude_api_key)
         if self.model == "openai" and not self.client:
             # Initialize OpenAI API client if it's not provided
-            api_key = get_openai_api_key()  # Fetch the API key
-            self.client = OpenAI(api_key=api_key)  # Instantiate OpenAI API client
+            openai_api_key = get_openai_api_key()  # Fetch the API key
+            self.client = OpenAI(
+                api_key=openai_api_key
+            )  # Instantiate OpenAI API client
         elif self.model == "llama3":
             # If using LLaMA3, no OpenAI client initialization is needed
             # You may initialize LLaMA3-specific settings here if needed
@@ -113,24 +135,60 @@ class TextEditor:
             logger.error(f"Error formatting prompt: {e}")
             raise
 
-    def call_llm(self, prompt, model="openai", temperature=None):
+    def call_llm(
+        self, prompt: str, model: str = "openai", temperature: Optional[float] = None
+    ) -> Union[
+        str,
+        JSONResponse,
+        TabularResponse,
+        TextResponse,
+        CodeResponse,
+        EditingResponseModel,
+        JobSiteResponseModel,
+    ]:
         """
-        Call the specified LLM API (OpenAI or LLaMA3) with the provided prompt and return the response.
+        Call the specified LLM API (OpenAI or LLaMA3) with the provided prompt and return the validated response.
 
         Args:
             prompt (str): The formatted prompt to send to the LLM API.
             model (str): The model to use for the API call ('openai' or 'llama3').
             temperature (float, optional): Temperature setting for this specific API call.
-                                           If None, uses the class-level temperature.
+                                        If None, uses the class-level temperature.
+
+        Returns:
+            dict: Validated response data as a dictionary, structured according to the JSON schema.
+
+        Raises:
+            ValueError: If the model type is unsupported or if the response does not pass validation.
         """
         # Set temperature to class default if not provided
         temperature = temperature if temperature is not None else self.temperature
 
+        # Select the appropriate LLM API call
         if model == "openai":
-            # Call OpenAI API
             response_pyd_obj = call_openai_api(
-                client=self.client,
+                prompt=prompt,
                 model_id=self.model_id,
+                expected_res_type="json",
+                context_type="editing",
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                client=self.client if isinstance(self.client, OpenAI) else None,
+            )
+
+        if model == "claude":
+            response_pyd_obj = call_claude_api(
+                prompt=prompt,
+                model_id=self.model_id,
+                expected_res_type="json",
+                context_type="editing",
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                client=self.client if isinstance(self.client, Anthropic) else None,
+            )
+
+        elif model == "llama3":
+            response_pyd_obj = call_llama3(
                 prompt=prompt,
                 expected_res_type="json",
                 context_type="editing",
@@ -138,38 +196,35 @@ class TextEditor:
                 max_tokens=self.max_tokens,
             )
 
-            if not isinstance(response_pyd_obj, EditingResponseModel):
-                logger.error(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-                raise ValueError(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-
-            return response_pyd_obj.model_dump()
-
-        elif model == "llama3":
-            # Call LLaMA3 API
-            response_pyd_obj = call_llama3(
-                prompt, expected_res_type="json", temperature=temperature
-            )
-
-            if not isinstance(response_pyd_obj, EditingResponseModel):
-                logger.error(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-                raise ValueError(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-
-            return response_pyd_obj.model_dump()
-
         else:
             raise ValueError(f"Unsupported model: {model}")
 
-    def validate_response(self, response_dict):
-        """Validate the API response dictionary using JSON Schema."""
+        # Validate the response
+        self.validate_response(response_pyd_obj)
+        # Return the validated response dictionary
+        return response_pyd_obj
+
+    def validate_response(self, response_pyd_obj: Union[BaseModel, dict]) -> None:
+        """
+        Validate the API response (Pydantic model or dictionary) using JSON Schema.
+
+        Args:
+            response_pyd_obj (Union[BaseModel, dict]): The response data, either as a Pydantic model or a dictionary.
+
+        Return: None
+
+        Raises:
+            ValueError: If the response does not match the expected JSON schema.
+        """
+        # Convert Pydantic model to dictionary if needed
+        response_dict = (
+            response_pyd_obj.model_dump()
+            if isinstance(response_pyd_obj, BaseModel)
+            else response_pyd_obj
+        )
+
         try:
+            # Perform JSON schema validation
             jsonschema.validate(instance=response_dict, schema=LLM_RES_JSON_SCHEMA)
             logger.info("JSON schema validation passed.")
         except ValidationError as e:
@@ -177,8 +232,13 @@ class TextEditor:
             raise ValueError(f"Invalid JSON format: {e}")
 
     def edit_for_dp(
-        self, target_text, source_text, text_id=None, model=None, temperature=None
-    ):
+        self,
+        target_text: str,
+        source_text: str,
+        text_id: str = "",
+        model: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         Re-edit the target text to better align w/t source text's dependency parsing (DP),
         leveraging the OpenAI API.
@@ -206,24 +266,36 @@ class TextEditor:
         Returns:
             dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
         """
+        # Generate text id (as unique identifier)
         text_id = self.generate_text_id(text_id)
         prompt = self.format_prompt(STRUCTURE_TRANSFER_PROMPT, target_text, source_text)
-        response_dict = self.call_llm(
+
+        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        response_model = self.call_llm(
             prompt, model=model if model else self.model, temperature=temperature
         )
-        self.validate_response(response_dict)
+
+        # pyd model -> dictionary
+        if isinstance(response_model, BaseModel):
+            response_dict = response_model.model_dump()
+        else:
+            raise ValueError(
+                "The response model is not a Pydantic model and does not have 'model_dumpt"
+            )
+
+        # Combine text_id and response_dict to form a new dictionary
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
 
     def edit_for_entailment(
         self,
-        premise_text,
-        hypothesis_text,
-        text_id=None,
-        model=None,
-        temperature=None,
-    ):
+        premise_text: str,
+        hypothesis_text: str,
+        text_id: str = "",
+        model: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         Re-edit the target text to strengthen its entailment with the source text.
         Entailment is directional and its order is often the reverse of other comparisons':
@@ -251,28 +323,37 @@ class TextEditor:
         Returns:
             dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
         """
+        # Generate text id (as unique identifier)
         text_id = self.generate_text_id(text_id)
         prompt = self.format_prompt(
             ENTAILMENT_ALIGNMENT_PROMPT, premise_text, hypothesis_text
         )
-        response_dict = self.call_llm(
-            prompt,
-            model=model if model else self.model,
-            temperature=temperature,
+
+        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        response_model = self.call_llm(
+            prompt, model=model if model else self.model, temperature=temperature
         )
-        self.validate_response(response_dict)
+
+        # pyd model -> dictionary
+        if isinstance(response_model, BaseModel):
+            response_dict = response_model.model_dump()
+        else:
+            raise ValueError(
+                "The response model is not a Pydantic model and does not have 'model_dumpt"
+            )
+        # Combine text_id and response_dict to form a new dictionary
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
 
     def edit_for_semantics(
         self,
-        candidate_text,
-        reference_text,
-        text_id=None,
-        model=None,
-        temperature=None,
-    ):
+        candidate_text: str,
+        reference_text: str,
+        text_id: str = "",
+        model: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         Re-edit the target text to better align w/t source text's semantics, leveraging LLMs.
 
@@ -297,28 +378,40 @@ class TextEditor:
         Returns:
             dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
         """
+        # Generate text id (as unique identifier)
         text_id = self.generate_text_id(text_id)
         prompt = self.format_prompt(
             SEMANTIC_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
-        response_dict = self.call_llm(
+
+        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        response_model = self.call_llm(
             prompt,
             model=model if model else self.model,
             temperature=temperature,
         )
-        self.validate_response(response_dict)
+
+        # pyd model -> dictionary
+        if isinstance(response_model, BaseModel):
+            response_dict = response_model.model_dump()
+        else:
+            raise ValueError(
+                "The response model is not a Pydantic model and does not have 'model_dumpt"
+            )
+
+        # Combine text_id and response_dict to form a new dictionary
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
 
     def edit_for_semantics_and_entailment(
         self,
-        candidate_text,
-        reference_text,
-        text_id=None,
-        model=None,
-        temperature=None,
-    ):
+        candidate_text: str,
+        reference_text: str,
+        text_id: str = "",
+        model: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         Re-edit the target text to better align w/t source text's semantics and strengthen
         the entailment relationships between the two texts, leveraging LLMs.
@@ -336,46 +429,28 @@ class TextEditor:
         Returns:
             dict: Contains 'text_id' and 'optimized_text' after revision.
         """
+        # Generate text id (as unique identifier)
         text_id = self.generate_text_id(text_id)
         prompt = self.format_prompt(
             SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
-        response_dict = self.call_llm(
+
+        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        response_model = self.call_llm(
             prompt,
             model=model if model else self.model,
             temperature=temperature,
         )
-        self.validate_response(response_dict)
+
+        # pyd model -> dictionary
+        if isinstance(response_model, BaseModel):
+            response_dict = response_model.model_dump()
+        else:
+            raise ValueError(
+                "The response model is not a Pydantic model and does not have 'model_dumpt"
+            )
+
+            # Combine text_id and response_dict to form a new dictionary
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
-
-
-# Function to modify resume w/t ChatGPT (unfinished...)
-def modify_resume_responsibilities(
-    section_json, requirements, model_id="gpt-3.5-turbo"
-):
-    """
-    Modifies a specific section of the resume to better align with job requirements.
-
-    Args:
-        section_json (dict): The JSON object containing the resume section details.
-        requirements (dict): The extracted requirements from the job description.
-        model_id (str): The model ID for OpenAI (default is gpt-3.5-turbo).
-
-    Returns:
-        dict: Modified resume section.
-    """
-    prompt = (
-        f"Modify the following resume section in JSON format to better align with the job requirements. "
-        f"Make it more concise and impactful while highlighting relevant skills and experiences:\n\n"
-        f"Current Section JSON:\n{section_json}\n\n"
-        f"Job Requirements JSON:\n{requirements}\n\n"
-        "Return the modified section in JSON format."
-    )
-
-    response = openai.chat.completions.create(
-        model=model_id, messages=[{"role": "user", "content": prompt}], temperature=0.7
-    )
-
-    return json.loads(response["choices"][0]["message"]["content"])
