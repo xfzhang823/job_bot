@@ -2,8 +2,9 @@ import os
 from pathlib import Path
 import logging
 from typing import Union
-from tqdm import tqdm
 import asyncio
+from tqdm import tqdm
+
 
 # from joblib import Parallel, delayed
 from models.resume_job_description_io_models import (
@@ -210,7 +211,7 @@ def verify_directory_paths(mapping_file_prev, mapping_file_curr) -> bool:
 async def run_pipeline_async(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
-    model: str = "openai",
+    llm_provider: str = "openai",
     model_id: str = "gpt-3.5-turbo",
     # n_jobs: int = -1, # Run non-parellel for now
 ):
@@ -290,7 +291,7 @@ async def run_pipeline_async(
             modified_resps = await modify_multi_resps_based_on_reqs_async(
                 responsibilities=validated_responsibilities.responsibilities,
                 requirements=validated_requirements.requirements,
-                model=model,
+                llm_provider=llm_provider,
                 model_id=model_id,
                 # n_jobs=n_jobs,
             )  # the function returns a pyd object

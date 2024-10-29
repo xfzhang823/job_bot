@@ -70,16 +70,16 @@ from config import (
     # modified_resps_flat_iter_2_json_file,
     mapping_file_name,
     elbow_curve_plot_file_name,
-    ITERATE_0_DIR,
-    REQS_FILES_ITERATE_0_DIR,
-    RESPS_FILES_ITERATE_0_DIR,
-    PRUNED_RESPS_FILES_ITERATE_0_DIR,
-    SIMILARITY_METRICS_ITERATE_0_DIR,
-    ITERATE_1_DIR,
-    REQS_FILES_ITERATE_1_DIR,
-    RESPS_FILES_ITERATE_1_DIR,
-    SIMILARITY_METRICS_ITERATE_1_DIR,
-    PRUNED_RESPS_FILES_ITERATE_1_DIR,
+    ITERATE_0_DIR_OPENAI,
+    REQS_FILES_ITERATE_0_DIR_OPENAI,
+    RESPS_FILES_ITERATE_0_DIR_OPENAI,
+    PRUNED_RESPS_FILES_ITERATE_0_DIR_OPENAI,
+    SIMILARITY_METRICS_ITERATE_0_DIR_OPENAI,
+    ITERATE_1_DIR_OPENAI,
+    REQS_FILES_ITERATE_1_DIR_OPENAI,
+    RESPS_FILES_ITERATE_1_DIR_OPENAI,
+    SIMILARITY_METRICS_ITERATE_1_DIR_OPENAI,
+    PRUNED_RESPS_FILES_ITERATE_1_DIR_OPENAI,
 )
 
 logging.info("Successfully imported config")
@@ -140,7 +140,7 @@ def run_pipeline_2a():
     run_upserting_mapping_file_pipeline_iter0(
         job_descriptions_file=job_descriptions_json_file,
         iteration=0,
-        iteration_dir=ITERATE_0_DIR,
+        iteration_dir=ITERATE_0_DIR_OPENAI,
         mapping_file_name=mapping_file_name,
     )
     logger.info("Finished running pipeline 2a: creating/updating the mapping file.")
@@ -151,7 +151,7 @@ def run_pipeline_2b():
     logger.info(
         "Running pipeline 2b: creating flattened responsibilities and requirements files."
     )
-    mapping_file_path = ITERATE_0_DIR / mapping_file_name
+    mapping_file_path = ITERATE_0_DIR_OPENAI / mapping_file_name
     logger.info(f"mapping file path: {mapping_file_path}")
 
     # Run pipeline
@@ -173,7 +173,7 @@ def run_pipeline_2c():
                 to generate similarity related metrics."
     )
 
-    mapping_file = ITERATE_0_DIR / mapping_file_name
+    mapping_file = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     if not os.path.exists(mapping_file):
         logger.error(f"Mapping file not found: {mapping_file}")
@@ -192,7 +192,7 @@ def run_pipeline_2d():
     """Mini-Pipeline for adding indices to metrics files"""
     logger.info("Running pipeline 2d: adding indices to metrics csv files")
 
-    csv_files_dir = SIMILARITY_METRICS_ITERATE_0_DIR
+    csv_files_dir = SIMILARITY_METRICS_ITERATE_0_DIR_OPENAI
     # Run pipeline for each url
     run_adding_multivariate_indices_mini_pipeline(csv_files_dir)
     logger.info("Finished running pipeline 2d: adding indices to metrics csv files.")
@@ -209,7 +209,7 @@ def run_pipeline_2e():
         "Running pipeline 2e: copying fles to pruned_responsibilities folder and exclude certain responsibilities."
     )
 
-    mapping_file = ITERATE_0_DIR / mapping_file_name
+    mapping_file = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     # Copy files to the folder
     run_copying_resps_to_pruned_resps_mini_pipeline(mapping_file)
@@ -231,10 +231,10 @@ def run_pipeline_2f():  # for now do not run this - skip!!!!
     # Run pipeline
 
     # File location of the mapping file (url: dir name: file names...)
-    mapping_file = ITERATE_0_DIR / mapping_file_name
+    mapping_file = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     #
-    elbow_curve_plot_file = ITERATE_0_DIR / elbow_curve_plot_file_name
+    elbow_curve_plot_file = ITERATE_0_DIR_OPENAI / elbow_curve_plot_file_name
     elbow_method_specific_params = {
         "max_k": 15,
         "S": 12.0,
@@ -265,7 +265,7 @@ def run_pipeline_3a():
     run_upserting_mapping_file_pipeline_iter1(
         job_descriptions_file=job_descriptions_json_file,
         iteration=1,
-        iteration_dir=ITERATE_1_DIR,
+        iteration_dir=ITERATE_1_DIR_OPENAI,
         mapping_file_name=mapping_file_name,
     )
 
@@ -286,13 +286,13 @@ def run_pipeline_3b():
 
     # Run the pipeline for all responsibilities files
 
-    mapping_file_curr_path = ITERATE_1_DIR / mapping_file_name
-    mapping_file_prev_path = ITERATE_0_DIR / mapping_file_name
+    mapping_file_curr_path = ITERATE_1_DIR_OPENAI / mapping_file_name
+    mapping_file_prev_path = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     run_resume_editting_pipeline(
         mapping_file_prev=mapping_file_prev_path,
         mapping_file_curr=mapping_file_curr_path,
-        model="openai",
+        llm_provider="openai",
         model_id="gpt-4-turbo",
     )
 
@@ -307,8 +307,8 @@ def run_pipeline_3c():
     logger.info(
         f"Running pipeline {pipe_num}: copying requirements from iteration 0 to iteration 1."
     )
-    mapping_file_curr_path = ITERATE_1_DIR / mapping_file_name
-    mapping_file_prev_path = ITERATE_0_DIR / mapping_file_name
+    mapping_file_curr_path = ITERATE_1_DIR_OPENAI / mapping_file_name
+    mapping_file_prev_path = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     # *Run pipeline
     run_copying_requirements_to_next_iteration_mini_pipeline(
@@ -327,7 +327,7 @@ def run_pipeline_3d():
         f"Running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
                 to generate similarity related metrics."
     )
-    mapping_file = ITERATE_1_DIR / mapping_file_name
+    mapping_file = ITERATE_1_DIR_OPENAI / mapping_file_name
 
     logger.info("Running pipeline {pipe_num}: ...")
     re_run_resume_comparison_pipeline(mapping_file)
@@ -345,7 +345,7 @@ def run_pipeline_3e():
     )
 
     # Set data_directory
-    csv_files_dir = SIMILARITY_METRICS_ITERATE_1_DIR
+    csv_files_dir = SIMILARITY_METRICS_ITERATE_1_DIR_OPENAI
 
     # Run pipeline
     run_adding_multivariate_indices_mini_pipeline(csv_files_dir)
@@ -399,7 +399,7 @@ async def run_pipeline_2c_async():
                 to generate similarity related metrics."
     )
 
-    mapping_file = ITERATE_0_DIR / mapping_file_name
+    mapping_file = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     if not os.path.exists(mapping_file):
         logger.error(f"Mapping file not found: {mapping_file}")
@@ -418,7 +418,7 @@ async def run_pipeline_2d_async():
     """Asynchronous Mini-Pipeline for adding indices to metrics files."""
     logger.info("Running pipeline 2b: adding indices to metrics csv files")
 
-    csv_files_dir = SIMILARITY_METRICS_ITERATE_0_DIR
+    csv_files_dir = SIMILARITY_METRICS_ITERATE_0_DIR_OPENAI
     # Run pipeline for each url
     await run_adding_multivariate_indices_mini_pipeline_async(csv_files_dir)
     logger.info("Finished running pipeline 2b: adding indices to metrics csv files.")
@@ -436,13 +436,13 @@ async def run_pipeline_3b_async():
 
     # Run the pipeline for all responsibilities files
 
-    mapping_file_curr_path = ITERATE_1_DIR / mapping_file_name
-    mapping_file_prev_path = ITERATE_0_DIR / mapping_file_name
+    mapping_file_curr_path = ITERATE_1_DIR_OPENAI / mapping_file_name
+    mapping_file_prev_path = ITERATE_0_DIR_OPENAI / mapping_file_name
 
     await run_resume_editting_pipeline_async(
         mapping_file_prev=mapping_file_prev_path,
         mapping_file_curr=mapping_file_curr_path,
-        model="openai",
+        llm_provider="openai",
         model_id="gpt-4-turbo",
     )
 
@@ -458,7 +458,7 @@ async def run_pipeline_3d_async():
         f"Running pipeline {pipe_num}: match resume's responsibilities to job postings' requirements \
                 to generate similarity related metrics."
     )
-    mapping_file = ITERATE_1_DIR / mapping_file_name
+    mapping_file = ITERATE_1_DIR_OPENAI / mapping_file_name
 
     await re_run_resume_comparison_pipeline_async(mapping_file)
 

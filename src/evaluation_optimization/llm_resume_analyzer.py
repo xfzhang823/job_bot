@@ -2,7 +2,7 @@
 TBA
 """
 
-from utils.llm_data_utils import get_openai_api_key
+from utils.llm_api_utils import get_openai_api_key
 
 
 # Analyze with LLM: WIP!!!

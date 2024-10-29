@@ -4,15 +4,15 @@ import pandas as pd
 from pydantic import ValidationError
 from models.resume_job_description_io_models import SimilarityMetrics
 from utils.validation_utils import validate_dataframe_with_pydantic
+from utils.llm_api_utils import call_claude_api
 
 
 def main():
-    f_path = r"C:\github\job_bot\input_output\evaluation_optimization\iteration_1\similarity_metrics\Amazon_Product_Manager__Artificial_General_Intelligence_-_Data_Services_sim_metrics_iter1.csv"
+    PROMPT = "Tell me a joke about Python."
 
-    df = pd.read_csv(f_path)
+    response = call_claude_api(prompt=PROMPT)
 
-    validated_rows = validate_dataframe_with_pydantic(df)
-    print(validated_rows)
+    print(response)
 
 
 if __name__ == "__main__":

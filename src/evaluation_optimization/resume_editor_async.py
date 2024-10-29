@@ -8,22 +8,37 @@ import logging
 from dotenv import load_dotenv
 import os
 import json
-import openai
 import jsonschema
 import uuid
-from openai import OpenAI
 import logging_config
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
+from typing import Dict, Union, Optional
+
+import openai
+from openai import OpenAI
+from anthropic import Anthropic
+
 from prompts.prompt_templates import (
     SEMANTIC_ALIGNMENT_PROMPT,
     ENTAILMENT_ALIGNMENT_PROMPT,
     SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
-from utils.llm_data_utils import get_openai_api_key
-from utils.llm_data_utils_async import call_openai_api_async, call_llama3_async
+from utils.llm_api_utils import get_openai_api_key
+from utils.llm_api_utils_async import (
+    call_openai_api_async,
+    call_llama3_async,
+    call_claude_api_async,
+)
 from utils.validation_utils import validate_json_response
-from models.llm_response_models import EditingResponseModel
+from models.llm_response_models import (
+    EditingResponseModel,
+    JobSiteResponseModel,
+    TextResponse,
+    JSONResponse,
+    TabularResponse,
+    CodeResponse,
+)
 
 # logging
 logger = logging.getLogger(__name__)
@@ -41,17 +56,17 @@ LLM_RES_JSON_SCHEMA = {
 }
 
 
-class TextEditor_async:
+class TextEditorAsync:
     """
     * Async version of class TextEditor
     A class to edit and optimize a text, given another text to "match" to, using language models
-    like OpenAI GPT-4 or LLaMA3.
+    like OpenAI GPT-4, Claude, or LLaMA3.
 
     This class provides methods to perform text editing based on semantic entailment
     and dependency parsing alignment using various language models via API calls.
 
     Attributes:
-        model (str): The model to use for the API calls ('openai' or 'llama3').
+        llm_provider (str): The model to use for the API calls ('openai', 'claude', or 'llama3').
         client (any): instantiated API for OpenAI API calls.
         model_id (str): The model ID to use for the API calls (e.g., 'gpt-4-turbo').
         temperature (float): Temperature parameter for the model, affecting response variability.
@@ -59,49 +74,46 @@ class TextEditor_async:
 
     Methods:
         - generate_text_id(text_id=None): Generates a unique text ID using UUID.
-        - format_prompt(prompt_template, content_1, content_2):
-            Formats the prompt using a provided template.
-        - call_llm(prompt, model=None, temperature=None):
-            Calls the specified LLM API (OpenAI or LLaMA3) with the given prompt and returns
+        - format_prompt(prompt_template, content_1, content_2): Formats the prompt using a provided template.
+        - call_llm_async(prompt, llm_provider=None, temperature=None):
+            Calls the specified LLM API (OpenAI, Anthropic, or LLaMA3) with the given prompt and returns
             the response.
-        - validate_response(response_dict):
-            Validates a response dictionary against a predefined JSON schema.
-        - edit_for_dp(target_text, source_text, text_id=None, model=None, temperature=None):
+        - validate_response(response_dict): Validates a response dictionary against a predefined JSON schema.
+        - edit_for_dp(target_text, source_text, text_id=None, llm_provider=None, temperature=None):
             Edits text to align with source text's dependency parsing (DP).
-        - edit_for_entailment(target_text, source_text, text_id=None, model=None, temperature=None):
+        - edit_for_entailment(target_text, source_text, text_id=None, llm_provider=None, temperature=None):
             Edits text based on semantic entailment.
-        - edit_for_semantics(target_text, source_text, text_id=None, model=None, temperature=None):
+        - edit_for_semantics(target_text, source_text, text_id=None, llm_provider=None, temperature=None):
             Edits text to align with source text's semantics.
-        - edit_for_semantics_and_entailment(candidate_text, reference_text, text_id=None, model=None,
-        temperature=None):
-            Edits text to align with source text's semantics and strengthen entailment relationships.
+        - edit_for_semantics_and_entailment(candidate_text, reference_text, text_id=None, llm_provider=None,
+          temperature=None): Edits text to align with source text's semantics and strengthen entailment relationships.
     """
 
     def __init__(
         self,
-        model="openai",
+        llm_provider="openai",
         model_id="gpt-4-turbo",
         temperature=0.7,
         max_tokens=1056,
         client=None,
     ):
-        self.model = model  # Default model ('openai')
+        self.llm_provider = llm_provider  # Default model ('openai')
         self.model_id = model_id
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = client  # Store the passed client
 
         # Conditionally initialize the client based on model
-        if self.model == "openai" and not self.client:
+        if self.llm_provider == "openai" and not self.client:
             # Initialize OpenAI API client if it's not provided
             api_key = get_openai_api_key()  # Fetch the API key
             self.client = OpenAI(api_key=api_key)  # Instantiate OpenAI API client
-        elif self.model == "llama3":
+        elif self.llm_provider == "llama3":
             # If using LLaMA3, no OpenAI client initialization is needed
             # You may initialize LLaMA3-specific settings here if needed
             logger.info("Using LLaMA3 model for text editing.")
         elif not self.client:
-            raise ValueError(f"Unsupported model: {self.model}")
+            raise ValueError(f"Unsupported model: {self.llm_provider}")
 
     def generate_text_id(self, text_id=None):
         """Generate a unique text_id using UUID if not provided."""
@@ -115,64 +127,81 @@ class TextEditor_async:
             logger.error(f"Error formatting prompt: {e}")
             raise
 
-    async def call_llm_async(self, prompt, model="openai", temperature=None):
+    async def call_llm_async(
+        self,
+        prompt: str,
+        llm_provider: str = "openai",
+        temperature: Optional[float] = None,
+    ) -> Union[
+        JSONResponse,
+        TabularResponse,
+        TextResponse,
+        CodeResponse,
+        EditingResponseModel,
+        JobSiteResponseModel,
+    ]:
         """
         *Async version of the method.
 
-        Call the specified LLM API (OpenAI or LLaMA3) with the provided prompt and return the response.
+        Call the specified LLM API (OpenAI, Anthropic, or LLaMA3) with the provided prompt
+        and return the response.
 
         Args:
             prompt (str): The formatted prompt to send to the LLM API.
-            model (str): The model to use for the API call ('openai' or 'llama3').
+            llm_provider (str): The llm provider to use for the API call ('openai', 'claude', or 'llama3').
             temperature (float, optional): Temperature setting for this specific API call.
                                            If None, uses the class-level temperature.
-        """
-        # Set temperature to class default if not provided
-        temperature = temperature if temperature is not None else self.temperature
 
-        if model == "openai":
-            # Call OpenAI API
+        Returns:
+            Union[JSONResponse, TabularResponse, TextResponse, CodeResponse, EditingResponseModel, JobSiteResponseModel]:
+            The structured response from the API, validated if it passes JSON schema requirements.
+        """
+        temperature = temperature if temperature is not None else self.temperature
+        # Choose the appropriate LLM API
+        if llm_provider == "openai":
             response_pyd_obj = await call_openai_api_async(
-                client=self.client,
+                prompt=prompt,
                 model_id=self.model_id,
+                expected_res_type="json",
+                context_type="editing",
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                client=self.client if isinstance(self.client, OpenAI) else None,
+            )
+        elif llm_provider == "claude":
+            response_pyd_obj = await call_claude_api_async(
+                prompt=prompt,
+                model_id=self.model_id,
+                expected_res_type="json",
+                context_type="editing",
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                client=self.client if isinstance(self.client, Anthropic) else None,
+            )
+        elif llm_provider == "llama3":
+            response_pyd_obj = await call_llama3_async(
                 prompt=prompt,
                 expected_res_type="json",
                 context_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
             )
-
-            if not isinstance(response_pyd_obj, EditingResponseModel):
-                logger.error(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-                raise ValueError(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-
-            return response_pyd_obj.model_dump()
-
-        elif model == "llama3":
-            # Call LLaMA3 API
-            response_pyd_obj = await call_llama3_async(
-                prompt, expected_res_type="json", temperature=temperature
-            )
-
-            if not isinstance(response_pyd_obj, EditingResponseModel):
-                logger.error(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-                raise ValueError(
-                    "Received response is not in expected EditingResponseModel format."
-                )
-
-            return response_pyd_obj.model_dump()
-
         else:
-            raise ValueError(f"Unsupported model: {model}")
+            raise ValueError(f"Unsupported LLM provider: {llm_provider}")
 
-    def validate_response(self, response_dict):
-        """Validate the API response dictionary using JSON Schema."""
+        # Validate response
+        self.validate_response(response_pyd_obj)
+        return response_pyd_obj
+
+    def validate_response(self, response_pyd_obj: Union[BaseModel, dict]) -> None:
+        """
+        Validate the API response (Pydantic model or dictionary) using JSON Schema.
+        """
+        response_dict = (
+            response_pyd_obj.model_dump()
+            if isinstance(response_pyd_obj, BaseModel)
+            else response_pyd_obj
+        )
         try:
             jsonschema.validate(instance=response_dict, schema=LLM_RES_JSON_SCHEMA)
             logger.info("JSON schema validation passed.")
@@ -181,55 +210,44 @@ class TextEditor_async:
             raise ValueError(f"Invalid JSON format: {e}")
 
     async def edit_for_dp_async(
-        self, target_text, source_text, text_id=None, model=None, temperature=None
-    ):
+        self,
+        target_text: str,
+        source_text: str,
+        text_id: str = "",
+        llm_provider: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         *Async version of the method
 
         Re-edit the target text to better align w/t source text's dependency parsing (DP),
-        leveraging the OpenAI API.
-
-        Example:
-        Re-edit revised responsibility to match with the original responsibility text's DP
-        to perserve the tone & style.
-
-        Args:
-            - target_text (str): The target text to be transformed (i.e.,
-            revised responsibility text).
-            - source_text (str): The source text from whose "dependency parsing"
-            to be modeled after (i.e., original responsibility text from resume).
-            - model_id (str): OpenAI model to use (default is 'gpt-4').
-            - text_id (str): Identifier of the target text (defaulted to None - unique IDs
-            to be generated by UUID function) (i.e., the responsibility bullet text.)
-            - model (str, optional): The model to use for the API call ('openai' or 'llama3').
-            - temperature (float): defaulted to 0.8 (a higher temperature setting is
-            needed to give the model more flexibility/creativity).
-
-            Note:
-            - resp is short for responsibility
-            - req is short for (job) requirement
+        leveraging the LLM API specified.
 
         Returns:
             dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
         """
         text_id = self.generate_text_id(text_id)
         prompt = self.format_prompt(STRUCTURE_TRANSFER_PROMPT, target_text, source_text)
-        response_dict = await self.call_llm_async(
-            prompt, model=model if model else self.model, temperature=temperature
+        response_model = await self.call_llm_async(
+            prompt,
+            llm_provider=llm_provider if llm_provider else self.llm_provider,
+            temperature=temperature,
         )
-        self.validate_response(response_dict)
+        response_dict = (
+            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        )
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
 
     async def edit_for_entailment_async(
         self,
-        premise_text,
-        hypothesis_text,
-        text_id=None,
-        model=None,
-        temperature=None,
-    ):
+        premise_text: str,
+        hypothesis_text: str,
+        text_id: str = "",
+        llm_provider: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         *Async version of the method.
 
@@ -248,7 +266,7 @@ class TextEditor_async:
             (the text that serves as the hypothesis (e.g., a follow-up statement).
             - text_id (str): Identifier of the target text (defaulted to None - unique IDs
             to be generated by UUID function) (i.e., the responsibility bullet text.)
-            - model (str, optional): The model to use for the API call ('openai' or 'llama3').
+            - llm_provider (str, optional): The model to use for the API call ('openai' or 'llama3').
             - temperature (float): defaulted to 0.8 (a higher temperature setting is
             needed to give the model more flexibility/creativity).
 
@@ -263,24 +281,26 @@ class TextEditor_async:
         prompt = self.format_prompt(
             ENTAILMENT_ALIGNMENT_PROMPT, premise_text, hypothesis_text
         )
-        response_dict = await self.call_llm_async(
+        response_model = await self.call_llm_async(
             prompt,
-            model=model if model else self.model,
+            llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        self.validate_response(response_dict)
+        response_dict = (
+            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        )
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
 
     async def edit_for_semantics_async(
         self,
-        candidate_text,
-        reference_text,
-        text_id=None,
-        model=None,
-        temperature=None,
-    ):
+        candidate_text: str,
+        reference_text: str,
+        text_id: str = "",
+        llm_provider: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         *Async version of the method.
 
@@ -296,7 +316,7 @@ class TextEditor_async:
             to be modeled after (i.e., original responsibility text from resume).
             - text_id (str): Identifier of the target text (defaulted to None - unique IDs
             to be generated by UUID function) (i.e., the responsibility bullet text.)
-            - model (str, optional): The model to use for the API call ('openai' or 'llama3').
+            - llm_provider (str, optional): The model to use for the API call ('openai' or 'llama3').
             - temperature (float): defaulted to 0.8 (a higher temperature setting is
             needed to give the model more flexibility/creativity).
 
@@ -311,24 +331,26 @@ class TextEditor_async:
         prompt = self.format_prompt(
             SEMANTIC_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
-        response_dict = await self.call_llm_async(
+        response_model = await self.call_llm_async(
             prompt,
-            model=model if model else self.model,
+            llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        self.validate_response(response_dict)
+        response_dict = (
+            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        )
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result
 
     async def edit_for_semantics_and_entailment_async(
         self,
-        candidate_text,
-        reference_text,
-        text_id=None,
-        model=None,
-        temperature=None,
-    ):
+        candidate_text: str,
+        reference_text: str,
+        text_id: str = "",
+        llm_provider: str = "",
+        temperature: Optional[float] = None,
+    ) -> Dict:
         """
         *Async version of the method.
 
@@ -342,7 +364,7 @@ class TextEditor_async:
             (i.e., requirement text to optimize against.)
             - text_id (int): (Optional) Identifier for the responsibility text.
             Default to None (unique ids to be generated with UUID function)
-            - model (str, optional): The model to use for the API call ('openai' or 'llama3').
+            - llm_provider (str, optional): The model to use for the API call ('openai' or 'llama3').
             - temperature (float, optional): Temperature setting for this specific call.
 
         Returns:
@@ -352,12 +374,14 @@ class TextEditor_async:
         prompt = self.format_prompt(
             SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
-        response_dict = await self.call_llm_async(
+        response_model = await self.call_llm_async(
             prompt,
-            model=model if model else self.model,
+            llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        self.validate_response(response_dict)
+        response_dict = (
+            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        )
         result = {"text_id": text_id, **response_dict}
         logger.info(f"Results updated: \n{result}")
         return result

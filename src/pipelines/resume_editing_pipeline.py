@@ -172,7 +172,7 @@ def verify_directory_paths(mapping_file_prev, mapping_file_curr) -> bool:
 def run_pipeline(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
-    model: str = "openai",
+    llm_provider: str = "openai",
     model_id: str = "gpt-3.5-turbo",
     # n_jobs: int = -1, # Run non-parellel for now
 ):
@@ -251,7 +251,7 @@ def run_pipeline(
             modified_resps = modify_multi_resps_based_on_reqs(
                 responsibilities=validated_responsibilities.responsibilities,
                 requirements=validated_requirements.requirements,
-                model=model,
+                model=llm_provider,
                 model_id=model_id,
                 # n_jobs=n_jobs,
             )  # the function returns a pyd object

@@ -9,7 +9,7 @@ from evaluation_optimization.text_similarity_finder import (
     compute_bertscore_precision,
     AsymmetricTextSimilarity,
 )
-from utils.llm_data_utils import get_openai_api_key
+from utils.llm_api_utils import get_openai_api_key
 from utils.field_mapping_utils import rename_df_columns, COLUMN_NAMES_TO_VARS_MAPPING
 
 

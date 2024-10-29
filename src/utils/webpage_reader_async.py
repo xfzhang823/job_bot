@@ -13,7 +13,7 @@ import re
 import asyncio
 import json
 from playwright.async_api import async_playwright
-from utils.llm_data_utils_async import call_openai_api_async
+from utils.llm_api_utils_async import call_openai_api_async
 from utils.webpage_reader import clean_webpage_text
 from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
 from models.llm_response_models import JobSiteResponseModel
