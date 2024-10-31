@@ -459,7 +459,7 @@ def read_webpages(urls: list):
 
 
 def convert_to_json_wt_gpt(
-    input_text: str, model_id: str = "gpt-4-turbo", temperature: floa = 0.3
+    input_text: str, model_id: str = "gpt-4-turbo", temperature: float = 0.3
 ):
     """
     Parse and convert job posting content to JSON format using OpenAI API.

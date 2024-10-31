@@ -9,6 +9,8 @@ import os
 import json
 import logging
 from dotenv import load_dotenv
+from typing import Union
+from pathlib import Path
 import asyncio
 import nest_asyncio
 import openai
@@ -97,8 +99,8 @@ def extract_flatten_resps_and_reqs(resume_json_file, requirements_json_file):
 
 async def run_pipeline_async(
     job_description_url: list,
-    job_descriptions_json_file: str,
-    requirements_json_file: str,
+    job_descriptions_json_file: Union[Path, str],
+    requirements_json_file: Union[Path, str],
 ):
     """
     Asynchronous pipeline for preprocessing job posting webpage(s):
@@ -119,6 +121,10 @@ async def run_pipeline_async(
     Returns:
         None
     """
+    # Ensure file parameters are changed to path if they are str.
+    job_descriptions_json_file = Path(job_descriptions_json_file)
+    requirements_json_file = Path(requirements_json_file)
+
     # Initialize key variables
     job_descriptions = {}
     job_description_json = {}
