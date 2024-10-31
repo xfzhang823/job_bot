@@ -11,10 +11,9 @@ import json
 from pydantic import ValidationError
 import pandas as pd
 from io import StringIO
-from typing import Union, Optional
-from cast import cast
+from typing import Union, Optional, cast
 
-from anthropic import Anthropic
+from anthropic import Anthropic, AsyncAnthropic
 import openai
 from openai import OpenAI, AsyncOpenAI
 import ollama
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 async def call_api_async(
-    client: Optional[Union[OpenAI, Anthropic]],
+    client: Optional[Union[AsyncOpenAI, AsyncAnthropic]],
     model_id: str,
     prompt: str,
     expected_res_type: str,
@@ -62,7 +61,7 @@ async def call_api_async(
             f"Making async API call with expected response type: {expected_res_type}"
         )
         if llm_provider == "openai":
-            openai_client = cast(OpenAI, client)  # Cast to OpenAI
+            openai_client = cast(AsyncOpenAI, client)  # Cast to OpenAI
             response = await openai_client.chat.completions.create(
                 model=model_id,
                 messages=[
@@ -78,7 +77,7 @@ async def call_api_async(
             response_content = response.choices[0].message.content
 
         elif llm_provider == "claude":
-            claude_client = cast(Anthropic, client)  # Cast to Anthropic (Claude)
+            claude_client = cast(AsyncAnthropic, client)  # Cast to Anthropic (Claude)
             system_instruction = (
                 "You are a helpful assistant who adheres to instructions."
             )

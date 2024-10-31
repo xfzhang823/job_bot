@@ -66,7 +66,7 @@ def customize_mapping_config(
 
 def run_pipeline(
     job_descriptions_file: Union[str, Path],
-    iteration: float,
+    iteration: int,
     iteration_dir: Union[str, Path],
     mapping_file_name: str,
 ) -> Dict:

@@ -14,8 +14,8 @@ from io import StringIO
 from dotenv import load_dotenv
 import pandas as pd
 from pydantic import ValidationError
-from typing import Union, Optional, Mapping, Any, Dict, cast
-import openai
+from typing import Union, Optional, Mapping, Any, Dict, List, cast
+
 from openai import OpenAI
 import ollama
 from anthropic import Anthropic
@@ -28,7 +28,7 @@ from models.llm_response_models import (
     EditingResponseModel,
     JobSiteResponseModel,
 )
-from models.openai_claude_llama3_basemodels import (
+from models.openai_claude_llama_response_basemodels import (
     OpenAITextResponse,
     OpenAIJSONResponse,
     OpenAITabularResponse,
@@ -54,16 +54,57 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+
 # Utility Functions
+# def clean_and_extract_json(response_content: str) -> str:
+#     """Ensures a response contains only valid JSON by extracting the JSON block."""
+#     json_block = re.search(r"{.*}", response_content, re.DOTALL)
+#     if json_block:
+#         return json_block.group(0)
+#     else:
+#         raise ValueError("No valid JSON block found in response.")
 
 
-def clean_and_extract_json(response_content: str) -> str:
-    """Ensures a response contains only valid JSON by extracting the JSON block."""
-    json_block = re.search(r"{.*}", response_content, re.DOTALL)
-    if json_block:
-        return json_block.group(0)
-    else:
-        raise ValueError("No valid JSON block found in response.")
+def clean_and_extract_json(
+    response_content: str,
+) -> Optional[Union[Dict[str, Any], List[Any]]]:
+    """
+    Extracts, cleans, and parses JSON content from the API response.
+    Strips out any non-JSON content like extra text before the JSON block.
+    Also removes JavaScript-style comments and trailing commas.
+
+    Args:
+        response_content (str): The full response content as a string, potentially containing JSON.
+
+    Returns:
+        Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
+        or None if parsing fails.
+    """
+    try:
+        # Find the first occurrence of the `{` and last occurrence of `}` to extract the JSON block
+        start_idx = response_content.find("{")
+        end_idx = response_content.rfind("}") + 1
+
+        # Ensure that valid JSON content is found
+        if start_idx == -1 or end_idx == -1:
+            logger.error("No valid JSON content found in response.")
+            return None
+
+        # Extract the JSON part of the response
+        raw_json_string = response_content[start_idx:end_idx]
+
+        # Remove single-line comments (// ...) but don't affect valid JSON
+        cleaned_json_string = re.sub(r"\s*//[^\n]*", "", raw_json_string)
+
+        # Remove trailing commas before closing curly braces or square brackets
+        cleaned_json_string = re.sub(r",\s*([\]}])", r"\1", cleaned_json_string)
+
+        # Parse JSON string into a Python object
+        return json.loads(cleaned_json_string)
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON: {e}")
+        return None
 
 
 def get_openai_api_key() -> str:
@@ -155,8 +196,6 @@ def parse_response(
 
 
 # Validation Functions
-
-
 def validate_response_type(
     response_content: Union[str, Any], expected_res_type: str
 ) -> Union[str, Dict[str, Any], pd.DataFrame]:

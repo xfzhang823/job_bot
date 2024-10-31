@@ -51,9 +51,14 @@ requirements_flat_json_file = PREPROCESSING_INPUT_OUTPUT_DIR / "requirements_fla
 
 # Evaluation and Optimization Input/Output
 EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "evaluation_optimization"
-ITERATE_0_DIR_OPENAI = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_0"
-ITERATE_1_DIR_OPENAI = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_1"
-ITERATE_2_DIR_OPENAI = EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "iteration_2"
+
+# Evaluation and Optimization I/O by OpenAI
+EVALUATION_OPTIMIZATION_BY_OPENAI_DIR = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "evaluation_optimization_by_openai"
+)
+ITERATE_0_OPENAI_DIR = EVALUATION_OPTIMIZATION_BY_OPENAI_DIR / "iteration_0"
+ITERATE_1_OPENAI_DIR = EVALUATION_OPTIMIZATION_BY_OPENAI_DIR / "iteration_1"
+ITERATE_2_OPENAI_DIR = EVALUATION_OPTIMIZATION_BY_OPENAI_DIR / "iteration_2"
 
 requirements_dir_name = "requirements"
 responsibilities_dir_name = "responsibilities"
@@ -64,160 +69,99 @@ elbow_curve_plot_file_name = "elbow_curve_plot.png"
 
 # Iteration 0
 # logging.info("Setting up iteration 0 directories")
-REQS_FILES_ITERATE_0_DIR_OPENAI = ITERATE_0_DIR_OPENAI / requirements_dir_name
-RESPS_FILES_ITERATE_0_DIR_OPENAI = ITERATE_0_DIR_OPENAI / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_0_DIR_OPENAI = (
-    ITERATE_0_DIR_OPENAI / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_0_OPENAI_DIR = ITERATE_0_OPENAI_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_0_OPENAI_DIR = ITERATE_0_OPENAI_DIR / responsibilities_dir_name
+PRUNED_RESPS_FILES_ITERATE_0_OPENAI_DIR = (
+    ITERATE_0_OPENAI_DIR / pruned_responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_0_DIR_OPENAI = (
-    ITERATE_0_DIR_OPENAI / similarity_metrics_dir_name
+SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR = (
+    ITERATE_0_OPENAI_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_0 = ITERATE_0_DIR_OPENAI / mapping_file_name
+url_to_file_mapping_file_iterate_0_openai = ITERATE_0_OPENAI_DIR / mapping_file_name
 
-list_of_dirs = [
-    REQS_FILES_ITERATE_0_DIR_OPENAI,
-    RESPS_FILES_ITERATE_0_DIR_OPENAI,
-    PRUNED_RESPS_FILES_ITERATE_0_DIR_OPENAI,
-    SIMILARITY_METRICS_ITERATE_0_DIR_OPENAI,
-]
+
 # logging.info(
 #     f"Iteration 0 directories set to: {', '.join(str(dir) for dir in list_of_dirs)}"
 # )
 
 # Iteration 1
 # logging.info("Setting up iteration 1 directories")
-REQS_FILES_ITERATE_1_DIR_OPENAI = ITERATE_1_DIR_OPENAI / requirements_dir_name
-RESPS_FILES_ITERATE_1_DIR_OPENAI = ITERATE_1_DIR_OPENAI / responsibilities_dir_name
+REQS_FILES_ITERATE_1_OPENAI_DIR = ITERATE_1_OPENAI_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_1_OPENAI_DIR = ITERATE_1_OPENAI_DIR / responsibilities_dir_name
 PRUNED_RESPS_FILES_ITERATE_1_DIR_OPENAI = (
-    ITERATE_1_DIR_OPENAI / pruned_responsibilities_dir_name
+    ITERATE_1_OPENAI_DIR / pruned_responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_1_DIR_OPENAI = (
-    ITERATE_1_DIR_OPENAI / similarity_metrics_dir_name
+SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR = (
+    ITERATE_1_OPENAI_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_1 = ITERATE_1_DIR_OPENAI / mapping_file_name
+url_to_file_mapping_file_iterate_1_openai = ITERATE_1_OPENAI_DIR / mapping_file_name
 
-list_of_dirs = [
-    REQS_FILES_ITERATE_1_DIR_OPENAI,
-    RESPS_FILES_ITERATE_1_DIR_OPENAI,
-    PRUNED_RESPS_FILES_ITERATE_1_DIR_OPENAI,
-    SIMILARITY_METRICS_ITERATE_1_DIR_OPENAI,
-]
 # logging.info(
 #     f"Iteration 1 directories set to: {', '.join(str(dir) for dir in list_of_dirs)}"
 # )
 
-# Create directories for iteration 1
-for dir in list_of_dirs:
-    dir.mkdir(parents=True, exist_ok=True)
-
 # Iteration 2
-REQS_FILES_ITERATE_2_DIR_OPENAI = ITERATE_2_DIR_OPENAI / requirements_dir_name
-RESPS_FILES_ITERATE_2_DIR_OPENAI = ITERATE_2_DIR_OPENAI / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_2_DIR_OPENAI = (
-    ITERATE_2_DIR_OPENAI / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_2_OPENAI_DIR = ITERATE_2_OPENAI_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_2_OPENAI_DIR = ITERATE_2_OPENAI_DIR / responsibilities_dir_name
+PRUNED_RESPS_FILES_ITERATE_2_OPENAI_DIR = (
+    ITERATE_2_OPENAI_DIR / pruned_responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_2_DIR_OPENAI = (
-    ITERATE_2_DIR_OPENAI / similarity_metrics_dir_name
+SIMILARITY_METRICS_ITERATE_2_OPENAI_DIR = (
+    ITERATE_2_OPENAI_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_2 = ITERATE_2_DIR_OPENAI / mapping_file_name
+url_to_file_mapping_file_iterate_2_openai = ITERATE_2_OPENAI_DIR / mapping_file_name
 
-# Add directory creation for iteration 2 as well
-list_of_dirs = [
-    REQS_FILES_ITERATE_2_DIR_OPENAI,
-    RESPS_FILES_ITERATE_2_DIR_OPENAI,
-    PRUNED_RESPS_FILES_ITERATE_2_DIR_OPENAI,
-    SIMILARITY_METRICS_ITERATE_2_DIR_OPENAI,
-]
-for dir in list_of_dirs:
-    dir.mkdir(parents=True, exist_ok=True)
-
-
-# Eval and Optimization - by Claude
+# *Eval and Optimization - by Claude
 # Evaluation and Optimization Input/Output
 EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR = (
     EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "evaluation_optimization_by_claude"
 )
 
-ITERATE_0_DIR_CLAUDE = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_0"
-ITERATE_1_DIR_CLAUDE = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_1"
-ITERATE_2_DIR_CLAUDE = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_2"
-
+ITERATE_0_CLAUDE_DIR = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_0"
+ITERATE_1_CLAUDE_DIR = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_1"
+ITERATE_2_CLAUDE_DIR = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_2"
 
 # Iteration 0
 # logging.info("Setting up iteration 0 directories")
-REQS_FILES_ITERATE_0_DIR_CLAUDE = ITERATE_0_DIR_CLAUDE / requirements_dir_name
-RESPS_FILES_ITERATE_0_DIR_CLAUDE = ITERATE_0_DIR_CLAUDE / responsibilities_dir_name
+REQS_FILES_ITERATE_0_CLAUDE_DIR = ITERATE_0_CLAUDE_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_0_CLAUDE_CLAUDE = ITERATE_0_CLAUDE_DIR / responsibilities_dir_name
 PRUNED_RESPS_FILES_ITERATE_0_DIR_CLAUDE = (
-    ITERATE_0_DIR_CLAUDE / pruned_responsibilities_dir_name
+    ITERATE_0_CLAUDE_DIR / pruned_responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_0_DIR_CLAUDE = (
-    ITERATE_0_DIR_CLAUDE / similarity_metrics_dir_name
+SIMILARITY_METRICS_ITERATE_0_CLAUDE_DIR = (
+    ITERATE_0_CLAUDE_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_0_claude = ITERATE_0_DIR_CLAUDE / mapping_file_name
+url_to_file_mapping_file_iterate_0_claude = ITERATE_0_CLAUDE_DIR / mapping_file_name
 
-list_of_dirs = [
-    REQS_FILES_ITERATE_0_DIR_CLAUDE,
-    RESPS_FILES_ITERATE_0_DIR_OPENAI,
-    PRUNED_RESPS_FILES_ITERATE_0_DIR_CLAUDE,
-    SIMILARITY_METRICS_ITERATE_0_DIR_CLAUDE,
-]
 # logging.info(
 #     f"Iteration 0 directories set to: {', '.join(str(dir) for dir in list_of_dirs)}"
 # )
 
-# Create directories if they don't exist
-for dir in list_of_dirs:
-    dir.mkdir(parents=True, exist_ok=True)
-
 # Iteration 1
 # logging.info("Setting up iteration 1 directories")
-REQS_FILES_ITERATE_1_DIR_CLAUDE = ITERATE_1_DIR_CLAUDE / requirements_dir_name
-RESPS_FILES_ITERATE_1_DIR_CLAUDE = ITERATE_1_DIR_OPENAI / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_1_DIR_CLAUDE = (
-    ITERATE_1_DIR_CLAUDE / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_1_CLAUDE_DIR = ITERATE_1_CLAUDE_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_1_CLAUDE_DIR = ITERATE_1_OPENAI_DIR / responsibilities_dir_name
+PRUNED_RESPS_FILES_ITERATE_1_CLAUDE_DIR = (
+    ITERATE_1_CLAUDE_DIR / pruned_responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_1_DIR_CLAUDE = (
-    ITERATE_1_DIR_CLAUDE / similarity_metrics_dir_name
+SIMILARITY_METRICS_ITERATE_1_CLAUDE_DIR = (
+    ITERATE_1_CLAUDE_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_1 = ITERATE_1_DIR_CLAUDE / mapping_file_name
-
-list_of_dirs = [
-    REQS_FILES_ITERATE_1_DIR_CLAUDE,
-    RESPS_FILES_ITERATE_1_DIR_CLAUDE,
-    PRUNED_RESPS_FILES_ITERATE_1_DIR_CLAUDE,
-    SIMILARITY_METRICS_ITERATE_1_DIR_CLAUDE,
-]
-# logging.info(
-#     f"Iteration 1 directories set to: {', '.join(str(dir) for dir in list_of_dirs)}"
-# )
-
-# Create directories for iteration 1
-for dir in list_of_dirs:
-    dir.mkdir(parents=True, exist_ok=True)
+url_to_file_mapping_file_iterate_1_claude = ITERATE_1_CLAUDE_DIR / mapping_file_name
 
 # Iteration 2
-REQS_FILES_ITERATE_2_DIR_CLAUDE = ITERATE_2_DIR_CLAUDE / requirements_dir_name
-RESPS_FILES_ITERATE_2_DIR_CLAUDE = ITERATE_2_DIR_CLAUDE / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_2_DIR_CLAUDE = (
-    ITERATE_2_DIR_CLAUDE / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_2_CLAUDE_DIR = ITERATE_2_CLAUDE_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_2_CLAUDE_DIR = ITERATE_2_CLAUDE_DIR / responsibilities_dir_name
+PRUNED_RESPS_FILES_ITERATE_2_CLAUDE_DIR = (
+    ITERATE_2_CLAUDE_DIR / pruned_responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_2_DIR_CLAUDE = (
-    ITERATE_2_DIR_CLAUDE / similarity_metrics_dir_name
+SIMILARITY_METRICS_ITERATE_2_CLAUDE_DIR = (
+    ITERATE_2_CLAUDE_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_2_claude = ITERATE_2_DIR_CLAUDE / mapping_file_name
+url_to_file_mapping_file_iterate_2_claude = ITERATE_2_CLAUDE_DIR / mapping_file_name
 
-# Add directory creation for iteration 2 as well
-list_of_dirs = [
-    REQS_FILES_ITERATE_2_DIR_CLAUDE,
-    RESPS_FILES_ITERATE_2_DIR_CLAUDE,
-    PRUNED_RESPS_FILES_ITERATE_2_DIR_CLAUDE,
-    SIMILARITY_METRICS_ITERATE_2_DIR_CLAUDE,
-]
-for dir in list_of_dirs:
-    dir.mkdir(parents=True, exist_ok=True)
-# config.py
 
-# LLM Models
+# *LLM Models
 # Anthropic (Claude) models
 CLAUDE_OPUS = "claude-3-opus-20240229"
 CLAUDE_SONNET = "claude-3-5-sonnet-20241022"
@@ -230,3 +174,28 @@ GPT_4 = "gpt-4"
 GPT_4_TURBO = "gpt-4-turbo"
 GPT_4_TURBO_32K = "gpt-4-turbo-32k"
 GPT_4O = "gpt-4o"
+
+
+# *LLM Provider configuration
+# config.py (additions)
+LLM_CONFIG = {
+    "openai": {
+        "model_id": "gpt-4-turbo",
+        "iteration_dirs": {
+            "0": ITERATE_0_OPENAI_DIR,
+            "1": ITERATE_1_OPENAI_DIR,
+            "2": ITERATE_2_OPENAI_DIR,
+            # Add more as needed
+        },
+    },
+    "claude": {
+        "model_id": "claude-3-5-sonnet-20241022",
+        "iteration_dirs": {
+            "0": ITERATE_0_CLAUDE_DIR,
+            "1": ITERATE_1_CLAUDE_DIR,
+            "2": ITERATE_2_CLAUDE_DIR,
+            # Add more as needed
+        },
+    },
+    # Add configurations for other LLM providers here
+}

@@ -6,7 +6,7 @@ from pathlib import Path
 import logging
 import logging_config
 from dataclasses import dataclass
-from typing import Optional, Union, Dict, cast, Any
+from typing import Optional, Union, Dict, Any, cast
 from pydantic import ValidationError, HttpUrl
 from models.resume_job_description_io_models import JobFileMappings
 from utils.generic_utils import save_to_json_file, read_from_json_file
@@ -115,7 +115,9 @@ def create_mapping_entry(
         )
 
     except ValidationError as ve:
-        logger.error(f"Pydantic validation error for entry {entry}: {ve}")
+        logger.error(
+            f"Pydantic validation error for entry {job_file_paths_model}: {ve}"
+        )
         raise ValueError(f"Pydantic validation error: {ve}")
 
     return job_file_paths_model  # Return the validated JobFilePaths instance
@@ -239,7 +241,7 @@ def load_existing_or_create_new_mapping(
     """
 
     mapping_file = config.mapping_file
-    job_urls = set(job_descriptions.keys())
+    job_urls_set = set(job_descriptions.keys())  # *-> to set to be compared
 
     # *Update existing mapping file
     if os.path.exists(mapping_file):
@@ -253,15 +255,25 @@ def load_existing_or_create_new_mapping(
             f"Existing mapping file '{mapping_file}' loaded and validated successfully."
         )
 
-        # Extract the underlying dictionary from the Pydantic model
-        mapped_urls = file_mappings_model.root.keys()
+        # Access the __root__ attribute and convert URLs to str, then a list of strings
+        mapped_urls: list[str] = [str(url) for url in file_mappings_model.root.keys()]
+        mapped_urls_set = set(mapped_urls)  # *-> to set to be compared
 
-        # *No newe URLs need to be added (nothing to update) - skip the process
-        if mapped_urls == job_urls:
+        # Check if the two datatypes are the same
+        logger.info(
+            f"mapped_urls' datatype: {type(mapped_urls)} \njob_urls: {type(job_urls_set)}"
+        )
+
+        print(f"mapped_urls: {mapped_urls}")  # Debugging
+        print(f"job_urls: {job_urls_set}")  # Debugging
+
+        # *No new URLs need to be added (nothing to update) - skip the process
+        if mapped_urls_set == job_urls_set:
+
             logger.info("The mapping file is up-to-date. No new URLs to add.")
             return file_mappings_model
 
-        elif set(mapped_urls) > job_urls:
+        elif mapped_urls_set > job_urls_set:
             logger.error(
                 "The mapping file contains more URLs than the job descriptions."
             )
@@ -271,7 +283,7 @@ def load_existing_or_create_new_mapping(
 
         else:
             logger.info("The mapping file has fewer URLs. Adding new entries...")
-            missing_urls = job_urls - set(mapped_urls)
+            missing_urls = job_urls_set - mapped_urls_set
 
             # Extract existing mapping dictionary from the root
             existing_mapping = file_mappings_model.root
