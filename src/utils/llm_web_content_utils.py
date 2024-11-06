@@ -19,7 +19,7 @@ import ollama
 from anthropic import Anthropic
 
 # Internal dependencies
-from src.utils.llm_api_utils import get_openai_api_key, get_claude_api_key
+from utils.llm_api_utils import get_openai_api_key, get_claude_api_key
 from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
 
 

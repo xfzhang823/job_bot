@@ -54,8 +54,8 @@ def execute_pipeline(pipeline_id, llm_provider="openai"):
 if __name__ == "__main__":
     # Example of running various pipelines
     # execute_pipeline("1")  # Run pipeline 1 with default OpenAI
-    execute_pipeline("2a", llm_provider="openai")  # Run pipeline 2a using Claude
-    execute_pipeline("3a", llm_provider="openai")  # Run pipeline 3b using Claude
+    execute_pipeline("2a", llm_provider="claude")  # Run pipeline 2a using Claude
+    execute_pipeline("3a", llm_provider="claude")  # Run pipeline 3b using Claude
     # execute_pipeline(
     #     "3d_async", llm_provider="openai"
     # )  # Run async pipeline 3d using OpenAI

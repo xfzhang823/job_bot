@@ -28,20 +28,6 @@ from models.llm_response_models import (
     EditingResponseModel,
     JobSiteResponseModel,
 )
-from models.openai_claude_llama_response_basemodels import (
-    OpenAITextResponse,
-    OpenAIJSONResponse,
-    OpenAITabularResponse,
-    OpenAICodeResponse,
-    ClaudeTextResponse,
-    ClaudeJSONResponse,
-    ClaudeTabularResponse,
-    ClaudeCodeResponse,
-    LlamaTextResponse,
-    LlamaJSONResponse,
-    LlamaTabularResponse,
-    LlamaCodeResponse,
-)
 
 from config import (
     GPT_35_TURBO,
@@ -56,13 +42,12 @@ logger = logging.getLogger(__name__)
 
 
 # Utility Functions
-# def clean_and_extract_json(response_content: str) -> str:
-#     """Ensures a response contains only valid JSON by extracting the JSON block."""
-#     json_block = re.search(r"{.*}", response_content, re.DOTALL)
-#     if json_block:
-#         return json_block.group(0)
-#     else:
-#         raise ValueError("No valid JSON block found in response.")
+
+json_model_mapping = {
+    "job_site": JobSiteResponseModel,
+    "editing": EditingResponseModel,  # Corrected "editting" to "editing"
+    # Additional mappings as needed
+}
 
 
 def clean_and_extract_json(
@@ -74,29 +59,26 @@ def clean_and_extract_json(
     Also removes JavaScript-style comments and trailing commas.
 
     Args:
-        response_content (str): The full response content as a string, potentially containing JSON.
+        response_content (str): The full response content as a string, potentially
+        containing JSON.
 
     Returns:
         Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
         or None if parsing fails.
     """
     try:
-        # Find the first occurrence of the `{` and last occurrence of `}` to extract the JSON block
-        start_idx = response_content.find("{")
-        end_idx = response_content.rfind("}") + 1
-
-        # Ensure that valid JSON content is found
-        if start_idx == -1 or end_idx == -1:
+        # Extract JSON-like block by matching the first `{` and the last `}`
+        match = re.search(r"{.*}", response_content, re.DOTALL)
+        if not match:
             logger.error("No valid JSON content found in response.")
             return None
 
-        # Extract the JSON part of the response
-        raw_json_string = response_content[start_idx:end_idx]
+        raw_json_string = match.group(0)
 
-        # Remove single-line comments (// ...) but don't affect valid JSON
+        # Remove JavaScript-style single-line comments (// ...) but retain valid JSON
         cleaned_json_string = re.sub(r"\s*//[^\n]*", "", raw_json_string)
 
-        # Remove trailing commas before closing curly braces or square brackets
+        # Remove trailing commas before closing braces or brackets
         cleaned_json_string = re.sub(r",\s*([\]}])", r"\1", cleaned_json_string)
 
         # Parse JSON string into a Python object
@@ -127,137 +109,106 @@ def get_claude_api_key() -> str:
     return api_key
 
 
-# Parsing Functions
-def parse_response(
-    provider: str, response_type: str, response: Mapping[str, Any]
-) -> Union[
-    OpenAITextResponse,
-    OpenAIJSONResponse,
-    OpenAITabularResponse,
-    OpenAICodeResponse,
-    ClaudeTextResponse,
-    ClaudeJSONResponse,
-    ClaudeTabularResponse,
-    ClaudeCodeResponse,
-    LlamaTextResponse,
-    LlamaJSONResponse,
-    LlamaTabularResponse,
-    LlamaCodeResponse,
-]:
-    """
-    Parses raw JSON response from an LLM API based on provider and response type.
-
-    Args:
-        provider (str): The LLM provider ("openai", "claude", "llama").
-        response_type (str): The type of response expected ("text", "json", "tabular", "code").
-        response (Mapping[str, Any]): The raw response dictionary from the LLM API.
-
-    Returns:
-        Union[OpenAITextResponse, OpenAIJSONResponse, ...]: Parsed response model specific to the provider and response type.
-    """
-    parsers = {
-        "openai": {
-            "text": lambda r: OpenAITextResponse(text=r.choices[0].message.content),
-            "json": lambda r: OpenAIJSONResponse(data=r),
-            "tabular": lambda r: OpenAITabularResponse(rows=r),
-            "code": lambda r: OpenAICodeResponse(
-                code=r.get("code"),
-                language=r.get("language"),
-                explanation=r.get("explanation"),
-            ),
-        },
-        "claude": {
-            "text": lambda r: ClaudeTextResponse(content=r["completion"]),
-            "json": lambda r: ClaudeJSONResponse(data=r),
-            "tabular": lambda r: ClaudeTabularResponse(rows=r),
-            "code": lambda r: ClaudeCodeResponse(
-                code=r.get("code"),
-                language=r.get("language"),
-                explanation=r.get("explanation"),
-            ),
-        },
-        "llama": {
-            "text": lambda r: LlamaTextResponse(result=r["result"]),
-            "json": lambda r: LlamaJSONResponse(data=r),
-            "tabular": lambda r: LlamaTabularResponse(rows=r),
-            "code": lambda r: LlamaCodeResponse(
-                code=r.get("code"),
-                language=r.get("language"),
-                explanation=r.get("explanation"),
-            ),
-        },
-    }
-    try:
-        return parsers[provider][response_type](response)
-    except KeyError:
-        raise ValueError(
-            f"Unsupported provider or response type: {provider}, {response_type}"
-        )
-
-
 # Validation Functions
 def validate_response_type(
     response_content: Union[str, Any], expected_res_type: str
-) -> Union[str, Dict[str, Any], pd.DataFrame]:
+) -> Union[
+    CodeResponse,
+    JSONResponse,
+    TabularResponse,
+    TextResponse,
+]:
     """
-    Validates the response type based on the expected_res_type.
+    Validates and structures the response content based on
+    the expected response type.
 
     Args:
-        response_content (str): The raw response content from the LLM API.
-        expected_res_type (str): The expected type of the response (e.g., "str", "json", "tabular", "code").
+        response_content (Any): The raw response content from the LLM API.
+        expected_res_type (str): The expected type of the response
+            (e.g., "json", "tabular", "str", "code").
 
     Returns:
-        Union[str, dict, pd.DataFrame]: The validated response content in the appropriate format.
+        Union[CodeResponse, JSONResponse, TabularResponse, TextResponse]:
+            The validated and structured response as a Pydantic model instance.
+            - CodeResponse: Returned when expected_res_type is "code", wraps code content.
+            - JSONResponse, JobSiteResponseModel, or EditingResponseModel:
+              Returned when expected_res_type is "json", based on json_type.
+            - TabularResponse: Returned when expected_res_type is "tabular", wraps a DataFrame.
+            - TextResponse: Returned when expected_res_type is "str", wraps plain text content.
     """
+
     if expected_res_type == "json":
-        try:
+        # Check if response_content is a string that needs parsing
+        if isinstance(response_content, str):
+            # Only parse if it's a string
             cleaned_content = clean_and_extract_json(response_content)
-            return json.loads(cleaned_content)
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Invalid JSON format: {e}")
-            raise ValueError("Response is not valid JSON.")
+            if cleaned_content is None:
+                raise ValueError("Failed to extract valid JSON from the response.")
+        else:
+            # If it's already a dict or list, use it directly
+            cleaned_content = response_content
+
+        # Create a JSONResponse instance with the cleaned content
+        if isinstance(cleaned_content, (dict, list)):
+            return JSONResponse(data=cleaned_content)
+        else:
+            raise TypeError(
+                f"Expected dict or list for JSON response, got {type(cleaned_content)}"
+            )
+
     elif expected_res_type == "tabular":
         try:
-            return pd.read_csv(StringIO(response_content))
+            # Parse as DataFrame and wrap in TabularResponse model
+            df = pd.read_csv(StringIO(response_content))
+            return TabularResponse(data=df)
         except Exception as e:
             logger.error(f"Error parsing tabular data: {e}")
             raise ValueError("Response is not valid tabular data.")
-    elif expected_res_type in {"str", "code"}:
-        return response_content
+
+    elif expected_res_type == "str":
+        # Wrap text response in TextResponse model
+        return TextResponse(content=response_content)
+
+    elif expected_res_type == "code":
+        # Wrap code response in CodeResponse model
+        return CodeResponse(code=response_content)
+
     else:
         raise ValueError(f"Unsupported response type: {expected_res_type}")
 
 
-def validate_context_type(
-    response_data: Dict[str, Any], context_type: str
-) -> Union[JSONResponse, JobSiteResponseModel, EditingResponseModel]:
+def validate_json_type(
+    response_data: Union[Dict[str, Any], List[Any]], json_type: str
+) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
     """
-    Validates and structures the JSON response based on the context_type.
+    Validates JSON data against a specific Pydantic model based on 'json_type'.
 
     Args:
-        - response_data (dict): The JSON data from the response, already
-        validated as a dictionary.
-        - context_type (str): The context in which to interpret the response
-        (e.g., "job_site" or "editing").
+        - response_data (Union[Dict[str, Any], List[Dict[str, Any]]]):
+        The raw JSON data
+          to validate.
+        - json_type (str): The type of JSON model to use for validation.
 
     Returns:
-        Union[JSONResponse, JobSiteResponseModel, EditingResponseModel]:
-        The structured and validated response as a pydantic model instance.
+        An instance of the validated Pydantic model.
     """
-    if context_type == "job_site":
-        return JobSiteResponseModel(
-            url=response_data.get("url"),
-            job_title=response_data.get("job_title"),
-            company=response_data.get("company"),
-            location=response_data.get("location"),
-            salary_info=response_data.get("salary_info"),
-            posted_date=response_data.get("posted_date"),
-            content=response_data.get("content"),
+
+    # Retrieve the model from the mapping
+    model = json_model_mapping.get(json_type)
+
+    if not model:
+        raise ValueError(f"Unsupported json_type: {json_type}")
+
+    try:
+        # Use model-specific instantiation
+        return (
+            model(**response_data)
+            if model != JSONResponse
+            else JSONResponse(data=response_data)
         )
-    elif context_type == "editing":
-        return EditingResponseModel(optimized_text=response_data.get("optimized_text"))
-    else:
-        return JSONResponse(data=response_data)  # Default JSON structure
+    except ValidationError as e:
+        logger.error(f"Validation failed for {json_type}: {e}")
+        raise ValueError(f"Invalid format for {json_type}: {e}")
 
 
 # API Calling Functions
@@ -266,7 +217,7 @@ def call_api(
     model_id: str,
     prompt: str,
     expected_res_type: str,
-    context_type: str,
+    json_type: str,
     temperature: float,
     max_tokens: int,
     llm_provider: str,
@@ -279,8 +230,12 @@ def call_api(
     JobSiteResponseModel,
 ]:
     """Unified function to handle API calls for OpenAI, Claude, and Llama."""
+
     try:
         logger.info(f"Making API call with expected response type: {expected_res_type}")
+        response_content = ""
+
+        # Step  1: Make the API call and receive the response
         if llm_provider == "openai":
             openai_client = cast(OpenAI, client)  # Cast to OpenAI
             response = openai_client.chat.completions.create(
@@ -308,10 +263,18 @@ def call_api(
                 messages=[{"role": "user", "content": system_instruction + prompt}],
                 temperature=temperature,
             )
-            response_content = response.content[0]
+
+            # Need to add an extra step to extract content from response object's TextBlocks
+            # (Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
+            # The content attribute of Message is a list of TextBlock objects,
+            # whereas others wrap everything into a single block.)
+            response_content = (
+                response.content[0].text
+                if hasattr(response.content[0], "text")
+                else str(response.content[0])
+            )
 
         elif llm_provider == "llama3":
-
             # Construct an instance of Options
             options = {
                 "temperature": temperature,
@@ -324,47 +287,35 @@ def call_api(
 
         logger.info(f"Raw {llm_provider} Response: {response_content}")
 
+        # Validate response is not empty
         if not response_content:
             raise ValueError(f"Received an empty response from {llm_provider} API.")
 
-        # Step 1: Validate response type
+        # Validate response type (generic text, JSON, tabular, and code)
         validated_response_content = validate_response_type(
             response_content, expected_res_type
         )
 
-        # Step 2: Convert to model based on response type and context
-        if expected_res_type == "json" and isinstance(validated_response_content, dict):
-            # For JSON, use context-specific model
-            return validate_context_type(validated_response_content, context_type)
-        elif expected_res_type == "tabular" and isinstance(
-            validated_response_content, pd.DataFrame
-        ):
-            return TabularResponse(
-                data=validated_response_content
-            )  # Wrap in TabularResponse
-        elif expected_res_type == "code":
-            # Ensure validated_response_content is a str for CodeResponse
-            if isinstance(validated_response_content, str):
-                return CodeResponse(
-                    code=validated_response_content
-                )  # Wrap in CodeResponse
-            else:
-                raise TypeError(
-                    f"Expected a str for code response, but got {type(validated_response_content).__name__}"
+        # Further validate JSON responses
+        if expected_res_type == "json":
+            # Ensure validated_response_content is a JSONResponse before accessing `.data`
+            if isinstance(validated_response_content, JSONResponse):
+                # Unpack the `data` field, ensuring it's a dict or list of dicts as expected
+                response_data = validated_response_content.data
+                if not isinstance(response_data, (dict, list)):
+                    raise ValueError(
+                        "Expected response data to be a dictionary or a list of dictionaries."
+                    )
+
+                validated_response_content = validate_json_type(
+                    response_data=response_data, json_type=json_type
                 )
-        elif expected_res_type == "str":
-            # Ensure validated_response_content is a str for TextResponse
-            if isinstance(validated_response_content, str):
-                return TextResponse(
-                    content=validated_response_content
-                )  # Wrap in TextResponse
             else:
                 raise TypeError(
-                    f"Expected a str for text response, but got {type(validated_response_content).__name__}"
+                    "Expected validated response content to be a JSONResponse."
                 )
 
-        # Raise an error if expected_res_type does not match any known types
-        raise ValueError(f"Unsupported response type: {expected_res_type}")
+        return validated_response_content
 
     except (json.JSONDecodeError, ValidationError) as e:
         logger.error(f"Validation or parsing error: {e}")
@@ -372,130 +323,3 @@ def call_api(
     except Exception as e:
         logger.error(f"{llm_provider} API call failed: {e}")
         raise
-
-
-def call_openai_api(
-    prompt: str,
-    model_id: str = "gpt-4-turbo",
-    expected_res_type: str = "str",
-    context_type: str = "",
-    temperature: float = 0.4,
-    max_tokens: int = 1056,
-    client: Optional[OpenAI] = None,
-) -> Union[
-    JSONResponse,
-    TabularResponse,
-    TextResponse,
-    CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
-]:
-    """
-    Calls OpenAI API and parses response.
-
-    Args:
-        prompt (str): The prompt to send to the API.
-        client (Optional[OpenAI]): An OpenAI client instance. If None, a new client is instantiated.
-        model_id (str): Model ID to use for the API call.
-        expected_res_type (str): The expected type of response from the API ('str', 'json',
-        'tabular', or 'code').
-        context_type (str): Context type for JSON responses ("editing" or "job_site").
-        temperature (float): Controls the creativity of the response.
-        max_tokens (int): Maximum number of tokens for the response.
-
-    Returns:
-        Union[TextResponse, JSONResponse, TabularResponse, CodeResponse, EditingResponseModel,
-        JobSiteResponseModel]: The structured response from the API.
-    """
-    # Use provided client or initialize a new one if not given
-    openai_client = client if client else OpenAI(api_key=get_openai_api_key())
-    logger.info("OpenAI client ready for API call.")
-
-    # Call call_api function and return
-    return call_api(
-        openai_client,
-        model_id,
-        prompt,
-        expected_res_type,
-        context_type,
-        temperature,
-        max_tokens,
-        "openai",
-    )
-
-
-def call_claude_api(
-    prompt: str,
-    model_id: str = "claude-3-5-sonnet-20241022",
-    expected_res_type: str = "str",
-    context_type: str = "",
-    temperature: float = 0.4,
-    max_tokens: int = 1056,
-    client: Optional[Anthropic] = None,
-) -> Union[
-    JSONResponse,
-    TabularResponse,
-    TextResponse,
-    CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
-]:
-    """
-    Calls the Claude API to generate responses based on a given prompt and expected response type.
-
-    Args:
-        prompt (str): The prompt to send to the API.
-        - model_id (str): Model ID to use for the Claude API call.
-        - expected_res_type (str): The expected type of response from the API
-        ('str', 'json', 'tabular', or 'code').
-        - context_type (str): Context type for JSON responses ("editing" or "job_site").
-        - temperature (float): Controls the creativity of the response.
-        - max_tokens (int): Maximum number of tokens for the response.
-        - client (Optional[Anthropic]): A Claude client instance.
-        If None, a new client is instantiated.
-
-    Returns:
-        Union[TextResponse, JSONResponse, TabularResponse, CodeResponse, EditingResponseModel, JobSiteResponseModel]:
-        The structured response from the API.
-    """
-    # Use provided client or initialize a new one if not given
-    claude_client = client if client else Anthropic(api_key=get_claude_api_key())
-    logger.info("Claude client ready for API call.")
-    return call_api(
-        claude_client,
-        model_id,
-        prompt,
-        expected_res_type,
-        context_type,
-        temperature,
-        max_tokens,
-        "claude",
-    )
-
-
-def call_llama3(
-    prompt: str,
-    model_id: str = "llama3",
-    expected_res_type: str = "str",
-    context_type: str = "",
-    temperature: float = 0.4,
-    max_tokens: int = 1056,
-) -> Union[
-    JSONResponse,
-    TabularResponse,
-    TextResponse,
-    CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
-]:
-    """Calls the Llama 3 API and parses response."""
-    return call_api(
-        client=None,
-        model_id=model_id,
-        prompt=prompt,
-        expected_res_type=expected_res_type,
-        context_type=context_type,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        llm_provider="llama3",
-    )

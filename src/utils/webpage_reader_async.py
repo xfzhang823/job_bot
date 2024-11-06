@@ -123,7 +123,7 @@ async def convert_to_json_wt_gpt_async(
         prompt=prompt,
         model_id=model_id,
         expected_res_type="json",
-        context_type="job_site",
+        json_type="job_site",
         temperature=temperature,
         max_tokens=2000,
     )
