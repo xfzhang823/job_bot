@@ -40,25 +40,39 @@ class TextResponse(BaseResponseModel):
         }
 
 
-# Generalized JSON Response Model
-class JSONResponse(BaseResponseModel):
-    optimized_text: Optional[str] = None  # For any optimized text-based content
-    data: Optional[dict] = None  # General data field for various JSON responses
+# Generalized JSON Response Model (New Version)
+class JSONResponse(BaseModel):
+    """Basic and generic model for JSON response"""
+
+    data: Union[
+        Dict[str, Any], List[Dict[str, Any]]
+    ]  # Allow both dict and list of dicts
 
     class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "JSON response processed.",
-                "optimized_text": "This is the optimized version of your text.",
-                # keep optimized_text in the base model b/c other models such as summarization, etc. may need it
-                "data": {"key_1": "value_1", "key_2": "value_2"},
-            }
-        }
+        arbitrary_types_allowed = True
+
+
+# Old version:
+# class JSONResponse(BaseResponseModel):
+#     optimized_text: Optional[str] = None  # For any optimized text-based content
+#     data: Optional[dict] = None  # General data field for various JSON responses
+
+#     class Config:
+#         json_schema_extra = {
+#             "example": {
+#                 "status": "success",
+#                 "message": "JSON response processed.",
+#                 "optimized_text": "This is the optimized version of your text.",
+#                 # keep optimized_text in the base model b/c other models such as summarization, etc. may need it
+#                 "data": {"key_1": "value_1", "key_2": "value_2"},
+#             }
+#         }
 
 
 # Model for handling tabular responses using pandas DataFrame
 class TabularResponse(BaseResponseModel):
+    """Generic modle for tabular LLM response"""
+
     data: pd.DataFrame  # Tabular data, returned as a pandas DataFrame
 
     class Config:
@@ -74,6 +88,8 @@ class TabularResponse(BaseResponseModel):
 
 # Model for handling code responses (e.g., snippets of code)
 class CodeResponse(BaseResponseModel):
+    """Generic modle for tabular LLM response"""
+
     code: str  # Holds the code as a string
 
     class Config:
@@ -88,6 +104,8 @@ class CodeResponse(BaseResponseModel):
 
 # Example job-specific response inheriting from JSONResponse (for job processing pipelines)
 class JobSiteResponseModel(JSONResponse):
+    """Specific model to validate job posting site parsing"""
+
     url: Optional[str] = Field(None, description="Job posting URL")
     job_title: Optional[str] = Field(None, description="Job title")
     company: Optional[str] = Field(None, description="Company name")

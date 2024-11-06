@@ -163,7 +163,7 @@ class TextEditorAsync:
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
-                context_type="editing",
+                json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, OpenAI) else None,
@@ -173,7 +173,7 @@ class TextEditorAsync:
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
-                context_type="editing",
+                json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, Anthropic) else None,
@@ -182,7 +182,7 @@ class TextEditorAsync:
             response_pyd_obj = await call_llama3_async(
                 prompt=prompt,
                 expected_res_type="json",
-                context_type="editing",
+                json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
             )
