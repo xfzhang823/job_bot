@@ -8,12 +8,12 @@ Not tested/debugged yet
 import os
 from pathlib import Path
 import logging
-from joblib import Parallel, delayed
-from typing import Any, Dict, Tuple
+from typing import Dict, Tuple
+from pydantic import ValidationError
 from tqdm import tqdm
 import asyncio
-from openai import OpenAI, AsyncOpenAI
-from anthropic import Anthropic
+from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 
 from evaluation_optimization.resume_editor_async import TextEditorAsync
 from utils.generic_utils import save_to_json_file
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 async def modify_resp_based_on_reqs_async(
     resp_key: str, resp: str, reqs: Dict[str, str], llm_provider: str, model_id: str
-) -> Tuple[str, Dict[str, Dict[str, str]]]:
+) -> Tuple[str, ResponsibilityMatch]:
     """
     *This is the async version of the modify_resps_based_on_reqs function.
 
@@ -84,7 +84,7 @@ async def modify_resp_based_on_reqs_async(
 
     elif llm_provider == "claude":
         claude_api_key = get_claude_api_key()
-        client = Anthropic(api_key=claude_api_key)
+        client = AsyncAnthropic(api_key=claude_api_key)
         logger.info("Claude API initialized.")
 
     elif llm_provider == "llama3":
@@ -127,24 +127,122 @@ async def modify_resp_based_on_reqs_async(
             optimized_text = OptimizedText(optimized_text=revised_text_3)
             local_modifications[req_key] = optimized_text.model_dump()
 
+        # Wrap the modifications under optimized_by_requirements
+        validated_modifications = ResponsibilityMatch(
+            optimized_by_requirements=local_modifications
+        )
+
+        # Debugging
+        logger.info(f"Before validated by ResponsibilityMatch: \n{local_modifications}")
+        logger.info(
+            f"After ResponsibilityMatch validation: \n{validated_modifications}"
+        )
+
     except Exception as e:
         logger.error(f"Failed to modify responsibility {resp_key}: {e}")
-        local_modifications[req_key] = OptimizedText(optimized_text=resp)
+        # Fallback for error cases
+        local_modifications[req_key] = OptimizedText(optimized_text=resp).model_dump()
+        validated_modifications = ResponsibilityMatch(
+            optimized_by_requirements=local_modifications
+        )
 
-    return resp_key, local_modifications
+    return resp_key, validated_modifications
 
 
 async def modify_multi_resps_based_on_reqs_async(
     responsibilities, requirements, llm_provider, model_id
 ):
-    tasks = []
-    for resp_key, resp in responsibilities.items():
-        tasks.append(
-            modify_resp_based_on_reqs_async(
+    """
+    This is the Async version of the modify_multi_resps_based_on_reqs function.
+
+    Modify multiple responsibilities by aligning them with multiple job requirements.
+
+    This function processes multiple responsibilities by aligning each responsibility
+    with multiple job requirements. It uses the `TextEditor` class to perform the
+    modifications and executes the processing in parallel using 'joblib' to speed up
+    the process, especially when dealing with large datasets.
+
+    Each responsibility undergoes a three-step modification process:
+    1. Semantic Alignment: Ensures that the responsibility text matches the meaning of the
+       job requirement.
+    2. Entailment Alignment: Ensures that the responsibility text can be logically inferred
+       from the job requirement.
+    3. Dependency Parsing Alignment (DP): Ensures that the structure of the responsibility
+       text is preserved while aligning it with the job requirement.
+
+    Args:
+        -responsibilities (dict): A dictionary of responsibility texts, where keys are
+            unique identifiers and values are the responsibility texts.
+        -requirements (dict): A dictionary of job requirement texts, where keys are unique
+            requirement identifiers and values are the requirement texts.
+        -TextEditor (callable): The class responsible for performing the text modifications.
+        -model (str, optional): The name of the model to be used (e.g., "openai").
+            Defaults to "openai".
+        -model_id (str, optional): The specific model version to be used (e.g., "gpt-3.5-turbo").
+            Defaults to "gpt-3.5-turbo".
+        -n_jobs (int, optional): The number of parallel jobs to run. Defaults to -1,
+            which means using all available processors.
+
+    Returns:
+        Pydantic object of a dictionary where keys are responsibility identifiers
+        and values are dictionaries of modified responsibility texts, each aligned
+        with multiple job requirements.
+
+    Example:
+        >>> modify_multi_resps_based_on_reqs(
+                responsibilities={"resp1": "Managed a team of 5 developers"},
+                requirements={"req1": "Experience leading software development teams."},
+                TextEditor=TextEditor,
+                model="openai",
+                model_id="gpt-3.5-turbo",
+                n_jobs=-1
+            )
+    """
+
+    # Limit the number of concurrent tasks (in this case, coroutines) that
+    # can run simultaneously
+    semaphore = asyncio.Semaphore(7)  # Adjust limit as needed
+
+    async def modify_resp_with_limit(resp_key, resp):
+        async with semaphore:
+            return await modify_resp_based_on_reqs_async(
                 resp_key, resp, requirements, llm_provider, model_id
             )
+
+    tasks = [
+        modify_resp_with_limit(resp_key, resp)
+        for resp_key, resp in responsibilities.items()
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Handle exceptions in results if any
+    modified_responsibilities = {}
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Task failed with exception: {result}")
+        elif isinstance(result, tuple) and len(result) == 2:
+            # Unpack only if it's a tuple with expected length
+            resp_key, modifications = result
+            modified_responsibilities[resp_key] = modifications
+        else:
+            logger.warning(f"Unexpected result format: {result}")
+
+    logger.info(
+        f"Before validated by ResponsibilityMatches: \n{modified_responsibilities}"
+    )  # TODO: for debugging; delete afterwards
+
+    # Validate and wrap the final result in ResponsibilityMatches model
+    try:
+        validated_modified_responsibilities = ResponsibilityMatches(
+            responsibilities=modified_responsibilities
         )
 
-    results = await asyncio.gather(*tasks)
-    modified_responsibilities = {result[0]: result[1] for result in results}
-    return modified_responsibilities
+        logger.info(
+            f"Before validated by ResponsibilityMatches: \n{validated_modified_responsibilities}"
+        )  # TODO: for debugging; delete afterwards
+
+        return validated_modified_responsibilities
+
+    except ValidationError as e:
+        logger.error(f"Validation error when creating ResponsibilityMatches: {e}")
+        raise ValueError("Failed to validate modified responsibilities.")

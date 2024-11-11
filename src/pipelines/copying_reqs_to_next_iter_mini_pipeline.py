@@ -58,18 +58,18 @@ def set_directory_paths(
     mapping_file_curr = Path(mapping_file_curr)
 
     # Load the mapping files using the Pydantic model loader
-    file_mapping_prev = load_mappings_model_from_json(mapping_file_prev)
-    file_mapping_curr = load_mappings_model_from_json(mapping_file_curr)
+    file_mapping_prev_model = load_mappings_model_from_json(mapping_file_prev)
+    file_mapping_curr_model = load_mappings_model_from_json(mapping_file_curr)
 
-    if file_mapping_prev is None or file_mapping_curr is None:
+    if file_mapping_prev_model is None or file_mapping_curr_model is None:
         logger.error(
             f"Failed to load one or both mapping files: {mapping_file_prev}, {mapping_file_curr}"
         )
         return {}
 
     # Extract mappings from the Pydantic models' root attribute
-    file_mapping_prev = file_mapping_prev.root
-    file_mapping_curr = file_mapping_curr.root
+    file_mapping_prev = file_mapping_prev_model.root
+    file_mapping_curr = file_mapping_curr_model.root
 
     # Initialize dictionary to hold paths
     paths_dict = {}
@@ -134,8 +134,6 @@ def verify_paths(mapping_file_prev, mapping_file_curr) -> bool:
 def run_pipeline(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
-    model: str = "openai",
-    model_id: str = "gpt-3.5-turbo",
 ):
     """
     Copy JSON files from the requirements folder in the previous iteration to the

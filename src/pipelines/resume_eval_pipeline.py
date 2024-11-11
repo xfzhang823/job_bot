@@ -414,37 +414,60 @@ def generate_matching_metrics_from_nested_json(
 
 
 def multivariate_indices_processing_mini_pipeline(
-    data_directory: Union[str, Path],
-    validate_input: bool = True,
+    mapping_file: Union[str, Path],
     add_indices_func: Callable[[pd.DataFrame], pd.DataFrame] = add_multivariate_indices,
 ) -> None:
     """
-    A mini pipeline that processes CSV files in a directory, adding multivariate indices
-    (composite and PCA scores) to files that are missing them.
+    A mini pipeline to process specified CSV files by adding multivariate indices
+    (composite and PCA scores) if they are missing. Validates required columns and
+    performs row-level validation using the SimilarityMetrics model.
 
     Args:
-        - data_directory (str | Path): The directory containing the CSV files to process.
-        - validate_input (bool, optional): Whether to validate the input directory. Defaults to True.
-        - add_indices_func (Callable[[pd.DataFrame], pd.DataFrame], optional):
+        mapping_file (str | Path): The mapping JSON file that includes paths to
+            sim_metrics files to be processed.
+        add_indices_func (Callable[[pd.DataFrame], pd.DataFrame], optional):
             Function to add multivariate indices to the DataFrame.
             Defaults to add_multivariate_indices.
 
     Raises:
-    - ValueError if the directory does not exist.
+        ValueError: If the specified mapping file does not exist.
     """
-    # Step 1: Validate the Input Directory
-    data_directory = Path(data_directory)
-    if validate_input:
-        try:
-            pipeline_input = PipelineInput(data_directory=data_directory)
-            data_directory = pipeline_input.data_directory  # Now a Path object
-            logger.info(f"Validated data directory: {data_directory}")
-        except ValidationError as ve:
-            logger.error(f"Input validation error: {ve}")
-            raise ValueError(f"Invalid input directory: {ve}") from ve
+    # Step 0: Ensure inputs are Path objects.
+    mapping_file = Path(mapping_file)
+
+    # Step 1: Validate the mapping file and load it into a Pydantic model
+    if not mapping_file.exists():
+        raise ValueError(f"The file '{mapping_file}' does not exist.")
+
+    file_mapping_model = load_mappings_model_from_json(mapping_file)
+
+    if file_mapping_model is None:
+        logger.error(f"Failed to load the mapping file: {mapping_file}")
+        return None
+
+    # Extract file paths of 'sim_metrics' for each URL in the mapping file
+    sim_metrics_files = {
+        str(url): Path(paths.sim_metrics)
+        for url, paths in file_mapping_model.root.items()
+    }
+
+    # Step 1.5: Check for non-existent sim_metrics files
+    missing_files = [file for file in sim_metrics_files.values() if not file.exists()]
+    missing_file_count = len(missing_files)
+
+    if missing_file_count > 0:
+        logger.warning(f"Missing sim_metrics files: {missing_files}")
+        print(f"Number of missing files: {missing_file_count}")
+
+    # Filter the list to include only existing files for further processing
+    sim_metrics_file_list = [
+        file for file in sim_metrics_files.values() if file.exists()
+    ]
 
     # Step 2: Find CSV files missing multivariate indices
-    files_need_to_process = get_files_wo_multivariate_indices(data_directory)
+    files_need_to_process = get_files_wo_multivariate_indices(
+        data_sources=sim_metrics_file_list,
+    )
     if not files_need_to_process:
         logger.info("No files require processing. Exiting pipeline.")
         return
@@ -513,160 +536,281 @@ def multivariate_indices_processing_mini_pipeline(
         f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
     )
 
-    # # Step 1: Validate the Input Directory
-    # data_directory = Path(data_directory)  # Ensure this param is Path
-    # if validate_input:
-    #     try:
-    #         pipeline_input = PipelineInput(data_directory=data_directory)
-    #         data_directory = pipeline_input.data_directory  # Now a Path object
+    # Final summary log if there were missing files
+    if missing_file_count > 0:
+        logger.info(
+            f"Pipeline completed with {missing_file_count} missing file(s) that were \
+                listed in the mapping but did not exist on disk."
+        )
 
-    #         logger.info(f"Validated data directory: {data_directory}")
-    #     except ValidationError as ve:
-    #         logger.error(f"Input validation error: {ve}")
-    #         raise ValueError(f"Invalid input directory: {ve}") from ve
 
-    # try:
-    #     # Step 2: Find CSV files missing multivariate indices
-    #     files_need_to_process = get_files_wo_multivariate_indices(data_directory)
-    #     logger.info(f"Files that need processing: {files_need_to_process}")
+# def multivariate_indices_processing_mini_pipeline(
+#     metrics_csv_file: Union[str, Path],
+#     add_indices_func: Callable[[pd.DataFrame], pd.DataFrame] = add_multivariate_indices,
+# ) -> None:
+#     """
+#     A mini pipeline to processes a specified CSV file by adding multivariate indices
+#     (composite and PCA scores) if they are missing. Validates required columns and
+#     performs row-level validation using the SimilarityMetrics model.
 
-    #     # *Explicit Check for Empty List
-    #     if not files_need_to_process:
-    #         logger.info("No files require processing. Exiting pipeline.")
-    #         return  # Early exit
+#     Args:
+#         - metrics_csv_file (str | Path): The CSV file to process.
+#         - add_indices_func (Callable[[pd.DataFrame], pd.DataFrame], optional):
+#             Function to add multivariate indices to the DataFrame.
+#             Defaults to add_multivariate_indices.
 
-    #     # Step 3: Validate Each Row Using the Model
-    #     validated_rows = []
-    #     for index, row in df.iterrows():
-    #         try:
-    #             validated_row = SimilarityMetrics(**row.to_dict())
-    #             validated_rows.append(validated_row.dict())
-    #         except ValidationError as ve:
-    #             logger.warning(f"Validation error in row {index} of '{file}': {ve}")
-    #             continue
+#     Raises:
+#     - ValueError if the directory does not exist.
+#     """
+#     # Step 0: Ensure inputs are Path obj.
+#     metrics_csv_file = Path(metrics_csv_file)
 
-    #     # Convert validated rows to a DataFrame
-    #     validated_df = pd.DataFrame(validated_rows)
-    #     if validated_df.empty:
-    #         logger.warning(f"No valid data in file '{file}'. Skipping.")
-    #         continue
+#     # Step 1: Validate mapping file, load into pyd model, extract sim_metric
+#     if not metrics_csv_file.exists():
+#         raise ValueError(f"The file '{metrics_csv_file}' does not exist.")
 
-    #     # Step 3: Iterate to add composite and PCA scores
-    #     for file in files_need_to_process:
-    #         logger.info(f"Processing file: {file}")
+#     file_mapping_model = load_mappings_model_from_json(metrics_csv_file)
 
-    #         try:
-    #             df = pd.read_csv(file)
+#     if file_mapping_model is None:
+#         logger.error(f"Failed to load the mapping file: {metrics_csv_file}")
+#         return None
 
-    #             # Verify required columns exist in the DataFrame before row-level validation
-    #             required_columns = {
-    #                 "responsibility_key",
-    #                 "responsibility",
-    #                 "requirement_key",
-    #                 "requirement",
-    #                 "bert_score_precision",
-    #                 "soft_similarity",
-    #                 "word_movers_distance",
-    #                 "deberta_entailment_score",
-    #             }
-    #             missing_columns = required_columns - set(df.columns)
-    #             if missing_columns:
-    #                 logger.error(
-    #                     f"File '{file}' is missing required columns: {missing_columns}"
-    #                 )
-    #                 continue  # Skip files missing required columns
+#     # Extract file paths of 'sim_metrics' for each URL in the mapping file
+#     sim_metrics_files = {
+#         str(url): Path(paths.sim_metrics)
+#         for url, paths in file_mapping_model.root.items()
+#     }  # Dictionary
 
-    #             # Step 4.1: Validate Each Row in the DataFrame
-    #             validated_rows = []
-    #             for index, row in df.iterrows():
-    #                 try:
-    #                     # Convert the row to a dictionary
-    #                     row_dict = row.to_dict()
+#     sim_metrics_file_list: list[Union[str, Path]] = list(sim_metrics_files.values())
 
-    #                     # Validate the row using the SimilarityMetrics model
-    #                     validated_row = SimilarityMetrics(**row_dict)
+#     # sim_metrics_file_list = list(sim_metrics_files.values())
 
-    #                     # Append the validated row as a dictionary
-    #                     validated_rows.append(validated_row.model_dump())
+#     # Step 2: Find CSV files missing multivariate indices
+#     files_need_to_process = get_files_wo_multivariate_indices(
+#         data_sources=sim_metrics_file_list,
+#     )
+#     if not files_need_to_process:
+#         logger.info("No files require processing. Exiting pipeline.")
+#         return
 
-    #                 except ValidationError as ve:
-    #                     logger.error(
-    #                         f"Validation error in file '{file}', row {index}: {ve}"
-    #                     )
-    #                     continue  # Skip invalid rows
+#     for file in files_need_to_process:
+#         try:
+#             df = pd.read_csv(file)
 
-    #             if not validated_rows:
-    #                 logger.warning(
-    #                     f"No valid data to process in file '{file}'. Skipping."
-    #                 )
-    #                 continue  # Skip to the next file
+#             # Verify required columns exist in the DataFrame before row-level validation
+#             required_columns = {
+#                 "responsibility_key",
+#                 "responsibility",
+#                 "requirement_key",
+#                 "requirement",
+#                 "bert_score_precision",
+#                 "soft_similarity",
+#                 "word_movers_distance",
+#                 "deberta_entailment_score",
+#             }
+#             missing_columns = required_columns - set(df.columns)
+#             if missing_columns:
+#                 logger.error(
+#                     f"File '{file}' is missing required columns: {missing_columns}"
+#                 )
+#                 continue  # Skip files missing required columns
 
-    #             # Convert validated rows back to a DataFrame
-    #             validated_df = pd.DataFrame(validated_rows)
-    #             logger.info(f"Validated data for file '{file}'.")
+#             # Step 3: Validate Each Row Using the Model
+#             validated_rows = []
+#             for index, row in df.iterrows():
+#                 try:
+#                     validated_row = SimilarityMetrics(**row.to_dict())
+#                     validated_rows.append(validated_row.model_dump())
+#                 except ValidationError as ve:
+#                     logger.warning(f"Validation error in row {index} of '{file}': {ve}")
+#                     continue
 
-    #             # Step 4.2: Add Multivariate Indices
-    #             updated_df = add_indices_func(validated_df)
+#             # Convert validated rows to a DataFrame
+#             validated_df = pd.DataFrame(validated_rows)
+#             if validated_df.empty:
+#                 logger.warning(f"No valid data in file '{file}'. Skipping.")
+#                 continue
 
-    #             # Ensure add_indices_func returns a DataFrame
-    #             if updated_df is None:
-    #                 logger.error(
-    #                     f"Function {add_indices_func.__name__} returned None for file '{file}'. Skipping."
-    #                 )
-    #                 continue
+#             # Step 4: Apply Multivariate Indices Function
+#             updated_df = add_indices_func(validated_df)
+#             if updated_df is None:
+#                 logger.error(
+#                     f"Function {add_indices_func.__name__} returned None for file '{file}'. Skipping."
+#                 )
+#                 continue
 
-    #             logger.info(f"Added multivariate indices to file '{file}'.")
+#             # Step 5: Save Updated DataFrame
+#             updated_df.to_csv(file, index=False)
+#             logger.info(f"Successfully processed and saved '{file}'.")
 
-    #             print(updated_df)  # Debugging
+#         except FileNotFoundError:
+#             logger.error(f"File not found: '{file}'. Skipping.")
+#             continue
+#         except pd.errors.EmptyDataError:
+#             logger.error(f"No data found in file '{file}'. Skipping.")
+#             continue
+#         except Exception as e:
+#             logger.error(f"Unexpected error processing file '{file}': {e}")
+#             continue
 
-    #             # Step 4.3: Save the Updated DataFrame to CSV
-    #             updated_df.to_csv(file, index=False)
-    #             logger.info(f"Successfully processed and saved '{file}'.")
+#     logger.info(
+#         f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
+#     )
 
-    #         except FileNotFoundError as fe:
-    #             logger.error(f"File not found: {fe.filename}. Skipping.")
-    #             continue
-    #         except pd.errors.EmptyDataError:
-    #             logger.error(f"No data found in file '{file}'. Skipping.")
-    #             continue
-    #         except Exception as e:
-    #             logger.error(f"Unexpected error processing file '{file}': {e}")
-    #             continue
+#     # # Step 1: Validate the Input Directory
+#     # data_directory = Path(data_directory)  # Ensure this param is Path
+#     # if validate_input:
+#     #     try:
+#     #         pipeline_input = PipelineInput(data_directory=data_directory)
+#     #         data_directory = pipeline_input.data_directory  # Now a Path object
 
-    # except Exception as e:
-    #     logger.error(f"Error during pipeline processing: {e}")
-    #     raise  # Re-raise the exception after logging
+#     #         logger.info(f"Validated data directory: {data_directory}")
+#     #     except ValidationError as ve:
+#     #         logger.error(f"Input validation error: {ve}")
+#     #         raise ValueError(f"Invalid input directory: {ve}") from ve
 
-    # logger.info(
-    #     f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
-    # )
+#     # try:
+#     #     # Step 2: Find CSV files missing multivariate indices
+#     #     files_need_to_process = get_files_wo_multivariate_indices(data_directory)
+#     #     logger.info(f"Files that need processing: {files_need_to_process}")
 
-    # try:
-    #     # Step 3: Find CSV files missing multivariate indices
-    #     files_need_to_process = get_files_wo_multivariate_indices(data_directory)
-    #     logger.info(f"Files that need processing: {files_need_to_process}")
+#     #     # *Explicit Check for Empty List
+#     #     if not files_need_to_process:
+#     #         logger.info("No files require processing. Exiting pipeline.")
+#     #         return  # Early exit
 
-    #     # Step 4: Iterate to add composite and PCA scores
-    #     for file in files_need_to_process:
-    #         logger.info(f"Processing file: {file}")
-    #         try:
-    #             df = pd.read_csv(file)
-    #     # Iterate to add composite and pca scores
-    #     for file in files_need_to_process:
-    #         try:
-    #             df = pd.read_csv(file)
-    #             df_wt_indices = add_multivariate_indices(df)
-    #             df_wt_indices.to_csv(file, index=False)
-    #             logger.info(f"Successfully processed and saved {file}")
-    #         except Exception as e:
-    #             logger.error(f"Error processing {file}: {e}")
+#     #     # Step 3: Validate Each Row Using the Model
+#     #     validated_rows = []
+#     #     for index, row in df.iterrows():
+#     #         try:
+#     #             validated_row = SimilarityMetrics(**row.to_dict())
+#     #             validated_rows.append(validated_row.dict())
+#     #         except ValidationError as ve:
+#     #             logger.warning(f"Validation error in row {index} of '{file}': {ve}")
+#     #             continue
 
-    # except Exception as e:
-    #     logger.error(f"Error during pipeline processing: {e}")
+#     #     # Convert validated rows to a DataFrame
+#     #     validated_df = pd.DataFrame(validated_rows)
+#     #     if validated_df.empty:
+#     #         logger.warning(f"No valid data in file '{file}'. Skipping.")
+#     #         continue
 
-    # logger.info(
-    #     f"Successfully added multivariate indices to {len(files_need_to_process)} files."
-    # )
+#     #     # Step 3: Iterate to add composite and PCA scores
+#     #     for file in files_need_to_process:
+#     #         logger.info(f"Processing file: {file}")
+
+#     #         try:
+#     #             df = pd.read_csv(file)
+
+#     #             # Verify required columns exist in the DataFrame before row-level validation
+#     #             required_columns = {
+#     #                 "responsibility_key",
+#     #                 "responsibility",
+#     #                 "requirement_key",
+#     #                 "requirement",
+#     #                 "bert_score_precision",
+#     #                 "soft_similarity",
+#     #                 "word_movers_distance",
+#     #                 "deberta_entailment_score",
+#     #             }
+#     #             missing_columns = required_columns - set(df.columns)
+#     #             if missing_columns:
+#     #                 logger.error(
+#     #                     f"File '{file}' is missing required columns: {missing_columns}"
+#     #                 )
+#     #                 continue  # Skip files missing required columns
+
+#     #             # Step 4.1: Validate Each Row in the DataFrame
+#     #             validated_rows = []
+#     #             for index, row in df.iterrows():
+#     #                 try:
+#     #                     # Convert the row to a dictionary
+#     #                     row_dict = row.to_dict()
+
+#     #                     # Validate the row using the SimilarityMetrics model
+#     #                     validated_row = SimilarityMetrics(**row_dict)
+
+#     #                     # Append the validated row as a dictionary
+#     #                     validated_rows.append(validated_row.model_dump())
+
+#     #                 except ValidationError as ve:
+#     #                     logger.error(
+#     #                         f"Validation error in file '{file}', row {index}: {ve}"
+#     #                     )
+#     #                     continue  # Skip invalid rows
+
+#     #             if not validated_rows:
+#     #                 logger.warning(
+#     #                     f"No valid data to process in file '{file}'. Skipping."
+#     #                 )
+#     #                 continue  # Skip to the next file
+
+#     #             # Convert validated rows back to a DataFrame
+#     #             validated_df = pd.DataFrame(validated_rows)
+#     #             logger.info(f"Validated data for file '{file}'.")
+
+#     #             # Step 4.2: Add Multivariate Indices
+#     #             updated_df = add_indices_func(validated_df)
+
+#     #             # Ensure add_indices_func returns a DataFrame
+#     #             if updated_df is None:
+#     #                 logger.error(
+#     #                     f"Function {add_indices_func.__name__} returned None for file '{file}'. Skipping."
+#     #                 )
+#     #                 continue
+
+#     #             logger.info(f"Added multivariate indices to file '{file}'.")
+
+#     #             print(updated_df)  # Debugging
+
+#     #             # Step 4.3: Save the Updated DataFrame to CSV
+#     #             updated_df.to_csv(file, index=False)
+#     #             logger.info(f"Successfully processed and saved '{file}'.")
+
+#     #         except FileNotFoundError as fe:
+#     #             logger.error(f"File not found: {fe.filename}. Skipping.")
+#     #             continue
+#     #         except pd.errors.EmptyDataError:
+#     #             logger.error(f"No data found in file '{file}'. Skipping.")
+#     #             continue
+#     #         except Exception as e:
+#     #             logger.error(f"Unexpected error processing file '{file}': {e}")
+#     #             continue
+
+#     # except Exception as e:
+#     #     logger.error(f"Error during pipeline processing: {e}")
+#     #     raise  # Re-raise the exception after logging
+
+#     # logger.info(
+#     #     f"Successfully added multivariate indices to {len(files_need_to_process)} file(s)."
+#     # )
+
+#     # try:
+#     #     # Step 3: Find CSV files missing multivariate indices
+#     #     files_need_to_process = get_files_wo_multivariate_indices(data_directory)
+#     #     logger.info(f"Files that need processing: {files_need_to_process}")
+
+#     #     # Step 4: Iterate to add composite and PCA scores
+#     #     for file in files_need_to_process:
+#     #         logger.info(f"Processing file: {file}")
+#     #         try:
+#     #             df = pd.read_csv(file)
+#     #     # Iterate to add composite and pca scores
+#     #     for file in files_need_to_process:
+#     #         try:
+#     #             df = pd.read_csv(file)
+#     #             df_wt_indices = add_multivariate_indices(df)
+#     #             df_wt_indices.to_csv(file, index=False)
+#     #             logger.info(f"Successfully processed and saved {file}")
+#     #         except Exception as e:
+#     #             logger.error(f"Error processing {file}: {e}")
+
+#     # except Exception as e:
+#     #     logger.error(f"Error during pipeline processing: {e}")
+
+#     # logger.info(
+#     #     f"Successfully added multivariate indices to {len(files_need_to_process)} files."
+#     # )
 
 
 # Running pipeline with pydantic model validation

@@ -18,7 +18,7 @@ from evaluation_optimization.metrics_calculator import categorize_scores
 
 # Import from non parallell version for now!
 # from evaluation_optimization.resumes_editing import modify_multi_resps_based_on_reqs
-from evaluation_optimization.resumes_editing_sequential import (
+from evaluation_optimization.resumes_editing_seq import (
     modify_multi_resps_based_on_reqs,
 )
 from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
@@ -251,7 +251,7 @@ def run_pipeline(
             modified_resps = modify_multi_resps_based_on_reqs(
                 responsibilities=validated_responsibilities.responsibilities,
                 requirements=validated_requirements.requirements,
-                model=llm_provider,
+                llm_provider=llm_provider,
                 model_id=model_id,
                 # n_jobs=n_jobs,
             )  # the function returns a pyd object

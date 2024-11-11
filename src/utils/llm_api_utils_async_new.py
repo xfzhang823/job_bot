@@ -304,7 +304,7 @@ async def call_openai_api_async(
         Union[TextResponse, JSONResponse, TabularResponse, CodeResponse, EditingResponseModel,
         JobSiteResponseModel]: The structured response from the API.
     """
-    openai_client = client if client else AsyncAnthropic(api_key=get_openai_api_key())
+    openai_client = client if client else AsyncOpenAI(api_key=get_openai_api_key())
     logger.info("OpenAI client ready for API call.")
 
     return await call_api_async(
