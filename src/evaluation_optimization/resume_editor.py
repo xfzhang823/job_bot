@@ -94,34 +94,34 @@ class TextEditor:
 
     def __init__(
         self,
-        model: str = "openai",
+        llm_provider: str = "openai",
         model_id: str = "gpt-4-turbo",
         temperature: float = 0.7,
         max_tokens: int = 1056,
         client: Optional[Union[OpenAI, Anthropic]] = None,
     ):
-        self.model = model  # Default model ('openai')
+        self.llm_provider = llm_provider  # Default model ('openai')
         self.model_id = model_id
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = client  # Store the passed client
 
         # Conditionally initialize the client based on model
-        if self.model == "claude" and not self.client:
+        if self.llm_provider == "claude" and not self.client:
             claude_api_key = get_claude_api_key()
             self.client = Anthropic(api_key=claude_api_key)
-        if self.model == "openai" and not self.client:
+        if self.llm_provider == "openai" and not self.client:
             # Initialize OpenAI API client if it's not provided
             openai_api_key = get_openai_api_key()  # Fetch the API key
             self.client = OpenAI(
                 api_key=openai_api_key
             )  # Instantiate OpenAI API client
-        elif self.model == "llama3":
+        elif self.llm_provider == "llama3":
             # If using LLaMA3, no OpenAI client initialization is needed
             # You may initialize LLaMA3-specific settings here if needed
             logger.info("Using LLaMA3 model for text editing.")
         elif not self.client:
-            raise ValueError(f"Unsupported model: {self.model}")
+            raise ValueError(f"Unsupported model: {self.llm_provider}")
 
     def generate_text_id(self, text_id=None):
         """Generate a unique text_id using UUID if not provided."""
@@ -136,7 +136,10 @@ class TextEditor:
             raise
 
     def call_llm(
-        self, prompt: str, model: str = "openai", temperature: Optional[float] = None
+        self,
+        prompt: str,
+        llm_provider: str = "openai",
+        temperature: Optional[float] = None,
     ) -> Union[
         str,
         JSONResponse,
@@ -165,39 +168,36 @@ class TextEditor:
         temperature = temperature if temperature is not None else self.temperature
 
         # Select the appropriate LLM API call
-        if model == "openai":
+        if llm_provider == "openai":
             response_pyd_obj = call_openai_api(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
-                json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, OpenAI) else None,
             )
 
-        if model == "claude":
+        if llm_provider == "claude":
             response_pyd_obj = call_claude_api(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
-                json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, Anthropic) else None,
             )
 
-        elif model == "llama3":
+        elif llm_provider == "llama3":
             response_pyd_obj = call_llama3(
                 prompt=prompt,
                 expected_res_type="json",
-                json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
             )
 
         else:
-            raise ValueError(f"Unsupported model: {model}")
+            raise ValueError(f"Unsupported model: {llm_provider}")
 
         # Validate the response
         self.validate_response(response_pyd_obj)
@@ -272,7 +272,9 @@ class TextEditor:
 
         # Call call_llm method to fetch a LLM response (in the form of a pyd model)
         response_model = self.call_llm(
-            prompt, model=model if model else self.model, temperature=temperature
+            prompt,
+            llm_provider=model if model else self.llm_provider,
+            temperature=temperature,
         )
 
         # pyd model -> dictionary
@@ -331,7 +333,9 @@ class TextEditor:
 
         # Call call_llm method to fetch a LLM response (in the form of a pyd model)
         response_model = self.call_llm(
-            prompt, model=model if model else self.model, temperature=temperature
+            prompt,
+            llm_provider=model if model else self.llm_provider,
+            temperature=temperature,
         )
 
         # pyd model -> dictionary
@@ -387,7 +391,7 @@ class TextEditor:
         # Call call_llm method to fetch a LLM response (in the form of a pyd model)
         response_model = self.call_llm(
             prompt,
-            model=model if model else self.model,
+            llm_provider=model if model else self.llm_provider,
             temperature=temperature,
         )
 
@@ -438,7 +442,7 @@ class TextEditor:
         # Call call_llm method to fetch a LLM response (in the form of a pyd model)
         response_model = self.call_llm(
             prompt,
-            model=model if model else self.model,
+            llm_provider=model if model else self.llm_provider,
             temperature=temperature,
         )
 

@@ -12,11 +12,11 @@ import jsonschema
 import uuid
 import logging_config
 from pydantic import BaseModel, ValidationError
-from typing import Dict, Union, Optional
+from typing import Dict, Union, Optional, cast
 
 import openai
-from openai import OpenAI
-from anthropic import Anthropic
+from openai import OpenAI, AsyncOpenAI
+from anthropic import Anthropic, AsyncAnthropic
 
 from prompts.prompt_templates import (
     SEMANTIC_ALIGNMENT_PROMPT,
@@ -166,7 +166,7 @@ class TextEditorAsync:
                 json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
-                client=self.client if isinstance(self.client, OpenAI) else None,
+                client=self.client if isinstance(self.client, AsyncOpenAI) else None,
             )
         elif llm_provider == "claude":
             response_pyd_obj = await call_claude_api_async(
@@ -176,7 +176,7 @@ class TextEditorAsync:
                 json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
-                client=self.client if isinstance(self.client, Anthropic) else None,
+                client=self.client if isinstance(self.client, AsyncAnthropic) else None,
             )
         elif llm_provider == "llama3":
             response_pyd_obj = await call_llama3_async(
@@ -193,21 +193,17 @@ class TextEditorAsync:
         self.validate_response(response_pyd_obj)
         return response_pyd_obj
 
-    def validate_response(self, response_pyd_obj: Union[BaseModel, dict]) -> None:
+    def validate_response(self, response_pyd_obj: BaseModel) -> None:
         """
-        Validate the API response (Pydantic model or dictionary) using JSON Schema.
+        Validate the API response using Pydantic model validation.
         """
-        response_dict = (
-            response_pyd_obj.model_dump()
-            if isinstance(response_pyd_obj, BaseModel)
-            else response_pyd_obj
-        )
         try:
-            jsonschema.validate(instance=response_dict, schema=LLM_RES_JSON_SCHEMA)
-            logger.info("JSON schema validation passed.")
+            # This will raise a ValidationError if the response does not match the model
+            response_pyd_obj = EditingResponseModel(**response_pyd_obj.model_dump())
+            logger.info("Pydantic model validation passed.")
         except ValidationError as e:
-            logger.error(f"JSON schema validation failed: {e}")
-            raise ValueError(f"Invalid JSON format: {e}")
+            logger.error(f"Pydantic model validation failed: {e}")
+            raise ValueError(f"Invalid format: {e}")
 
     async def edit_for_dp_async(
         self,
@@ -233,12 +229,21 @@ class TextEditorAsync:
             llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        response_dict = (
-            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
-        )
-        result = {"text_id": text_id, **response_dict}
+
+        # Extract the actual optimized content
+        data = cast(EditingResponseModel, response_model)
+        optimized_text = data.data.optimized_text
+        # optimized_text = response_model.model_dump().get("optimized_text", "")
+        result = {"text_id": text_id, "optimized_text": optimized_text}
         logger.info(f"Results updated: \n{result}")
         return result
+
+        # response_dict = (
+        #     response_model.data if isinstance(response_model, BaseModel) else {}
+        # )
+        # result = {"text_id": text_id, **response_dict}
+        # logger.info(f"Results updated: \n{result}")
+        # return result
 
     async def edit_for_entailment_async(
         self,
@@ -286,12 +291,21 @@ class TextEditorAsync:
             llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        response_dict = (
-            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
-        )
-        result = {"text_id": text_id, **response_dict}
+
+        # Extract the actual optimized content
+        data = cast(EditingResponseModel, response_model)
+        optimized_text = data.data.optimized_text
+        # optimized_text = response_model.model_dump().get("optimized_text", "")
+        result = {"text_id": text_id, "optimized_text": optimized_text}
         logger.info(f"Results updated: \n{result}")
         return result
+
+        # response_dict = (
+        #     response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        # )
+        # result = {"text_id": text_id, **response_dict}
+        # logger.info(f"Results updated: \n{result}")
+        # return result
 
     async def edit_for_semantics_async(
         self,
@@ -336,12 +350,22 @@ class TextEditorAsync:
             llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        response_dict = (
-            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
-        )
-        result = {"text_id": text_id, **response_dict}
+
+        # Extract the actual optimized content
+        data = cast(EditingResponseModel, response_model)
+        optimized_text = data.data.optimized_text
+
+        logger.info(f"optimized_text: {optimized_text}")
+        result = {"text_id": text_id, "optimized_text": optimized_text}
         logger.info(f"Results updated: \n{result}")
         return result
+
+        # response_dict = (
+        #     response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        # )
+        # result = {"text_id": text_id, **response_dict}
+        # logger.info(f"Results updated: \n{result}")
+        # return result
 
     async def edit_for_semantics_and_entailment_async(
         self,
@@ -379,9 +403,17 @@ class TextEditorAsync:
             llm_provider=llm_provider if llm_provider else self.llm_provider,
             temperature=temperature,
         )
-        response_dict = (
-            response_model.model_dump() if isinstance(response_model, BaseModel) else {}
-        )
-        result = {"text_id": text_id, **response_dict}
+
+        # Extract the actual optimized content
+        data = cast(EditingResponseModel, response_model)
+        optimized_text = data.data.optimized_text
+        result = {"text_id": text_id, "optimized_text": optimized_text}
         logger.info(f"Results updated: \n{result}")
         return result
+
+        # response_dict = (
+        #     response_model.model_dump() if isinstance(response_model, BaseModel) else {}
+        # )
+        # result = {"text_id": text_id, **response_dict}
+        # logger.info(f"Results updated: \n{result}")
+        # return result

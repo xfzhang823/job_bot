@@ -119,23 +119,60 @@ def check_file_existence(file_path):
 
 
 def get_files_wo_multivariate_indices(
-    data_directory: Union[str, Path], indices: Optional[List[str]] = None
+    data_sources: Union[str, Path, List[Union[str, Path]]],
+    indices: Optional[List[str]] = None,
 ) -> List:
     """
-    Find .csv files in the specified directory that contain the required metrics
-    but do not contain the specified multivariate indices.
+    Identifies CSV files in a directory, or a list of individual CSV files, that
+    contain the required metrics but are missing specified multivariate indices.
 
-    Parameters:
-    - data_directory: The path to the directory containing .csv files.
-    - indices (list): List of index column names to check for.
-                      Default is composite score and PCA score.
+    This function can accept either a directory path or a list of file paths. If a
+    directory is provided, the function will locate all `.csv` files within it (including
+    subdirectories). If a list of files is provided, only those files are checked.
+
+    Args:
+        data_sources (Union[str, Path, List[Union[str, Path]]]):
+            A path to a directory containing `.csv` files, or a list of `.csv` file paths
+            to check for the specified indices.
+
+            - If a directory path is provided, all `.csv` files within the directory 
+            (and its subdirectories) will be checked.
+            - If a list of file paths is provided, only those specific files will be checked.
+
+        indices (Optional[List[str]]):
+            List of index column names to check for in each file. Defaults to a set of common
+            indices, including "composite_score" and "pca_score".
 
     Returns:
-    - List of full file paths to .csv files without the specified multivariate indices.
-    """
-    # Change data_directory to Path obj if it's str.
-    data_directory = Path(data_directory)
+        List[Path]:
+            A list of file paths to `.csv` files that are missing the specified multivariate
+            indices or have empty values for those indices.
 
+    Raises:
+        ValueError: If the provided directory path does not exist.
+
+    Examples:
+        # Example 1: Using a directory path as input
+        missing_indices_files = get_files_wo_multivariate_indices("path/to/data_directory")
+
+        # Example 2: Using a list of file paths as input
+        file_paths = [
+            "path/to/file1.csv",
+            "path/to/file2.csv"
+        ]
+        missing_indices_files = get_files_wo_multivariate_indices(file_paths)
+
+        # Example 3: Specifying custom indices
+        custom_indices = ["index1", "index2"]
+        missing_indices_files = get_files_wo_multivariate_indices("path/to/data_directory", \
+            indices=custom_indices)
+
+    Notes:
+        This function identifies files that are missing specified indices or contain empty
+        values in those indices. If a file lacks the required metrics, it will be skipped
+        with a warning.
+    """
+    # Check if indices needed to be added
     if indices is None:
         indices = [
             "scaled_bert_score_precision",
@@ -145,21 +182,33 @@ def get_files_wo_multivariate_indices(
             "composite_score",
             "pca_score",
         ]
-    if not os.path.exists(data_directory):
-        raise ValueError(f"The provided directory '{data_directory}' does not exist.")
 
-    # Get the list of .csv files in the directory
-    file_list = get_file_names(
-        directory_path=data_directory,
-        full_path=True,
-        recursive=True,
-        file_types=[".csv"],
-    )
+    if isinstance(data_sources, (str, Path)):
+        # Treat data_sources as a directory path and check if it exists
+        data_directory = Path(data_sources)
+        if not data_directory.exists():
+            raise ValueError(
+                f"The provided directory '{data_directory}' does not exist."
+            )
+
+        # Get all CSV files in the directory
+        file_list = get_file_names(
+            directory_path=data_directory,
+            full_path=True,
+            recursive=True,
+            file_types=[".csv"],
+        )
+    else:
+        # Ensure each item in the list is converted to a Path
+        file_list = [Path(file) for file in data_sources]
 
     files_without_indices = []
 
     # Check each file for the required metrics and the specified indices
     for file_path in file_list:
+        if not file_path.exists():
+            logger.warning(f"File '{file_path}' does not exist.")
+            continue
         try:
             df = pd.read_csv(file_path)
 
@@ -205,16 +254,19 @@ def get_file_paths_and_create_files(
     create_func=None,
 ):
     """
-    Get URLs that don't have corresponding files in the output directory and create files if necessary.
+    Get URLs that don't have corresponding files in the output directory and
+    create files if necessary.
 
     Args:
         job_descriptions (dict): A dictionary of job descriptions with URLs as keys.
         output_dir (str): Directory where files are saved.
         suffixes (list): List of suffixes for different file types (without extension).
-        create_func (callable, optional): A function to create and save files (e.g., process requirements/responsibilities).
+        create_func (callable, optional): A function to create and save files
+        (e.g., process requirements/responsibilities).
 
     Returns:
-        dict: A dictionary where the keys are new URLs and the values are the created file paths.
+        dict: A dictionary where the keys are new URLs and the values are
+        the created file paths.
     """
     if suffixes is None:
         suffixes = ["reqs_flat", "resps_flat", "sim_metrics"]
@@ -259,15 +311,16 @@ def get_file_paths_and_create_files(
 def get_new_urls_and_file_names(job_descriptions, output_dir):
     """
     Get URLs that don't have corresponding files in the output directory,
-    and return a dictionary with the new URLs as keys and their corresponding file names as values.
+    and return a dictionary with the new URLs as keys and their corresponding
+    file names as values.
 
     Args:
         job_descriptions (dict): A dictionary of job descriptions, with URLs as keys.
         output_dir (str or Path): The directory to check for existing files.
 
     Returns:
-        dict: A dictionary where the keys are new URLs and the values are the corresponding \
-            file names (w/o the full path).
+        dict: A dictionary where the keys are new URLs and the values are
+        the corresponding file names (w/o the full path).
     """
     new_urls_and_file_names = {}
     for url, info in job_descriptions.items():
@@ -294,8 +347,8 @@ def get_new_urls_and_metrics_file_paths(job_descriptions, output_dir):
         output_dir (str or Path): The directory to check for existing files.
 
     Returns:
-        dict: A dictionary where the keys are new URLs and the values are the corresponding \
-            file names (w/o the full path).
+        dict: A dictionary where the keys are new URLs and the values are the corresponding
+        file names (w/o the full path).
     """
     new_urls_and_file_paths = {}
     for url, info in job_descriptions.items():

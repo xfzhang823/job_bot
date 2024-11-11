@@ -433,13 +433,44 @@ async def metrics_re_processing_pipeline_async(
                 )
             continue
 
-        # Step 3.2: Generate the metrics file asynchronously
+        # Step 3.2: validate the requirements and responsibilities files with pyd models
+        try:
+            reqs_data = read_from_json_file(reqs_file)
+
+            # Validate using the Requirements model
+            validated_requirements = Requirements.model_validate(reqs_data)
+            logger.info(f"Loaded and validated requirements from {reqs_file}")
+        except ValidationError as e:
+            logger.error(f"Validation error for requirements: {e}")
+            continue
+
+        # Attempt to load and validate the responsibilities JSON with ResponsibilityMatches model
+        try:
+            resps_data = read_from_json_file(resps_file)
+
+            # If the file lacks a top-level "responsibilities" key, wrap it
+            if "responsibilities" not in resps_data:
+                resps_data = {"responsibilities": resps_data}
+
+            # If the file lacks a top-level "responsibilities" key, wrap it
+            if "responsibilities" not in resps_data:
+                resps_data = {"responsibilities": resps_data}
+
+            validated_responsibilities = ResponsibilityMatches.model_validate(
+                resps_data
+            )
+            logger.info(f"Loaded and validated responsibilities from {resps_file}")
+        except ValidationError as e:
+            logger.error(f"Validation error when parsing JSON files: {e}")
+            continue
+
+        # Step 3.3: Generate the metrics file asynchronously
         tasks.append(generate_metrics(reqs_file, resps_file, sim_metrics_file))
         logger.info(
             f"Queued metrics generation for {url} to be saved to {sim_metrics_file}"
         )
 
-    # Run all the tasks concurrently
+    # Step 4: run all the tasks concurrently
     if tasks:
         await asyncio.gather(*tasks)
         logger.info("Finished processing all missing sim_metrics files.")

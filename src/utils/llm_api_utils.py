@@ -43,11 +43,11 @@ logger = logging.getLogger(__name__)
 
 # Utility Functions
 
-json_model_mapping = {
-    "job_site": JobSiteResponseModel,
-    "editing": EditingResponseModel,  # Corrected "editting" to "editing"
-    # Additional mappings as needed
-}
+# json_model_mapping = {
+#     "job_site": JobSiteResponseModel,
+#     "editing": EditingResponseModel,  # Corrected "editting" to "editing"
+#     # Additional mappings as needed
+# }
 
 
 def clean_and_extract_json(
@@ -178,20 +178,24 @@ def validate_response_type(
 
 
 def validate_json_type(
-    response_data: Union[Dict[str, Any], List[Any]], json_type: str
+    response_model: JSONResponse, json_type: str
 ) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
     """
     Validates JSON data against a specific Pydantic model based on 'json_type'.
 
     Args:
-        - response_data (Union[Dict[str, Any], List[Dict[str, Any]]]):
-        The raw JSON data
-          to validate.
+        - response_model (JSONResponse): The generic JSON response model to validate.
         - json_type (str): The type of JSON model to use for validation.
 
     Returns:
         An instance of the validated Pydantic model.
     """
+    # Map json_type to the correct model class
+    json_model_mapping = {
+        "job_site": JobSiteResponseModel,
+        "editing": EditingResponseModel,
+        "generic": JSONResponse,
+    }
 
     # Retrieve the model from the mapping
     model = json_model_mapping.get(json_type)
@@ -200,15 +204,73 @@ def validate_json_type(
         raise ValueError(f"Unsupported json_type: {json_type}")
 
     try:
-        # Use model-specific instantiation
-        return (
-            model(**response_data)
-            if model != JSONResponse
-            else JSONResponse(data=response_data)
-        )
+        # Extract the 'data' content from response_model
+        response_data = response_model.model_dump().get("data")
+
+        logger.info(
+            f"response_model model dump.get(data): {response_data}"
+        )  # TODO: debugging, delete later
+
+        # For EditingResponseModel, ensure response_data directly matches the expected format
+        if json_type == "editing" and isinstance(response_data, dict):
+            # Ensure we pass {"optimized_text": "..."} directly as data
+            response_data = (
+                response_data
+                if "optimized_text" in response_data
+                else {"optimized_text": response_data}
+            )
+
+        logger.info(
+            f"response_data - editing: {response_data}"
+        )  # TODO: debugging, delete later
+
+        # Instantiate the model with modified response_data
+        validated_model = model(data=response_data)
+        return validated_model
     except ValidationError as e:
         logger.error(f"Validation failed for {json_type}: {e}")
         raise ValueError(f"Invalid format for {json_type}: {e}")
+
+
+# def validate_json_type(
+#     response_data: Union[Dict[str, Any], List[Any]], json_type: str
+# ) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
+#     """
+#     Validates JSON data against a specific Pydantic model based on 'json_type'.
+
+#     Args:
+#         - response_data (Union[Dict[str, Any], List[Dict[str, Any]]]):
+#         The raw JSON data
+#           to validate.
+#         - json_type (str): The type of JSON model to use for validation.
+
+#     Returns:
+#         An instance of the validated Pydantic model.
+#     """
+#     # Map json_type to the correct model class
+#     json_model_mapping = {
+#         "job_site": JobSiteResponseModel,
+#         "editing": EditingResponseModel,
+#         "generic": JSONResponse,
+#     }
+
+#     # Retrieve the model from the mapping
+#     model = json_model_mapping.get(json_type)
+
+#     if not model:
+#         raise ValueError(f"Unsupported json_type: {json_type}")
+
+#     # # Dynamically wrap response_data for EditingResponseModel validation if necessary
+#     # if json_type == "editing" and "data" not in response_data:
+#     #     response_data = {"data": response_data}
+
+#     try:
+#         # Instantiate the model with response_data under `data`
+#         validated_model = model(data=response_data)
+#         return validated_model
+#     except ValidationError as e:
+#         logger.error(f"Validation failed for {json_type}: {e}")
+#         raise ValueError(f"Invalid format for {json_type}: {e}")
 
 
 # API Calling Functions
@@ -323,3 +385,132 @@ def call_api(
     except Exception as e:
         logger.error(f"{llm_provider} API call failed: {e}")
         raise
+
+
+def call_openai_api(
+    prompt: str,
+    model_id: str = GPT_4_TURBO,
+    expected_res_type: str = "str",
+    context_type: str = "",
+    temperature: float = 0.4,
+    max_tokens: int = 1056,
+    client: Optional[OpenAI] = None,
+) -> Union[
+    JSONResponse,
+    TabularResponse,
+    TextResponse,
+    CodeResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+]:
+    """
+    Calls OpenAI API and parses response.
+
+    Args:
+        - prompt (str): The prompt to send to the API.
+        - client (Optional[OpenAI]): An OpenAI client instance.
+        - If None, a new client is instantiated.
+        - model_id (str): Model ID to use for the API call.
+        - expected_res_type (str): The expected type of response from the API ('str', 'json',
+        'tabular', or 'code').
+        - context_type (str): Context type for JSON responses ("editing" or "job_site").
+        - temperature (float): Controls the creativity of the response.
+        max_tokens (int): Maximum number of tokens for the response.
+
+    Returns:
+        Union[TextResponse, JSONResponse, TabularResponse, CodeResponse, EditingResponseModel,
+        JobSiteResponseModel]: The structured response from the API as
+        a Pydantic model instance.
+    """
+    # Use provided client or initialize a new one if not given
+    openai_client = client if client else OpenAI(api_key=get_openai_api_key())
+    logger.info("OpenAI client ready for API call.")
+
+    # Call call_api function and return
+    return call_api(
+        openai_client,
+        model_id,
+        prompt,
+        expected_res_type,
+        context_type,
+        temperature,
+        max_tokens,
+        "openai",
+    )
+
+
+def call_claude_api(
+    prompt: str,
+    model_id: str = CLAUDE_SONNET,
+    expected_res_type: str = "str",
+    context_type: str = "",
+    temperature: float = 0.4,
+    max_tokens: int = 1056,
+    client: Optional[Anthropic] = None,
+) -> Union[
+    JSONResponse,
+    TabularResponse,
+    TextResponse,
+    CodeResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+]:
+    """
+    Calls the Claude API to generate responses based on a given prompt and expected response type.
+
+    Args:
+        prompt (str): The prompt to send to the API.
+        - model_id (str): Model ID to use for the Claude API call.
+        - expected_res_type (str): The expected type of response from the API
+        ('str', 'json', 'tabular', or 'code').
+        - context_type (str): Context type for JSON responses ("editing" or "job_site").
+        - temperature (float): Controls the creativity of the response.
+        - max_tokens (int): Maximum number of tokens for the response.
+        - client (Optional[Anthropic]): A Claude client instance.
+        If None, a new client is instantiated.
+
+    Returns:
+        Union[TextResponse, JSONResponse, TabularResponse, CodeResponse, EditingResponseModel, JobSiteResponseModel]:
+        The structured response from the API.
+    """
+    # Use provided client or initialize a new one if not given
+    claude_client = client if client else Anthropic(api_key=get_claude_api_key())
+    logger.info("Claude client ready for API call.")
+    return call_api(
+        claude_client,
+        model_id,
+        prompt,
+        expected_res_type,
+        context_type,
+        temperature,
+        max_tokens,
+        "claude",
+    )
+
+
+def call_llama3(
+    prompt: str,
+    model_id: str = "llama3",
+    expected_res_type: str = "str",
+    context_type: str = "",
+    temperature: float = 0.4,
+    max_tokens: int = 1056,
+) -> Union[
+    JSONResponse,
+    TabularResponse,
+    TextResponse,
+    CodeResponse,
+    EditingResponseModel,
+    JobSiteResponseModel,
+]:
+    """Calls the Llama 3 API and parses response."""
+    return call_api(
+        client=None,
+        model_id=model_id,
+        prompt=prompt,
+        expected_res_type=expected_res_type,
+        json_type=context_type,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        llm_provider="llama3",
+    )

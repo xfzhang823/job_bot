@@ -77,7 +77,7 @@ def modify_resp_based_on_reqs(
 
     # Instantiate TextEditor class
     text_editor = TextEditor(
-        model=model, model_id=model_id, client=client, max_tokens=1024
+        llm_provider=model, model_id=model_id, client=client, max_tokens=1024
     )
 
     local_modifications = {}

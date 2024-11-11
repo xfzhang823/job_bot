@@ -32,6 +32,18 @@ from config import (
     PRUNED_RESPS_FILES_ITERATE_1_CLAUDE_DIR,
 )
 
+from config import (
+    GPT_35_TURBO,
+    GPT_35_TURBO_16K,
+    GPT_4,
+    GPT_4_TURBO,
+    GPT_4_TURBO_32K,
+    GPT_4O,
+    CLAUDE_HAIKU,
+    CLAUDE_SONNET,
+    CLAUDE_OPUS,
+)
+
 
 # Enum for defining pipeline stages
 class PipelineStage(Enum):
@@ -39,6 +51,9 @@ class PipelineStage(Enum):
     EVALUATION = "evaluation"
     EDITING = "editing"
 
+
+# pipeline_config.py
+DEFAULT_MODEL_IDS = {"openai": GPT_35_TURBO, "claude": CLAUDE_HAIKU}
 
 # Dictionary of configurations for each pipeline stage
 PIPELINE_CONFIG = {
@@ -142,10 +157,10 @@ PIPELINE_CONFIG = {
         "function": "run_adding_multivariate_indices_mini_pipeline",
         "io": {
             "openai": {
-                "csv_files_dir": SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR,
+                "mapping_file": ITERATE_0_OPENAI_DIR / mapping_file_name,
             },
             "claude": {
-                "csv_files_dir": SIMILARITY_METRICS_ITERATE_0_CLAUDE_DIR,
+                "mapping_file": ITERATE_0_CLAUDE_DIR / mapping_file_name,
             },
         },
     },
@@ -199,7 +214,6 @@ PIPELINE_CONFIG = {
         "description": "Modify responsibilities based on requirements using LLM",
         "function": "run_resume_editing_pipeline",
         "llm_provider": "openai",
-        "model_id": "gpt-4-turbo",
         "io": {
             "openai": {
                 "mapping_file_prev": ITERATE_0_OPENAI_DIR / mapping_file_name,
@@ -215,6 +229,7 @@ PIPELINE_CONFIG = {
         "stage": PipelineStage.EDITING,
         "description": "Async modification of responsibilities based on requirements",
         "function": "run_resume_editing_pipeline_async",
+        "llm_provider": "openai",
         "io": {
             "openai": {
                 "mapping_file_prev": ITERATE_0_OPENAI_DIR / mapping_file_name,
@@ -273,10 +288,10 @@ PIPELINE_CONFIG = {
         "function": "run_adding_multivariate_indices_mini_pipeline",
         "io": {
             "openai": {
-                "csv_files_dir": SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR,
+                "mapping_file": ITERATE_1_OPENAI_DIR / mapping_file_name,
             },
             "claude": {
-                "csv_files_dir": SIMILARITY_METRICS_ITERATE_1_CLAUDE_DIR,
+                "mapping_file": ITERATE_1_CLAUDE_DIR / mapping_file_name,
             },
         },
     },

@@ -17,18 +17,56 @@ import logging_config
 logger = logging.getLogger(__name__)
 
 
-# Base model to serve as a foundation for multiple response types
 class BaseResponseModel(BaseModel):
-    status: str = "success"  # General status field for all responses
-    message: Optional[str] = None  # Optional message or feedback
+    """
+    Base model that provides common fields for various response models.
+
+    Attributes:
+        status (str): Indicates the success status of the response, defaults to "success".
+        message (Optional[str]): Optional field to provide additional feedback or a message.
+
+    Config:
+        arbitrary_types_allowed (bool): Allows non-standard types like pandas DataFrame.
+    """
+
+    status: str = "success"
+    message: Optional[str] = None
 
     class Config:
-        arbitrary_types_allowed = True  # Allow non-standard types like DataFrame
+        arbitrary_types_allowed = True
 
 
-# Model for handling text-based responses
+class JSONResponse(BaseModel):
+    """
+    General-purpose model for handling JSON-based responses.
+
+    Attributes:
+        data (Union[Dict[str, Any], List[Dict[str, Any]]]): Holds JSON data,
+        which can be either a dictionary or a list of dictionaries.
+
+    Config:
+        arbitrary_types_allowed (bool): Allows non-standard types in
+        JSON responses.
+    """
+
+    data: Union[Dict[str, Any], List[Dict[str, Any]]]
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class TextResponse(BaseResponseModel):
-    content: str  # Holds plain text content
+    """
+    Model for plain text responses.
+
+    Attributes:
+        content (str): Holds plain text content of the response.
+
+    Config:
+        json_schema_extra (dict): Provides an example structure for documentation.
+    """
+
+    content: str
 
     class Config:
         json_schema_extra = {
@@ -40,16 +78,178 @@ class TextResponse(BaseResponseModel):
         }
 
 
-# Generalized JSON Response Model (New Version)
-class JSONResponse(BaseModel):
-    """Basic and generic model for JSON response"""
+class TabularResponse(BaseResponseModel):
+    """
+    Model for handling tabular data responses using pandas DataFrame.
 
-    data: Union[
-        Dict[str, Any], List[Dict[str, Any]]
-    ]  # Allow both dict and list of dicts
+    Attributes:
+        data (pd.DataFrame): Contains the tabular data.
+
+    Config:
+        - arbitrary_types_allowed (bool): Allows DataFrame as a valid type.
+        - json_schema_extra (dict): Example structure for tabular data documentation.
+    """
+
+    data: pd.DataFrame
 
     class Config:
         arbitrary_types_allowed = True
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Tabular data processed.",
+                "data": "Pandas DataFrame object",
+            }
+        }
+
+
+class CodeResponse(BaseResponseModel):
+    """
+    Model for responses containing code snippets.
+
+    Attributes:
+        code (str): Holds the code as a string.
+
+    Config:
+        json_schema_extra (dict): Example structure for code response documentation.
+    """
+
+    code: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Code response processed.",
+                "code": "print('Hello, world!')",
+            }
+        }
+
+
+# class EditingData(BaseModel):
+#     """
+#     Inner model for editing responses, specifically for optimized text.
+
+#     Attributes:
+#         optimized_text (str): The optimized text produced by an editing operation.
+#     """
+
+#     optimized_text: str
+
+
+class OptimizedTextData(BaseModel):
+    """Inner model to specify required 'optimized_text' field."""
+
+    optimized_text: str = Field(..., description="The optimized text after editing.")
+
+
+class EditingResponseModel(BaseModel):
+    """
+    Model for responses involving text editing operations.
+
+    Attributes:
+        data (OptimizedTextData): Contains 'optimized_text' as a required field.
+    """
+
+    data: OptimizedTextData  # Use inner model to enforce 'optimized_text' structure
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Text editing processed successfully.",
+                "data": {"optimized_text": "This is the optimized text after editing."},
+            }
+        }
+
+
+# class EditingResponseModel(JSONResponse):
+#     """
+#     Simplified model for responses involving text editing operations.
+
+#     Attributes:
+#         data (Dict[str, str]): A dictionary with `optimized_text` key and string value.
+#     """
+
+#     data: Dict[
+#         str, str
+#     ]  # Simplify to contain just "optimized_text" as a string in the data
+
+#     class Config:
+#         json_schema_extra = {
+#             "example": {
+#                 "status": "success",
+#                 "message": "Text editing processed successfully.",
+#                 "data": {"optimized_text": "This is the optimized text after editing."},
+#             }
+#         }
+
+
+class JobSiteData(BaseModel):
+    """
+    Inner model containing detailed job site information.
+
+    Attributes:
+        url (Optional[str]): The URL of the job posting.
+        job_title (Optional[str]): Title of the job position.
+        company (Optional[str]): Name of the company posting the job.
+        location (Optional[str]): Job location.
+        salary_info (Optional[str]): Salary information, if available.
+        posted_date (Optional[str]): Date when the job was posted.
+        content (Optional[Dict[str, Any]]): Contains the job description, responsibilities, and qualifications as a dictionary.
+    """
+
+    url: Optional[str] = Field(None, description="Job posting URL")
+    job_title: Optional[str] = Field(None, description="Job title")
+    company: Optional[str] = Field(None, description="Company name")
+    location: Optional[str] = Field(None, description="Job location")
+    salary_info: Optional[str] = Field(None, description="Salary information")
+    posted_date: Optional[str] = Field(None, description="Job posting date")
+    content: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Dictionary containing job description, responsibilities, and qualifications",
+    )
+
+
+class JobSiteResponseModel(BaseResponseModel):
+    """
+    Model for handling job site response data, standardizing job-related information.
+
+    Attributes:
+        data (JobSiteData): Holds detailed job site information as a nested JobSiteData instance.
+
+    Config:
+        json_schema_extra (dict): Provides an example structure for documentation.
+    """
+
+    data: JobSiteData
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Job site data processed successfully.",
+                "data": {
+                    "url": "https://example.com/job-posting",
+                    "job_title": "Software Engineer",
+                    "company": "Tech Corp",
+                    "location": "San Francisco, CA",
+                    "salary_info": "$100,000 - $120,000",
+                    "posted_date": "2024-11-08",
+                    "content": {
+                        "description": "We are looking for a Software Engineer...",
+                        "responsibilities": [
+                            "Develop software",
+                            "Collaborate with team",
+                        ],
+                        "qualifications": [
+                            "BS in Computer Science",
+                            "2+ years experience",
+                        ],
+                    },
+                },
+            }
+        }
 
 
 # Old version:
@@ -68,84 +268,15 @@ class JSONResponse(BaseModel):
 #             }
 #         }
 
-
-# Model for handling tabular responses using pandas DataFrame
-class TabularResponse(BaseResponseModel):
-    """Generic modle for tabular LLM response"""
-
-    data: pd.DataFrame  # Tabular data, returned as a pandas DataFrame
-
-    class Config:
-        arbitrary_types_allowed = True  # Allow pandas DataFrame as a valid type
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Tabular data processed.",
-                "data": "Pandas DataFrame object",
-            }
-        }
-
-
-# Model for handling code responses (e.g., snippets of code)
-class CodeResponse(BaseResponseModel):
-    """Generic modle for tabular LLM response"""
-
-    code: str  # Holds the code as a string
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Code response processed.",
-                "code": "print('Hello, world!')",
-            }
-        }
-
-
-# Example job-specific response inheriting from JSONResponse (for job processing pipelines)
-class JobSiteResponseModel(JSONResponse):
-    """Specific model to validate job posting site parsing"""
-
-    url: Optional[str] = Field(None, description="Job posting URL")
-    job_title: Optional[str] = Field(None, description="Job title")
-    company: Optional[str] = Field(None, description="Company name")
-    location: Optional[str] = Field(None, description="Job location")
-    salary_info: Optional[str] = Field(None, description="Salary information")
-    posted_date: Optional[str] = Field(None, description="Job posting date")
-    content: Optional[dict] = Field(
-        None,
-        description="Dictionary containing job description, responsibilities, and qualifications",
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Job data extracted successfully.",
-                "url": "https://searchjobs.libertymutualgroup.com/careers/job/618499888480?microsite=libertymutual.com&domain=libertymutual.com&utm_source=Job+Board&utm_campaign=LinkedIn+Jobs&extcmp=bof-paid-text-lkin-aljb",
-                "job_title": "Software Engineer",
-                "company": "Tech Corp",
-                "location": "New York, NY",
-                "salary_info": "$100,000 - $120,000 per year",
-                "posted_date": "2024-10-01",
-                "content": {
-                    "description": "Design and build new features...",
-                    "responsibilities": "Lead team meetings...",
-                    "qualifications": "Bachelor's degree in Computer Science...",
-                },
-            }
-        }
-
-
 # Editing Response Model (inherits from JSONResponse)
-class EditingResponseModel(JSONResponse):
-    optimized_text: Optional[str] = None
+# class EditingResponseModel(JSONResponse):
+#     optimized_text: Optional[str] = None
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Text editing processed successfully.",
-                "optimized_text": "This is the optimized text after editing.",
-            }
-        }
+#     class Config:
+#         json_schema_extra = {
+#             "example": {
+#                 "status": "success",
+#                 "message": "Text editing processed successfully.",
+#                 "optimized_text": "This is the optimized text after editing.",
+#             }
+#         }
