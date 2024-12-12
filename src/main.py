@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 # High level function to call the run_pipeline functions (sync and async)
 def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
     """
-    Executes a pipeline by dynamically selecting between synchronous and
-    asynchronous execution paths.
+    *Executes a pipeline by dynamically selecting between synchronous and
+    *asynchronous execution paths.
 
     This function serves as the main entry point for executing pipelines
     based on their ID and provider. It references configurations stored in
@@ -34,7 +34,7 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
     - Otherwise, it calls `run_pipeline` directly for synchronous execution.
 
     Organization:
-        * `main.py`: The `execute_pipeline` function orchestrates pipeline execution,
+        * 'main.py': The `execute_pipeline` function orchestrates pipeline execution,
         * choosing between `run_pipeline` and `run_pipeline_async` based on `is_async`.
         - `run_pipelines.py`: Contains `run_pipeline` and `run_pipeline_async`,
         which dynamically lookup and execute specific pipeline functions

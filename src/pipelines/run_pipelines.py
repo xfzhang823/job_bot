@@ -72,7 +72,7 @@ def run_pipeline(
     pipeline_id: str, llm_provider: str = "openai", model_id: Optional[str] = None
 ):
     """
-    *Sync version
+    *Thi is the sync version
 
     Executes a dynamically specified pipeline based on its configuration in `PIPELINE_CONFIG`.
 
@@ -86,9 +86,9 @@ def run_pipeline(
     signature, ensuring only the necessary arguments are passed.
 
     Note:
-        `globals()` is used here as a lookup tool to dynamically access function objects
-        based on their names stored as strings, not to make a function accessible outside
-        of a local function.
+        *'globals()' is used here as a lookup tool to dynamically access function objects
+        *based on their names stored as strings, not to make a function accessible outside
+        *of a local function.
 
     This approach supports flexible configurations, enabling `run_pipeline` to handle
     multiple pipelines with distinct argument requirements without the need to hardcode
@@ -138,8 +138,8 @@ def run_pipeline(
     `PIPELINE_CONFIG`. This includes the function name and the relevant I/O configurations for
     the given `llm_provider`.
     2. The `func_name` is retrieved as a string and converted to a function object
-    using `globals()`.
-    3. Using `inspect.signature`, the function examines the parameters required by `func_name`.
+    using 'globals()'.
+    3. Using `inspect.signature`, the function examines the parameters required by 'func_name'.
     4. A dictionary `kwargs` is initialized with values from `io_config`.
     5. The `llm_provider` and `model_id` arguments are conditionally added to `kwargs`
     only if they are expected by the function, preventing unexpected argument errors.

@@ -250,33 +250,3 @@ class JobSiteResponseModel(BaseResponseModel):
                 },
             }
         }
-
-
-# Old version:
-# class JSONResponse(BaseResponseModel):
-#     optimized_text: Optional[str] = None  # For any optimized text-based content
-#     data: Optional[dict] = None  # General data field for various JSON responses
-
-#     class Config:
-#         json_schema_extra = {
-#             "example": {
-#                 "status": "success",
-#                 "message": "JSON response processed.",
-#                 "optimized_text": "This is the optimized version of your text.",
-#                 # keep optimized_text in the base model b/c other models such as summarization, etc. may need it
-#                 "data": {"key_1": "value_1", "key_2": "value_2"},
-#             }
-#         }
-
-# Editing Response Model (inherits from JSONResponse)
-# class EditingResponseModel(JSONResponse):
-#     optimized_text: Optional[str] = None
-
-#     class Config:
-#         json_schema_extra = {
-#             "example": {
-#                 "status": "success",
-#                 "message": "Text editing processed successfully.",
-#                 "optimized_text": "This is the optimized text after editing.",
-#             }
-#         }
