@@ -8,11 +8,11 @@ response format: text
 return: filtered content only; do not include explanation
 """
 
-# You need to use Escaping Curly Braces, "{{ }}", for JSON output examples!
-# When use .format() method in Python strings, any curly braces {} in the string
-# are treated as placeholders for variable substitution.
-# Therefore, you need to escape them by doubling them ({{ for { and }} for })!!!
-# Updated this with Claude's suggested prompt
+# !You need to use Escaping Curly Braces, "{{ }}", for JSON output examples!
+# !When use .format() method in Python strings, any curly braces {} in the string
+# !are treated as placeholders for variable substitution.
+# !Therefore, you need to escape them by doubling them ({{ for { and }} for })!!!
+# Updated this with Claude's suggested prompt (generally better than other LLMs)
 CONVERT_JOB_POSTING_TO_JSON_PROMPT = """
 You are a skilled professional at analyzing job descriptions. Extract key information and relevant content from the provided job description, converting it into a comprehensive, valid JSON format. Exclude purely website-related information or general company boilerplate not specific to the job.
 

@@ -1,6 +1,6 @@
 """
 Filename: llm_api_utils.py
-Last Updated: 2024-10-28
+Last Updated: 2024-12-12
 
 Utils classes/methods for data extraction, parsing, and manipulation
 """
@@ -26,6 +26,8 @@ from models.llm_response_models import (
     TabularResponse,
     TextResponse,
     EditingResponseModel,
+    OptimizedTextData,
+    JobSiteData,
     JobSiteResponseModel,
 )
 
@@ -38,57 +40,11 @@ from config import (
     CLAUDE_OPUS,
 )
 
+# Setup logger
 logger = logging.getLogger(__name__)
 
 
-# Utility Functions
-
-# json_model_mapping = {
-#     "job_site": JobSiteResponseModel,
-#     "editing": EditingResponseModel,  # Corrected "editting" to "editing"
-#     # Additional mappings as needed
-# }
-
-
-def clean_and_extract_json(
-    response_content: str,
-) -> Optional[Union[Dict[str, Any], List[Any]]]:
-    """
-    Extracts, cleans, and parses JSON content from the API response.
-    Strips out any non-JSON content like extra text before the JSON block.
-    Also removes JavaScript-style comments and trailing commas.
-
-    Args:
-        response_content (str): The full response content as a string, potentially
-        containing JSON.
-
-    Returns:
-        Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
-        or None if parsing fails.
-    """
-    try:
-        # Extract JSON-like block by matching the first `{` and the last `}`
-        match = re.search(r"{.*}", response_content, re.DOTALL)
-        if not match:
-            logger.error("No valid JSON content found in response.")
-            return None
-
-        raw_json_string = match.group(0)
-
-        # Remove JavaScript-style single-line comments (// ...) but retain valid JSON
-        cleaned_json_string = re.sub(r"\s*//[^\n]*", "", raw_json_string)
-
-        # Remove trailing commas before closing braces or brackets
-        cleaned_json_string = re.sub(r",\s*([\]}])", r"\1", cleaned_json_string)
-
-        # Parse JSON string into a Python object
-        return json.loads(cleaned_json_string)
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON: {e}")
-        return None
-
-
+# API key util functions
 def get_openai_api_key() -> str:
     """Retrieves the OpenAI API key from environment variables."""
     load_dotenv()
@@ -109,7 +65,8 @@ def get_claude_api_key() -> str:
     return api_key
 
 
-# Validation Functions
+# Parsing & validation utils functions
+# Response type validation
 def validate_response_type(
     response_content: Union[str, Any], expected_res_type: str
 ) -> Union[
@@ -177,6 +134,108 @@ def validate_response_type(
         raise ValueError(f"Unsupported response type: {expected_res_type}")
 
 
+def clean_and_extract_json(
+    response_content: str,
+) -> Optional[Union[Dict[str, Any], List[Any]]]:
+    """
+    Extracts, cleans, and parses JSON content from the API response.
+    Strips out any non-JSON content like extra text before the JSON block.
+    Also removes JavaScript-style comments and trailing commas.
+
+    Args:
+        response_content (str): Raw response content.
+
+    Returns:
+        Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
+        or None if parsing fails.
+    """
+    try:
+        # Attempt direct parsing
+        return json.loads(response_content)
+    except json.JSONDecodeError:
+        logger.warning("Initial JSON parsing failed. Attempting fallback extraction.")
+
+    # Fallback: Extract first JSON-like structure
+    match = re.search(r"{.*?}", response_content, re.DOTALL)
+    if not match:
+        logger.error("No JSON-like content found.")
+        return None
+
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON in fallback: {e}")
+        return None
+
+
+def validate_editing_response(response_model: JSONResponse) -> EditingResponseModel:
+    """
+    Processes and validates a JSON response for the "editing" type.
+
+    This function ensures that the "data" field in the response is an instance of OptimizedTextData.
+
+    Args:
+        response_model (JSONResponse): The generic JSON response model to validate.
+
+    Returns:
+        EditingResponseModel: The validated EditingResponseModel instance containing "optimized_text".
+
+    Raises:
+        ValueError: If the data is None or not an instance of OptimizedTextData.
+    """
+    response_data = response_model.data
+
+    if response_data is None:
+        raise ValueError("Response data is None and cannot be processed.")
+
+    if not isinstance(response_data, OptimizedTextData):
+        raise ValueError(
+            f"Unexpected data type for editing response: {type(response_data)}"
+        )
+
+    validated_response_model = EditingResponseModel(data=response_data)
+
+    logger.info(f"Validated response model - editing: {validated_response_model}")
+
+    return validated_response_model
+
+
+def validate_job_site_response(response_model: JSONResponse) -> JobSiteResponseModel:
+    """
+    Processes and validates a JSON response for the "job_site" type.
+
+    This function ensures that the "data" field in the response is an instance of JobSiteData.
+
+    Args:
+        response_model (JSONResponse): The generic JSON response model to validate.
+
+    Returns:
+        JobSiteResponseModel: The validated JobSiteResponseModel instance containing job-specific data.
+
+    Raises:
+        ValueError: If the "data" field is None or not an instance of JobSiteData.
+    """
+    response_data_model = response_model.data  # parse -> data sub model
+
+    if response_data_model is None:
+        raise ValueError("Response data is None and cannot be processed.")
+
+    if not isinstance(response_data_model, JobSiteData):
+        raise ValueError(
+            f"Unexpected data type for job site response: {type(response_data_model)}"
+        )
+
+    validated_response_model = JobSiteResponseModel(
+        status="success",
+        message="Job site data processed successfully.",
+        data=response_data_model,
+    )
+
+    logger.info(f"Validated response model - job site: {validated_response_model}")
+
+    return validated_response_model
+
+
 def validate_json_type(
     response_model: JSONResponse, json_type: str
 ) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
@@ -184,96 +243,33 @@ def validate_json_type(
     Validates JSON data against a specific Pydantic model based on 'json_type'.
 
     Args:
-        - response_model (JSONResponse): The generic JSON response model to validate.
-        - json_type (str): The type of JSON model to use for validation.
+        response_model (JSONResponse): The generic JSON response to validate.
+        json_type (str): The expected JSON type ('job_site', 'editing', or 'generic').
 
     Returns:
-        An instance of the validated Pydantic model.
+        Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
+        Validated model instance.
+
+    Raises:
+        ValueError: If 'json_type' is unsupported or validation fails.
     """
     # Map json_type to the correct model class
     json_model_mapping = {
-        "job_site": JobSiteResponseModel,
-        "editing": EditingResponseModel,
-        "generic": JSONResponse,
+        "editing": validate_editing_response,
+        "job_site": validate_job_site_response,
+        "generic": lambda model: model,  # Return as is
     }
 
-    # Retrieve the model from the mapping
-    model = json_model_mapping.get(json_type)
-
-    if not model:
+    # Pick the right function
+    validator = json_model_mapping.get(json_type)
+    if not validator:
         raise ValueError(f"Unsupported json_type: {json_type}")
 
-    try:
-        # Extract the 'data' content from response_model
-        response_data = response_model.model_dump().get("data")
-
-        logger.info(
-            f"response_model model dump.get(data): {response_data}"
-        )  # TODO: debugging, delete later
-
-        # For EditingResponseModel, ensure response_data directly matches the expected format
-        if json_type == "editing" and isinstance(response_data, dict):
-            # Ensure we pass {"optimized_text": "..."} directly as data
-            response_data = (
-                response_data
-                if "optimized_text" in response_data
-                else {"optimized_text": response_data}
-            )
-
-        logger.info(
-            f"response_data - editing: {response_data}"
-        )  # TODO: debugging, delete later
-
-        # Instantiate the model with modified response_data
-        validated_model = model(data=response_data)
-        return validated_model
-    except ValidationError as e:
-        logger.error(f"Validation failed for {json_type}: {e}")
-        raise ValueError(f"Invalid format for {json_type}: {e}")
-
-
-# def validate_json_type(
-#     response_data: Union[Dict[str, Any], List[Any]], json_type: str
-# ) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
-#     """
-#     Validates JSON data against a specific Pydantic model based on 'json_type'.
-
-#     Args:
-#         - response_data (Union[Dict[str, Any], List[Dict[str, Any]]]):
-#         The raw JSON data
-#           to validate.
-#         - json_type (str): The type of JSON model to use for validation.
-
-#     Returns:
-#         An instance of the validated Pydantic model.
-#     """
-#     # Map json_type to the correct model class
-#     json_model_mapping = {
-#         "job_site": JobSiteResponseModel,
-#         "editing": EditingResponseModel,
-#         "generic": JSONResponse,
-#     }
-
-#     # Retrieve the model from the mapping
-#     model = json_model_mapping.get(json_type)
-
-#     if not model:
-#         raise ValueError(f"Unsupported json_type: {json_type}")
-
-#     # # Dynamically wrap response_data for EditingResponseModel validation if necessary
-#     # if json_type == "editing" and "data" not in response_data:
-#     #     response_data = {"data": response_data}
-
-#     try:
-#         # Instantiate the model with response_data under `data`
-#         validated_model = model(data=response_data)
-#         return validated_model
-#     except ValidationError as e:
-#         logger.error(f"Validation failed for {json_type}: {e}")
-#         raise ValueError(f"Invalid format for {json_type}: {e}")
+    return validator(response_model)
 
 
 # API Calling Functions
+# Call LLM API
 def call_api(
     client: Optional[Union[OpenAI, Anthropic]],
     model_id: str,
@@ -291,7 +287,16 @@ def call_api(
     EditingResponseModel,
     JobSiteResponseModel,
 ]:
-    """Unified function to handle API calls for OpenAI, Claude, and Llama."""
+    """
+    Unified function to handle API calls for OpenAI, Claude, and Llama.
+
+    *Note:
+    *The API calling methods need to remain separate because:
+    *OpenAI returns single-block responses.
+    *Anthropic (Claude) uses multi-block responses that needs special treatment.
+    Combining them into a single code block will have complications;
+    keep them separate here for each provider is a more clean and modular.
+    """
 
     try:
         logger.info(f"Making API call with expected response type: {expected_res_type}")
@@ -326,10 +331,10 @@ def call_api(
                 temperature=temperature,
             )
 
-            # Need to add an extra step to extract content from response object's TextBlocks
-            # (Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
-            # The content attribute of Message is a list of TextBlock objects,
-            # whereas others wrap everything into a single block.)
+            # *Need to add an extra step to extract content from response object's TextBlocks
+            # *(Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
+            # *The content attribute of Message is a list of TextBlock objects,
+            # *whereas others wrap everything into a single block.)
             response_content = (
                 response.content[0].text
                 if hasattr(response.content[0], "text")
@@ -354,30 +359,24 @@ def call_api(
             raise ValueError(f"Received an empty response from {llm_provider} API.")
 
         # Validate response type (generic text, JSON, tabular, and code)
-        validated_response_content = validate_response_type(
-            response_content, expected_res_type
+        validated_response_model = validate_response_type(
+            response_content=response_content, expected_res_type=expected_res_type
         )
 
-        # Further validate JSON responses
+        # Further validate JSONResponse -> edit response or job site response models
         if expected_res_type == "json":
-            # Ensure validated_response_content is a JSONResponse before accessing `.data`
-            if isinstance(validated_response_content, JSONResponse):
-                # Unpack the `data` field, ensuring it's a dict or list of dicts as expected
-                response_data = validated_response_content.data
-                if not isinstance(response_data, (dict, list)):
-                    raise ValueError(
-                        "Expected response data to be a dictionary or a list of dictionaries."
-                    )
-
-                validated_response_content = validate_json_type(
-                    response_data=response_data, json_type=json_type
+            # Ensure validated_response_content is a JSONResponse.
+            if isinstance(validated_response_model, JSONResponse):
+                # Pass directly to validate_json_type for further validation
+                validated_response_model = validate_json_type(
+                    response_model=validated_response_model, json_type=json_type
                 )
             else:
                 raise TypeError(
-                    "Expected validated response content to be a JSONResponse."
+                    "Expected validated response content needs to be a JSONResponse model."
                 )
 
-        return validated_response_content
+        return validated_response_model
 
     except (json.JSONDecodeError, ValidationError) as e:
         logger.error(f"Validation or parsing error: {e}")

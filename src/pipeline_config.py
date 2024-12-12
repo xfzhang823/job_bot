@@ -52,7 +52,7 @@ class PipelineStage(Enum):
     EDITING = "editing"
 
 
-# pipeline_config.py
+# pipeline_config.pyn
 DEFAULT_MODEL_IDS = {"openai": GPT_35_TURBO, "claude": CLAUDE_HAIKU}
 
 # Dictionary of configurations for each pipeline stage

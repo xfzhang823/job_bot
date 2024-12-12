@@ -296,8 +296,9 @@ class JobFileMappings(RootModel[Dict[HttpUrl, JobFilePaths]]):
     Pydantic model for validating a mapping of job URLs to associated file paths for
     requirements, responsibilities, and metrics.
 
-    This model maps job URLs directly to their corresponding file paths without relying on the `__root__` attribute,
-    using a dictionary structure where job posting URLs are keys, and the associated file paths are values validated by the `JobFilePaths` model.
+    This model maps job URLs directly to their corresponding file paths without relying on 
+    the `__root__` attribute, using a dictionary structure where job posting URLs are keys, 
+    and the associated file paths are values validated by the `JobFilePaths` model.
 
     Structure Overview:
     - The top-level keys represent job URLs (validated as `HttpUrl`).

@@ -1,4 +1,27 @@
-"""Async version of llm_api_utils_async.py"""
+"""Async version of llm_api_utils_async.py
+
+This module provides asynchronous utility functions for interacting with various LLM APIs, 
+including OpenAI, Claude (Anthropic), and Llama3. It handles API calls, validates responses, 
+and manages provider-specific nuances such as single-block versus multi-block responses.
+
+Key Features:
+- Asynchronous support for OpenAI and Claude APIs.
+- Compatibility with synchronous Llama3 API via an async executor.
+- Validation and structuring of responses into Pydantic models.
+- Modular design to accommodate provider-specific response handling.
+
+Modules and Methods:
+- `call_openai_api_async`: Asynchronously interacts with the OpenAI API.
+- `call_claude_api_async`: Asynchronously interacts with the Claude API.
+- `call_llama3_async`: Asynchronously interacts with the Llama3 API using a synchronous executor.
+- `call_api_async`: Unified async function for handling API calls with validation.
+- `run_in_executor_async`: Executes synchronous functions in an async context.
+- Validation utilities (e.g., `validate_response_type`, `validate_json_type`).
+
+Usage:
+This module is intended for applications that require efficient and modular integration 
+with multiple LLM providers.
+"""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -39,9 +62,23 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+"""
+
+"""
+
 
 # Helper function to run synchronous API calls in an executor
 async def run_in_executor_async(func, *args):
+    """
+    Runs a synchronous function in a ThreadPoolExecutor for async compatibility.
+
+    Args:
+        func (Callable): The synchronous function to execute.
+        *args: Arguments to pass to the function.
+
+    Returns:
+        Any: The result of the synchronous function.
+    """
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as pool:
         return await loop.run_in_executor(pool, func, *args)
@@ -65,8 +102,60 @@ async def call_api_async(
     EditingResponseModel,
     JobSiteResponseModel,
 ]:
-    """Unified asynchronous function to handle API calls for OpenAI, Claude, and Llama."""
+    """
+    Asynchronous function for handling API calls to OpenAI, Claude, and Llama.
 
+    This method handles provider-specific nuances (e.g., multi-block responses for Claude)
+    and validates responses against expected types and Pydantic models.
+
+    Args:
+        client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]):
+            The API client instance for the respective provider.
+            If None, a new client is instantiated.
+        model_id (str):
+            The model ID to use for the API call (e.g., "gpt-4-turbo" for OpenAI).
+        prompt (str):
+            The input prompt for the LLM.
+        expected_res_type (str):
+            The expected type of response (e.g., "json", "tabular", "str", "code").
+        json_type (str):
+            Specifies the type of JSON model for validation (e.g., "job_site", "editing").
+        temperature (float):
+            Sampling temperature for the LLM.
+        max_tokens (int):
+            Maximum number of tokens for the response.
+        llm_provider (str):
+            The name of the LLM provider ("openai", "claude", or "llama3").
+
+    Returns:
+        Union[JSONResponse, TabularResponse, CodeResponse, TextResponse, EditingResponseModel,
+        JobSiteResponseModel]:
+            The validated and structured response.
+
+    Raises:
+        ValueError: If the response cannot be validated or parsed.
+        TypeError: If the response type does not match the expected format.
+        Exception: For other unexpected errors during API interaction.
+
+    Notes:
+    - OpenAI returns single-block responses, while Claude may return multi-block responses.
+    - Llama3 API is synchronous and is executed using an async executor. that needs special treatment.
+    #* Therefore, the API calling for each LLM provider need to remain separate:
+    #* Combining them into a single code block will have complications;
+    #* keep them separate here for each provider is a more clean and modular.
+
+    Examples:
+    >>> await call_api_async(
+            client=openai_client,
+            model_id="gpt-4-turbo",
+            prompt="Translate this text to French",
+            expected_res_type="json",
+            json_type="editing",
+            temperature=0.5,
+            max_tokens=100,
+            llm_provider="openai"
+        )
+    """
     try:
         logger.info(f"Making API call with expected response type: {expected_res_type}")
         response_content = ""
@@ -95,6 +184,11 @@ async def call_api_async(
                 messages=[{"role": "user", "content": system_instruction + prompt}],
                 temperature=temperature,
             )
+
+            # *Need to add an extra step to extract content from response object's TextBlocks
+            # *(Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
+            # *The content attribute of Message is a list of TextBlock objects,
+            # *whereas others wrap everything into a single block.)
             response_content = (
                 response.content[0].text
                 if hasattr(response.content[0], "text")
@@ -117,37 +211,32 @@ async def call_api_async(
 
         logger.info(f"Raw {llm_provider} Response: {response_content}")
 
-        # *Validation 1: response content and return structured response
-        validated_response_content = validate_response_type(
+        # Validation 1: response content and return structured response
+        validated_response_model = validate_response_type(
             response_content, expected_res_type
         )
 
         logger.info(
-            f"validated response content after validate_response_type: \n{validated_response_content}"
+            f"validated response content after validate_response_type: \n{validated_response_model}"
         )  # TODO: debugging; delete afterwards
 
-        # *Validation 2: Validate response content and return structured response
+        # Validation 2: Further validate JSONResponse -> edit response or job site response models
         if expected_res_type == "json":
-            if isinstance(validated_response_content, JSONResponse):
-                # response_data = validated_response_content.data
-
-                # logger.info(
-                #     f"response_data: {response_data}"
-                # )  # TODO: debugging; delete afterwards
-
-                # if not isinstance(response_data, (dict, list)):
-                #     raise ValueError(
-                #         "Expected response data to be a dictionary or list."
-                #     )
-                validated_response_content = validate_json_type(
-                    response_model=validated_response_content, json_type=json_type
+            if isinstance(validated_response_model, JSONResponse):
+                # Pass directly to validate_json_type for further validation
+                validated_response_model = validate_json_type(
+                    response_model=validated_response_model, json_type=json_type
+                )
+            else:
+                raise TypeError(
+                    "Expected validated response content needs to be a JSONResponse model."
                 )
 
         logger.info(
-            f"validated response content after validate_json_type: \n{validated_response_content}"
+            f"validated response content after validate_json_type: \n{validated_response_model}"
         )  # TODO: debugging; delete afterwards
 
-        return validated_response_content
+        return validated_response_model
 
     except (json.JSONDecodeError, ValidationError) as e:
         logger.error(f"Validation or parsing error: {e}")
