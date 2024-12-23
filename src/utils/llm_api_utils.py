@@ -1,25 +1,28 @@
 """
 Filename: llm_api_utils.py
+Author: Xiao-Fei Zhang
 Last Updated: 2024-12-12
 
 Utils classes/methods for data extraction, parsing, and manipulation
 """
 
-# External libraries
+# Built-in & External libraries
 import os
 import json
 import logging
 import re
 from io import StringIO
+from typing import Any, Dict, List, Optional, Union, cast
 from dotenv import load_dotenv
 import pandas as pd
 from pydantic import ValidationError
-from typing import Union, Optional, Mapping, Any, Dict, List, cast
 
+# LLM imports
 from openai import OpenAI
 import ollama
 from anthropic import Anthropic
 
+# from own modules
 from models.llm_response_models import (
     CodeResponse,
     JSONResponse,
@@ -30,8 +33,7 @@ from models.llm_response_models import (
     JobSiteData,
     JobSiteResponseModel,
 )
-
-from config import (
+from project_config import (
     GPT_35_TURBO,
     GPT_4,
     GPT_4_TURBO,
@@ -66,6 +68,43 @@ def get_claude_api_key() -> str:
 
 
 # Parsing & validation utils functions
+# Function to clean/extract JSON content
+def clean_and_extract_json(
+    response_content: str,
+) -> Optional[Union[Dict[str, Any], List[Any]]]:
+    """
+    Extracts, cleans, and parses JSON content from the API response.
+    Strips out any non-JSON content like extra text before the JSON block.
+    Also removes JavaScript-style comments and trailing commas.
+
+    Args:
+        response_content (str): Raw response content.
+
+    Returns:
+        Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
+        or None if parsing fails.
+    """
+    try:
+        # Attempt direct parsing
+        return json.loads(response_content)
+    except json.JSONDecodeError:
+        logger.warning("Initial JSON parsing failed. Attempting fallback extraction.")
+
+    # Extract JSON-like structure (object or array)
+    match = re.search(r"({.*}|\\[.*\\])", response_content, re.DOTALL)
+    if not match:
+        logger.error("No JSON-like content found.")
+        return None
+
+    try:
+        # Remove trailing commas
+        clean_content = re.sub(r",\\s*([}\\]])", r"\\1", match.group(0))
+        return json.loads(clean_content)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON in fallback: {e}")
+        return None
+
+
 # Response type validation
 def validate_response_type(
     response_content: Union[str, Any], expected_res_type: str
@@ -134,40 +173,6 @@ def validate_response_type(
         raise ValueError(f"Unsupported response type: {expected_res_type}")
 
 
-def clean_and_extract_json(
-    response_content: str,
-) -> Optional[Union[Dict[str, Any], List[Any]]]:
-    """
-    Extracts, cleans, and parses JSON content from the API response.
-    Strips out any non-JSON content like extra text before the JSON block.
-    Also removes JavaScript-style comments and trailing commas.
-
-    Args:
-        response_content (str): Raw response content.
-
-    Returns:
-        Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
-        or None if parsing fails.
-    """
-    try:
-        # Attempt direct parsing
-        return json.loads(response_content)
-    except json.JSONDecodeError:
-        logger.warning("Initial JSON parsing failed. Attempting fallback extraction.")
-
-    # Fallback: Extract first JSON-like structure
-    match = re.search(r"{.*?}", response_content, re.DOTALL)
-    if not match:
-        logger.error("No JSON-like content found.")
-        return None
-
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON in fallback: {e}")
-        return None
-
-
 def validate_editing_response(response_model: JSONResponse) -> EditingResponseModel:
     """
     Processes and validates a JSON response for the "editing" type.
@@ -183,17 +188,22 @@ def validate_editing_response(response_model: JSONResponse) -> EditingResponseMo
     Raises:
         ValueError: If the data is None or not an instance of OptimizedTextData.
     """
-    response_data = response_model.data
+    response_data = response_model.data  # parse -> data (dictionary)
 
     if response_data is None:
         raise ValueError("Response data is None and cannot be processed.")
 
-    if not isinstance(response_data, OptimizedTextData):
+    if not isinstance(response_data, dict):
         raise ValueError(
-            f"Unexpected data type for editing response: {type(response_data)}"
+            f"Expected response_data_model to be a dictionary, got {type(response_data)}"
         )
 
-    validated_response_model = EditingResponseModel(data=response_data)
+    parsed_data = OptimizedTextData(**response_data)
+    validated_response_model = EditingResponseModel(
+        status="success",
+        message="Text editing processed successfully.",
+        data=parsed_data,
+    )
 
     logger.info(f"Validated response model - editing: {validated_response_model}")
 
@@ -215,20 +225,27 @@ def validate_job_site_response(response_model: JSONResponse) -> JobSiteResponseM
     Raises:
         ValueError: If the "data" field is None or not an instance of JobSiteData.
     """
-    response_data_model = response_model.data  # parse -> data sub model
+    response_data = response_model.data  # parse -> data dictionary
 
-    if response_data_model is None:
+    if response_data is None:
         raise ValueError("Response data is None and cannot be processed.")
 
-    if not isinstance(response_data_model, JobSiteData):
+    if not isinstance(response_data, dict):
         raise ValueError(
-            f"Unexpected data type for job site response: {type(response_data_model)}"
+            f"Expected response_data_model to be a dictionary, got {type(response_data)}"
         )
+
+    try:
+        # Parse the data field into JobSiteData
+        parsed_data = JobSiteData(**response_data)
+
+    except ValidationError as e:
+        raise ValueError(f"Invalid data structure for job site response: {e}")
 
     validated_response_model = JobSiteResponseModel(
         status="success",
         message="Job site data processed successfully.",
-        data=response_data_model,
+        data=parsed_data,
     )
 
     logger.info(f"Validated response model - job site: {validated_response_model}")
@@ -288,14 +305,57 @@ def call_api(
     JobSiteResponseModel,
 ]:
     """
-    Unified function to handle API calls for OpenAI, Claude, and Llama.
+    Unified function to handle API calls for OpenAI, Claude, and Llama. This method handles
+    provider-specific nuances (e.g., multi-block responses for Claude) and validates responses
+    against expected types and Pydantic models.
 
-    *Note:
-    *The API calling methods need to remain separate because:
-    *OpenAI returns single-block responses.
-    *Anthropic (Claude) uses multi-block responses that needs special treatment.
-    Combining them into a single code block will have complications;
-    keep them separate here for each provider is a more clean and modular.
+    Args:
+        client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]):
+            The API client instance for the respective provider.
+            If None, a new client is instantiated.
+        model_id (str):
+            The model ID to use for the API call (e.g., "gpt-4-turbo" for OpenAI).
+        prompt (str):
+            The input prompt for the LLM.
+        expected_res_type (str):
+            The expected type of response (e.g., "json", "tabular", "str", "code").
+        json_type (str):
+            Specifies the type of JSON model for validation (e.g., "job_site", "editing").
+        temperature (float):
+            Sampling temperature for the LLM.
+        max_tokens (int):
+            Maximum number of tokens for the response.
+        llm_provider (str):
+            The name of the LLM provider ("openai", "claude", or "llama3").
+
+    Returns:
+        Union[JSONResponse, TabularResponse, CodeResponse, TextResponse, EditingResponseModel,
+        JobSiteResponseModel]:
+            The validated and structured response.
+
+    Raises:
+        ValueError: If the response cannot be validated or parsed.
+        TypeError: If the response type does not match the expected format.
+        Exception: For other unexpected errors during API interaction.
+
+    Notes:
+    - OpenAI returns single-block responses, while Claude may return multi-block responses.
+    - Llama3 API is synchronous and is executed using an async executor. that needs special treatment.
+    #* Therefore, the API calling for each LLM provider need to remain separate:
+    #* Combining them into a single code block will have complications;
+    #* keep them separate here for each provider is a more clean and modular.
+
+    Examples:
+    >>> await call_api_async(
+            client=openai_client,
+            model_id="gpt-4-turbo",
+            prompt="Translate this text to French",
+            expected_res_type="json",
+            json_type="editing",
+            temperature=0.5,
+            max_tokens=100,
+            llm_provider="openai"
+        )
     """
 
     try:
@@ -371,6 +431,9 @@ def call_api(
                 validated_response_model = validate_json_type(
                     response_model=validated_response_model, json_type=json_type
                 )
+                logger.debug(
+                    f"Validated response model type: {type(validated_response_model).__name__}"
+                )  # Debugging
             else:
                 raise TypeError(
                     "Expected validated response content needs to be a JSONResponse model."
@@ -390,7 +453,7 @@ def call_openai_api(
     prompt: str,
     model_id: str = GPT_4_TURBO,
     expected_res_type: str = "str",
-    context_type: str = "",
+    json_type: str = "",
     temperature: float = 0.4,
     max_tokens: int = 1056,
     client: Optional[OpenAI] = None,
@@ -431,7 +494,7 @@ def call_openai_api(
         model_id,
         prompt,
         expected_res_type,
-        context_type,
+        json_type,
         temperature,
         max_tokens,
         "openai",
@@ -442,7 +505,7 @@ def call_claude_api(
     prompt: str,
     model_id: str = CLAUDE_SONNET,
     expected_res_type: str = "str",
-    context_type: str = "",
+    json_type: str = "",
     temperature: float = 0.4,
     max_tokens: int = 1056,
     client: Optional[Anthropic] = None,
@@ -480,7 +543,7 @@ def call_claude_api(
         model_id,
         prompt,
         expected_res_type,
-        context_type,
+        json_type,
         temperature,
         max_tokens,
         "claude",
@@ -491,7 +554,7 @@ def call_llama3(
     prompt: str,
     model_id: str = "llama3",
     expected_res_type: str = "str",
-    context_type: str = "",
+    json_type: str = "",
     temperature: float = 0.4,
     max_tokens: int = 1056,
 ) -> Union[
@@ -508,7 +571,7 @@ def call_llama3(
         model_id=model_id,
         prompt=prompt,
         expected_res_type=expected_res_type,
-        json_type=context_type,
+        json_type=json_type,
         temperature=temperature,
         max_tokens=max_tokens,
         llm_provider="llama3",

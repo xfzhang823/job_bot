@@ -71,6 +71,15 @@ def modify_resp_based_on_reqs(
                 llm_provider="openai",
                 model_id="gpt-3.5-turbo"
             )
+
+        Returns:
+            ResponsibilityMatch(
+                optimized_by_requirements={
+                    "req1": OptimizedText(optimized_text="Fallback responsibility text for req1."),
+                    "req2": OptimizedText(optimized_text="Fallback responsibility text for req2."),
+                    # Additional requirements as necessary
+                }
+            )
     """
     # Instantiate the client within the function for each responsibility
     openai_api_key = get_openai_api_key()  # Fetch the API key
@@ -90,28 +99,25 @@ def modify_resp_based_on_reqs(
             revised = text_editor.edit_for_semantics(
                 candidate_text=resp,
                 reference_text=req,
-                text_id=f"{resp_key}_{req_key}",
                 temperature=0.5,
             )
-            revised_text_1 = revised["optimized_text"]
+            revised_text_1 = revised.data.optimized_text
 
             # Step 2: Align Entailment
             revised = text_editor.edit_for_entailment(
                 premise_text=revised_text_1,
                 hypothesis_text=req,
-                text_id=f"{resp_key}_{req_key}",
                 temperature=0.6,
             )
-            revised_text_2 = revised["optimized_text"]
+            revised_text_2 = revised.data.optimized_text
 
             # Step 3: Align Original Sentence's DP
             revised = text_editor.edit_for_dp(
                 target_text=revised_text_2,
                 source_text=resp,
-                text_id=f"{resp_key}_{req_key}",
                 temperature=0.9,
             )
-            revised_text_3 = revised["optimized_text"]
+            revised_text_3 = revised.data.optimized_text
 
             # Validate the final optimized text using a pydantic model
             optimized_text = OptimizedText(optimized_text=revised_text_3)
@@ -127,7 +133,15 @@ def modify_resp_based_on_reqs(
     except Exception as e:
         logger.error(f"Failed to modify responsibility {resp_key}: {e}")
         # Ensure a fallback for this responsibility in case of an error
-        local_modifications[req_key] = OptimizedText(optimized_text=resp)
+        validated_modifications = ResponsibilityMatch(
+            optimized_by_requirements={
+                "req1": OptimizedText(optimized_text="Fallback responsibility text."),
+                "req2": OptimizedText(
+                    optimized_text="Another fallback responsibility text."
+                ),
+                # Add more requirements if necessary
+            }
+        )
 
     return (resp_key, validated_modifications)  # Returns a Pydantic object
 

@@ -1,6 +1,8 @@
 """
 Filename: resume_editing.py
 Lst updated on: 2024 Oct 9
+
+*Still working on!!!!
 """
 
 import os
@@ -82,53 +84,87 @@ def modify_resp_based_on_reqs(
 
     local_modifications = {}
 
-    try:
-        for req_key, req in reqs.items():
-            logger.info(f"Modifying responsibility: {resp} \nwith requirement: {req}")
+    # Function to process a single requirement
+    def process_requirement(req_key, req, text_editor):
+        try:
+            for req_key, req in reqs.items():
+                logger.info(
+                    f"Modifying responsibility: {resp} \nwith requirement: {req}"
+                )
 
-            # Step 1: Align Semantic
+            # Step 1: Semantic Alignment
             revised = text_editor.edit_for_semantics(
-                candidate_text=resp,
-                reference_text=req,
-                text_id=f"{resp_key}_{req_key}",
-                temperature=0.5,
+                candidate_text=resp, reference_text=req, temperature=0.5
             )
-            revised_text_1 = revised["optimized_text"]
+            revised_text_1 = revised.data.optimized_text
 
-            # Step 2: Align Entailment
+            # Step 2: Entailment Alignment
             revised = text_editor.edit_for_entailment(
-                premise_text=revised_text_1,
-                hypothesis_text=req,
-                text_id=f"{resp_key}_{req_key}",
-                temperature=0.6,
+                premise_text=revised_text_1, hypothesis_text=req, temperature=0.6
             )
-            revised_text_2 = revised["optimized_text"]
+            revised_text_2 = revised.data.optimized_text
 
-            # Step 3: Align Original Sentence's DP
+            # Step 3: Dependency Parsing Alignment
             revised = text_editor.edit_for_dp(
-                target_text=revised_text_2,
-                source_text=resp,
-                text_id=f"{resp_key}_{req_key}",
-                temperature=0.9,
+                target_text=revised_text_2, source_text=resp, temperature=0.9
             )
-            revised_text_3 = revised["optimized_text"]
+            revised_text_3 = revised.data.optimized_text
 
-            # Validate the final optimized text using a pydantic model
-            optimized_text = OptimizedText(optimized_text=revised_text_3)
+            # Create and return the OptimizedText object
+            return req_key, OptimizedText(optimized_text=revised_text_3)
 
-            # Store the modification for this requirement
-            local_modifications[req_key] = optimized_text.model_dump()
+        except Exception as e:
+            logger.error(f"Failed to process req_key={req_key}: {e}")
+            # Fallback to original responsibility text in case of an error
+            return req_key, OptimizedText(optimized_text=resp)
 
-        # Validate the entire set of modifications for this repsonsiblity
-        validated_modifications = ResponsibilityMatch(
-            optimized_by_requirements=local_modifications
-        )
-    except Exception as e:
-        logger.error(f"Failed to modify responsibility {resp_key}: {e}")
-        # Ensure a fallback for this responsibility in case of an error
-        local_modifications[req_key] = OptimizedText(optimized_text=resp)
+        # Instantiate the client inside the worker process
 
-    return (resp_key, validated_modifications)  # Returns a pyd obj
+    openai_api_key = get_openai_api_key()
+    client = OpenAI(api_key=openai_api_key)
+
+    # Instantiate TextEditor class
+    text_editor = TextEditor(
+        llm_provider=model, model_id=model_id, client=client, max_tokens=1024
+    )
+
+    # Process requirements in parallel using joblib
+    results = Parallel(n_jobs=-1)(
+        delayed(process_requirement)(req_key, req, text_editor)
+        for req_key, req in reqs.items()
+    )
+
+    # Collect results into a dictionary
+    local_modifications = {
+        req_key: optimized_text for req_key, optimized_text in results
+    }
+
+    # Validate the entire set of modifications for this responsibility
+    validated_modifications = ResponsibilityMatch(
+        optimized_by_requirements=local_modifications
+    )
+
+    return resp_key, validated_modifications
+
+    #         # Create and return the OptimizedText object
+    #         return req_key, OptimizedText(optimized_text=revised_text_3)
+
+    #         # Validate the final optimized text using a pydantic model
+    #         optimized_text = OptimizedText(optimized_text=revised_text_3)
+
+    #         # Store the modification for this requirement
+    #         local_modifications[req_key] = optimized_text.model_dump()
+
+    #     # Validate the entire set of modifications for this repsonsiblity
+    #     validated_modifications = ResponsibilityMatch(
+    #         optimized_by_requirements=local_modifications
+    #     )
+    # except Exception as e:
+    #     logger.error(f"Failed to modify responsibility {resp_key}: {e}")
+    #     # Ensure a fallback for this responsibility in case of an error
+    #     local_modifications[req_key] = OptimizedText(optimized_text=resp)
+
+    # return (resp_key, validated_modifications)  # Returns a pyd obj
 
 
 def modify_multi_resps_based_on_reqs(

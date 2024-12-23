@@ -23,20 +23,21 @@ This module is intended for applications that require efficient and modular inte
 with multiple LLM providers.
 """
 
+# Built-in & External libraries
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-
-from typing import Union, Optional, Any, cast
+from typing import Union, Optional, cast
 import json
 import logging
+import logging_config
 from pydantic import ValidationError
-from io import StringIO
-import pandas as pd
 
+# LLM imports
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 import ollama  # ollama remains synchronous as there’s no async client yet
 
+# From own modules
 from models.llm_response_models import (
     CodeResponse,
     JSONResponse,
@@ -51,7 +52,7 @@ from utils.llm_api_utils import (
     get_claude_api_key,
     get_openai_api_key,
 )
-from config import (
+from project_config import (
     GPT_35_TURBO,
     GPT_4,
     GPT_4_TURBO,
@@ -61,10 +62,6 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
-
-"""
-
-"""
 
 
 # Helper function to run synchronous API calls in an executor
@@ -138,11 +135,12 @@ async def call_api_async(
         Exception: For other unexpected errors during API interaction.
 
     Notes:
-    - OpenAI returns single-block responses, while Claude may return multi-block responses.
-    - Llama3 API is synchronous and is executed using an async executor. that needs special treatment.
+    - OpenAI & Llama3 always returns single-block responses, while Claude may
+    return multi-block responses, which needs special treatment.
+    - Llama3 API is synchronous and is executed using an async executor.
     #* Therefore, the API calling for each LLM provider need to remain separate:
-    #* Combining them into a single code block will have complications;
-    #* keep them separate here for each provider is a more clean and modular.
+        #* Combining them into a single code block will have complications;
+        #* keep them separate here for each provider is a more clean and modular.
 
     Examples:
     >>> await call_api_async(
@@ -185,7 +183,7 @@ async def call_api_async(
                 temperature=temperature,
             )
 
-            # *Need to add an extra step to extract content from response object's TextBlocks
+            # *Add an extra step to extract content from response object's TextBlocks
             # *(Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
             # *The content attribute of Message is a list of TextBlock objects,
             # *whereas others wrap everything into a single block.)
@@ -194,7 +192,6 @@ async def call_api_async(
                 if hasattr(response.content[0], "text")
                 else str(response.content[0])
             )
-            # logger.info(f"claude api response raw output: {response_content}")
 
         elif llm_provider == "llama3":
             # Llama3 remains synchronous, so run it in an executor

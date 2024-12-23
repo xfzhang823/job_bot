@@ -105,43 +105,37 @@ async def modify_resp_based_on_reqs_async(
         for req_key, req in reqs.items():
             logger.info(f"Modifying responsibility: {resp} \nwith requirement: {req}")
 
-            # Semantic alignment
+            # Step 1: Semantic Alignment
             revised = await text_editor.edit_for_semantics_async(
                 candidate_text=resp, reference_text=req
             )
-            revised_text_1 = revised["optimized_text"]
+            revised_text_1 = revised.data.optimized_text
 
-            # Entailment alignment
+            # Step 2: Entailment Alignment
             revised = await text_editor.edit_for_entailment_async(
                 premise_text=revised_text_1, hypothesis_text=req
             )
-            revised_text_2 = revised["optimized_text"]
+            revised_text_2 = revised.data.optimized_text
 
-            # Dependency Parsing alignment
+            # Step 3: Dependency Parsing Alignment
             revised = await text_editor.edit_for_dp_async(
                 target_text=revised_text_2, source_text=resp
             )
-            revised_text_3 = revised["optimized_text"]
+            revised_text_3 = revised.data.optimized_text
 
             # Store the optimized text
             optimized_text = OptimizedText(optimized_text=revised_text_3)
-            local_modifications[req_key] = optimized_text.model_dump()
+            local_modifications[req_key] = optimized_text
 
         # Wrap the modifications under optimized_by_requirements
         validated_modifications = ResponsibilityMatch(
             optimized_by_requirements=local_modifications
         )
 
-        # Debugging
-        logger.info(f"Before validated by ResponsibilityMatch: \n{local_modifications}")
-        logger.info(
-            f"After ResponsibilityMatch validation: \n{validated_modifications}"
-        )
-
     except Exception as e:
         logger.error(f"Failed to modify responsibility {resp_key}: {e}")
         # Fallback for error cases
-        local_modifications[req_key] = OptimizedText(optimized_text=resp).model_dump()
+        local_modifications[req_key] = OptimizedText(optimized_text=resp)
         validated_modifications = ResponsibilityMatch(
             optimized_by_requirements=local_modifications
         )
@@ -171,15 +165,15 @@ async def modify_multi_resps_based_on_reqs_async(
        text is preserved while aligning it with the job requirement.
 
     Args:
-        -responsibilities (dict): A dictionary of responsibility texts, where keys are
-            unique identifiers and values are the responsibility texts.
-        -requirements (dict): A dictionary of job requirement texts, where keys are unique
-            requirement identifiers and values are the requirement texts.
-        -TextEditor (callable): The class responsible for performing the text modifications.
-        -model (str, optional): The name of the model to be used (e.g., "openai").
-            Defaults to "openai".
-        -model_id (str, optional): The specific model version to be used (e.g., "gpt-3.5-turbo").
-            Defaults to "gpt-3.5-turbo".
+        - responsibilities (dict): A dictionary of responsibility texts, where keys are
+        unique identifiers and values are the responsibility texts.
+        - requirements (dict): A dictionary of job requirement texts, where keys are unique
+        requirement identifiers and values are the requirement texts.
+        - TextEditor (callable): The class responsible for performing the text modifications.
+        - model (str, optional): The name of the model to be used (e.g., "openai").
+        Defaults to "openai".
+        - model_id (str, optional): The specific model version to be used (e.g., "gpt-3.5-turbo").
+        Defaults to "gpt-3.5-turbo".
         -n_jobs (int, optional): The number of parallel jobs to run. Defaults to -1,
             which means using all available processors.
 
