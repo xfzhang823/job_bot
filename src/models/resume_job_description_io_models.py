@@ -21,16 +21,48 @@ import logging_config
 # Set up logger
 logger = logging.getLogger(__name__)
 
+
 # Model to validate the initial output: optimized text for a single responsibility
 # to requirement match
-
-
 class OptimizedText(BaseModel):
+    """
+    Pydantic base model for higher level models such as ResponsibilityMatch.
+
+    Exmaple data:
+        {
+            "optimized_text": "Led strategic initiatives for a leading multinational IT corporation."
+        }
+    """
+
     optimized_text: str
 
 
 # Model to validate the next output: optimized texts for multiple requirements
 class ResponsibilityMatch(BaseModel):
+    """
+    Pydantic model that validates the structure mapping requirement_keys to
+    their corresponding optimized text objects.
+
+    Example Output:
+        A dictionary where:
+        - Keys are `requirement_key`s (e.g., "0.pie_in_the_sky.0").
+        - Values are objects containing the optimized text for the corresponding requirement.
+
+    Structure:
+        {
+            "0.pie_in_the_sky.0": {
+                "optimized_text": "Led strategic initiatives for a leading multinational IT corporation."
+            },
+            "0.pie_in_the_sky.1": {
+                "optimized_text": "Optimized the service partner ecosystem for a major global IT vendor."
+            }
+        }
+
+    Attributes:
+        - optimized_by_requirements (Dict[str, OptimizedText]):
+            A dictionary mapping requirement keys to their corresponding `OptimizedText` objects.
+    """
+
     optimized_by_requirements: Dict[str, OptimizedText]
 
 
@@ -43,8 +75,8 @@ class ResponsibilityMatches(BaseModel):
     their corresponding requirement-based optimized texts. It validates the format of
     nested JSON files where responsibilities map to multiple requirement-based optimizations.
 
-    Main purpose: validate I/O in the resume editing process, and validate responsibilities json files 
-    in iteration 1 and beyond.
+    Main purpose: validate I/O in the resume editing process, and validate responsibilities
+    json files in iteration 1 and beyond.
 
     Structure Overview:
     - At the top level, the keys represent `responsibility_key`s (e.g., "0.responsibilities.0").
@@ -56,27 +88,29 @@ class ResponsibilityMatches(BaseModel):
     {
         "0.responsibilities.0": {
             "0.pie_in_the_sky.0": {
-                "optimized_text": "Led strategic initiatives for a leading multinational IT corporation..."
+                "optimized_text": "Led strategic initiatives for a leading multinational IT
+                corporation..."
             },
             "0.pie_in_the_sky.1": {
-                "optimized_text": "Optimized the service partner ecosystem for a major global IT vendor..."
+                "optimized_text": "Optimized the service partner ecosystem for
+                a major global IT vendor..."
             }
         },
         "0.responsibilities.1": {
             "1.down_to_earth.0": {
-                "optimized_text": "11 years of experience providing strategic insights to a major \
-                    global IT vendor..."
+                "optimized_text": "11 years of experience providing strategic insights
+                to a major global IT vendor..."
             },
             "1.down_to_earth.1": {
-                "optimized_text": "Experience optimizing the service partner ecosystem in \
-                    Asia Pacific..."
+                "optimized_text": "Experience optimizing the service partner ecosystem
+                in Asia Pacific..."
             }
         }
     }
     ```
 
     Attributes:
-    - **responsibilities (Dict[str, ResponsibilityMatch])**:
+    - responsibilities (Dict[str, ResponsibilityMatch]):
         A dictionary where:
         - The keys represent `responsibility_key`s (e.g., "0.responsibilities.0").
         - The values are instances of `ResponsibilityMatch` that contain the
@@ -296,8 +330,8 @@ class JobFileMappings(RootModel[Dict[HttpUrl, JobFilePaths]]):
     Pydantic model for validating a mapping of job URLs to associated file paths for
     requirements, responsibilities, and metrics.
 
-    This model maps job URLs directly to their corresponding file paths without relying on 
-    the `__root__` attribute, using a dictionary structure where job posting URLs are keys, 
+    This model maps job URLs directly to their corresponding file paths without relying on
+    the `__root__` attribute, using a dictionary structure where job posting URLs are keys,
     and the associated file paths are values validated by the `JobFilePaths` model.
 
     Structure Overview:

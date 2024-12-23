@@ -106,6 +106,8 @@ class TextEditor:
         self.max_tokens = max_tokens
         self.client = client  # Store the passed client
 
+        logger.debug(f"Client initialized: {self.client}")  # debugging
+
         # Conditionally initialize the client based on model
         if self.llm_provider == "claude" and not self.client:
             claude_api_key = get_claude_api_key()
@@ -141,7 +143,6 @@ class TextEditor:
         llm_provider: str = "openai",
         temperature: Optional[float] = None,
     ) -> Union[
-        str,
         JSONResponse,
         TabularResponse,
         TextResponse,
@@ -150,157 +151,152 @@ class TextEditor:
         JobSiteResponseModel,
     ]:
         """
-        Call the specified LLM API (OpenAI or LLaMA3) with the provided prompt and return the validated response.
+        Call the specified LLM API (OpenAI, Claude, LLaMA3) with the provided prompt
+        and return the validated response.
 
         Args:
-            prompt (str): The formatted prompt to send to the LLM API.
-            model (str): The model to use for the API call ('openai' or 'llama3').
-            temperature (float, optional): Temperature setting for this specific API call.
-                                        If None, uses the class-level temperature.
+            - prompt (str): The formatted prompt to send to the LLM API.
+            - llm_provider (str): The provider to use for the API call
+            ('openai', 'claude', 'llama3').
+            - temperature (float, optional):
+                Temperature setting for this specific API call.
+                Defaults to the class-level temperature if not provided.
 
         Returns:
-            dict: Validated response data as a dictionary, structured according to the JSON schema.
+            Union[str, JSONResponse, TabularResponse, TextResponse, CodeResponse,
+            EditingResponseModel]:
+                The validated response data as a dictionary or structured Pydantic model.
 
         Raises:
-            ValueError: If the model type is unsupported or if the response does not pass validation.
+            ValueError: If the model type is unsupported or the response
+            does not pass validation.
         """
+        logger.debug(f"Entering call_llm with llm_provider={llm_provider}")
+
+        # Assert that llm_provider is valid
+        assert llm_provider in [
+            "openai",
+            "claude",
+            "llama3",
+        ], f"Unexpected llm_provider: {llm_provider}"
+
         # Set temperature to class default if not provided
         temperature = temperature if temperature is not None else self.temperature
 
+        # Fixed json_type for all methods in TextEditor
+        json_type = "editing"
+
+        logger.debug(f"LLM provider passed to call_llm: {llm_provider}")
+
         # Select the appropriate LLM API call
         if llm_provider == "openai":
-            response_pyd_obj = call_openai_api(
+            logger.debug("Using OpenAI client.")  # debugging
+
+            response_model = call_openai_api(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
+                json_type=json_type,  # Fixed json_type
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, OpenAI) else None,
             )
 
+            logger.debug(
+                f"Response received from call_openai_api: {type(response_model).__name__}"
+            )  # TODO debugging; delete later
+            logger.info(f"returned model: {response_model}")
+
         if llm_provider == "claude":
-            response_pyd_obj = call_claude_api(
+            logger.debug("Using Claude client.")  # debugging
+
+            response_model = call_claude_api(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
+                json_type=json_type,  # Fixed json_type
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, Anthropic) else None,
             )
 
         elif llm_provider == "llama3":
-            response_pyd_obj = call_llama3(
+            logger.debug("Using LLaMA3.")
+
+            response_model = call_llama3(
                 prompt=prompt,
                 expected_res_type="json",
+                json_type=json_type,  # Fixed json_type
                 temperature=temperature,
                 max_tokens=self.max_tokens,
             )
 
         else:
+            logger.error(f"Unsupported model: {llm_provider}")
             raise ValueError(f"Unsupported model: {llm_provider}")
 
-        # Validate the response
-        self.validate_response(response_pyd_obj)
-        # Return the validated response dictionary
-        return response_pyd_obj
-
-    def validate_response(self, response_pyd_obj: Union[BaseModel, dict]) -> None:
-        """
-        Validate the API response (Pydantic model or dictionary) using JSON Schema.
-
-        Args:
-            response_pyd_obj (Union[BaseModel, dict]): The response data, either as a Pydantic model or a dictionary.
-
-        Return: None
-
-        Raises:
-            ValueError: If the response does not match the expected JSON schema.
-        """
-        # Convert Pydantic model to dictionary if needed
-        response_dict = (
-            response_pyd_obj.model_dump()
-            if isinstance(response_pyd_obj, BaseModel)
-            else response_pyd_obj
-        )
-
-        try:
-            # Perform JSON schema validation
-            jsonschema.validate(instance=response_dict, schema=LLM_RES_JSON_SCHEMA)
-            logger.info("JSON schema validation passed.")
-        except ValidationError as e:
-            logger.error(f"JSON schema validation failed: {e}")
-            raise ValueError(f"Invalid JSON format: {e}")
+        return response_model
 
     def edit_for_dp(
         self,
         target_text: str,
         source_text: str,
-        text_id: str = "",
-        model: str = "",
         temperature: Optional[float] = None,
-    ) -> Dict:
+    ) -> EditingResponseModel:
         """
         Re-edit the target text to better align w/t source text's dependency parsing (DP),
         leveraging the OpenAI API.
 
         Example:
         Re-edit revised responsibility to match with the original responsibility text's DP
-        to perserve the tone & style.
+        to preserve the tone & style.
 
         Args:
             - target_text (str): The target text to be transformed (i.e.,
             revised responsibility text).
             - source_text (str): The source text from whose "dependency parsing"
             to be modeled after (i.e., original responsibility text from resume).
-            - model_id (str): OpenAI model to use (default is 'gpt-4').
-            - text_id (str): Identifier of the target text (defaulted to None - unique IDs
-            to be generated by UUID function) (i.e., the responsibility bullet text.)
             - model (str, optional): The model to use for the API call ('openai' or 'llama3').
-            - temperature (float): defaulted to 0.8 (a higher temperature setting is
-            needed to give the model more flexibility/creativity).
+            - temperature (float, optional): Defaults to 0.8 (a higher temperature setting
+            is needed to give the model more flexibility/creativity).
 
             Note:
-            - resp is short for responsibility
-            - req is short for (job) requirement
+            - resp is short for responsibility.
+            - req is short for (job) requirement.
 
         Returns:
-            dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
+            EditingResponseModel: A Pydantic model containing the optimized text.
         """
-        # Generate text id (as unique identifier)
-        text_id = self.generate_text_id(text_id)
+        # Generate a unique text id (preserved for potential future use)
+        text_id = f"{hash(target_text)}_{hash(source_text)}"
         prompt = self.format_prompt(STRUCTURE_TRANSFER_PROMPT, target_text, source_text)
 
-        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        # Call call_llm method to fetch a LLM response (in the form of a Pydantic model)
         response_model = self.call_llm(
             prompt,
-            llm_provider=model if model else self.llm_provider,
+            llm_provider=self.llm_provider,
             temperature=temperature,
         )
 
-        # pyd model -> dictionary
-        if isinstance(response_model, BaseModel):
-            response_dict = response_model.model_dump()
-        else:
-            raise ValueError(
-                "The response model is not a Pydantic model and does not have 'model_dumpt"
-            )
+        # Ensure the response is an instance of EditingResponseModel
+        if not isinstance(response_model, EditingResponseModel):
+            raise ValueError("The response is not an instance of EditingResponseModel.")
 
-        # Combine text_id and response_dict to form a new dictionary
-        result = {"text_id": text_id, **response_dict}
-        logger.info(f"Results updated: \n{result}")
-        return result
+        # Log and return the response model
+        logger.info(
+            f"Dependency Parsing Alignment Result (text_id={text_id}): {response_model}"
+        )
+        return response_model
 
     def edit_for_entailment(
         self,
         premise_text: str,
         hypothesis_text: str,
-        text_id: str = "",
-        model: str = "",
         temperature: Optional[float] = None,
-    ) -> Dict:
+    ) -> EditingResponseModel:
         """
         Re-edit the target text to strengthen its entailment with the source text.
-        Entailment is directional and its order is often the reverse of other comparisons':
+        Entailment is directional and its order is often the reverse of other comparisons:
         - Premise is to be transformed.
         - Hypothesis text serves as the reference and does not change.
 
@@ -308,56 +304,49 @@ class TextEditor:
         Revise responsibility text to match with job description's requirement(s).
 
         Args:
-            - premise (str): the text is to be transformed
-            (the text that serves as the premise (e.g., a claim)).
-            - hypothesis_text (str): The source text to "compare to" (not to be transformed)
-            (the text that serves as the hypothesis (e.g., a follow-up statement).
-            - text_id (str): Identifier of the target text (defaulted to None - unique IDs
-            to be generated by UUID function) (i.e., the responsibility bullet text.)
+            - premise_text (str): The text to be transformed (the premise, e.g., a claim).
+            - hypothesis_text (str): The source text to "compare to" (not to be transformed,
+            e.g., a follow-up statement).
             - model (str, optional): The model to use for the API call ('openai' or 'llama3').
-            - temperature (float): defaulted to 0.8 (a higher temperature setting is
-            needed to give the model more flexibility/creativity).
+            - temperature (float, optional): Defaults to 0.8 (a higher temperature setting
+            is needed to give the model more flexibility/creativity).
 
             Note:
-            - resp is short for responsibility
-            - req is short for (job) requirement
+            - resp is short for responsibility.
+            - req is short for (job) requirement.
 
         Returns:
-            dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
+            EditingResponseModel: A Pydantic model containing the optimized text.
         """
-        # Generate text id (as unique identifier)
-        text_id = self.generate_text_id(text_id)
+        # Generate a unique text id (preserved for potential future use)
+        text_id = f"{hash(premise_text)}_{hash(hypothesis_text)}"
         prompt = self.format_prompt(
             ENTAILMENT_ALIGNMENT_PROMPT, premise_text, hypothesis_text
         )
 
-        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        # Call call_llm method to fetch a LLM response (in the form of a Pydantic model)
         response_model = self.call_llm(
             prompt,
-            llm_provider=model if model else self.llm_provider,
+            llm_provider=self.llm_provider,
             temperature=temperature,
         )
 
-        # pyd model -> dictionary
-        if isinstance(response_model, BaseModel):
-            response_dict = response_model.model_dump()
-        else:
-            raise ValueError(
-                "The response model is not a Pydantic model and does not have 'model_dumpt"
-            )
-        # Combine text_id and response_dict to form a new dictionary
-        result = {"text_id": text_id, **response_dict}
-        logger.info(f"Results updated: \n{result}")
-        return result
+        # Ensure the response is an instance of EditingResponseModel
+        if not isinstance(response_model, EditingResponseModel):
+            raise ValueError("The response is not an instance of EditingResponseModel.")
+
+        # Log and return the response model
+        logger.info(
+            f"Entailment Alignment Result (text_id={text_id}): {response_model}"
+        )
+        return response_model
 
     def edit_for_semantics(
         self,
         candidate_text: str,
         reference_text: str,
-        text_id: str = "",
-        model: str = "",
         temperature: Optional[float] = None,
-    ) -> Dict:
+    ) -> EditingResponseModel:
         """
         Re-edit the target text to better align w/t source text's semantics, leveraging LLMs.
 
@@ -367,94 +356,41 @@ class TextEditor:
         Args:
             - candidate_text (str): The text to be transformed (i.e.,
             revised responsibility text).
-            - reference_text (str): The text to be compared to (not transformed)
-            to be modeled after (i.e., original responsibility text from resume).
-            - text_id (str): Identifier of the target text (defaulted to None - unique IDs
-            to be generated by UUID function) (i.e., the responsibility bullet text.)
+            - reference_text (str): The text to be compared to (not transformed,
+            e.g., original responsibility text from resume).
             - model (str, optional): The model to use for the API call ('openai' or 'llama3').
-            - temperature (float): defaulted to 0.8 (a higher temperature setting is
-            needed to give the model more flexibility/creativity).
+            - temperature (float, optional): Defaults to 0.8 (a higher temperature setting
+            is needed to give the model more flexibility/creativity).
 
             Note:
-            - resp is short for responsibility
-            - req is short for (job) requirement
+            - resp is short for responsibility.
+            - req is short for (job) requirement.
 
         Returns:
-            dict: A dictionary in the format of {'text_id': "...", 'optimized_text': "..."}.
+            EditingResponseModel: A Pydantic model containing the optimized text.
         """
-        # Generate text id (as unique identifier)
-        text_id = self.generate_text_id(text_id)
+        # Generate a unique text id (preserved for potential future use)
+        text_id = f"{hash(candidate_text)}_{hash(reference_text)}"
         prompt = self.format_prompt(
             SEMANTIC_ALIGNMENT_PROMPT, candidate_text, reference_text
         )
 
-        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
+        # Call call_llm method to fetch a LLM response (in the form of a Pydantic model)
         response_model = self.call_llm(
             prompt,
-            llm_provider=model if model else self.llm_provider,
+            llm_provider=self.llm_provider,
             temperature=temperature,
         )
 
-        # pyd model -> dictionary
-        if isinstance(response_model, BaseModel):
-            response_dict = response_model.model_dump()
-        else:
-            raise ValueError(
-                "The response model is not a Pydantic model and does not have 'model_dumpt"
-            )
-
-        # Combine text_id and response_dict to form a new dictionary
-        result = {"text_id": text_id, **response_dict}
-        logger.info(f"Results updated: \n{result}")
-        return result
-
-    def edit_for_semantics_and_entailment(
-        self,
-        candidate_text: str,
-        reference_text: str,
-        text_id: str = "",
-        model: str = "",
-        temperature: Optional[float] = None,
-    ) -> Dict:
-        """
-        Re-edit the target text to better align w/t source text's semantics and strengthen
-        the entailment relationships between the two texts, leveraging LLMs.
-
-        Args:
-            - candidate_text (str): Original text to be transformed by the model
-            (i.e., the riginal responsibility text to be revised.)
-            - reference_text (str): Text that the candidate text is being compared to
-            (i.e., requirement text to optimize against.)
-            - text_id (int): (Optional) Identifier for the responsibility text.
-            Default to None (unique ids to be generated with UUID function)
-            - model (str, optional): The model to use for the API call ('openai' or 'llama3').
-            - temperature (float, optional): Temperature setting for this specific call.
-
-        Returns:
-            dict: Contains 'text_id' and 'optimized_text' after revision.
-        """
-        # Generate text id (as unique identifier)
-        text_id = self.generate_text_id(text_id)
-        prompt = self.format_prompt(
-            SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT, candidate_text, reference_text
+        # Debugging
+        logger.debug(
+            f"Response model type in edit_for_semantics: {type(response_model).__name__}"
         )
 
-        # Call call_llm method to fetch a LLM response (in the form of a pyd model)
-        response_model = self.call_llm(
-            prompt,
-            llm_provider=model if model else self.llm_provider,
-            temperature=temperature,
-        )
+        # Ensure the response is an instance of EditingResponseModel
+        if not isinstance(response_model, EditingResponseModel):
+            raise ValueError("The response is not an instance of EditingResponseModel.")
 
-        # pyd model -> dictionary
-        if isinstance(response_model, BaseModel):
-            response_dict = response_model.model_dump()
-        else:
-            raise ValueError(
-                "The response model is not a Pydantic model and does not have 'model_dumpt"
-            )
-
-            # Combine text_id and response_dict to form a new dictionary
-        result = {"text_id": text_id, **response_dict}
-        logger.info(f"Results updated: \n{result}")
-        return result
+        # Log and return the response model
+        logger.info(f"Semantic Alignment Result (text_id={text_id}): {response_model}")
+        return response_model

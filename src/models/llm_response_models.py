@@ -27,6 +27,8 @@ class BaseResponseModel(BaseModel):
 
     Config:
         arbitrary_types_allowed (bool): Allows non-standard types like pandas DataFrame.
+
+    *Allows validation functions to add status and message easily!
     """
 
     status: str = "success"
@@ -126,24 +128,13 @@ class CodeResponse(BaseResponseModel):
         }
 
 
-# class EditingData(BaseModel):
-#     """
-#     Inner model for editing responses, specifically for optimized text.
-
-#     Attributes:
-#         optimized_text (str): The optimized text produced by an editing operation.
-#     """
-
-#     optimized_text: str
-
-
 class OptimizedTextData(BaseModel):
     """Inner model to specify required 'optimized_text' field."""
 
     optimized_text: str = Field(..., description="The optimized text after editing.")
 
 
-class EditingResponseModel(BaseModel):
+class EditingResponseModel(BaseResponseModel):
     """
     Model for responses involving text editing operations.
 
@@ -163,45 +154,23 @@ class EditingResponseModel(BaseModel):
         }
 
 
-# class EditingResponseModel(JSONResponse):
-#     """
-#     Simplified model for responses involving text editing operations.
-
-#     Attributes:
-#         data (Dict[str, str]): A dictionary with `optimized_text` key and string value.
-#     """
-
-#     data: Dict[
-#         str, str
-#     ]  # Simplify to contain just "optimized_text" as a string in the data
-
-#     class Config:
-#         json_schema_extra = {
-#             "example": {
-#                 "status": "success",
-#                 "message": "Text editing processed successfully.",
-#                 "data": {"optimized_text": "This is the optimized text after editing."},
-#             }
-#         }
-
-
 class JobSiteData(BaseModel):
     """
     Inner model containing detailed job site information.
 
     Attributes:
-        url (Optional[str]): The URL of the job posting.
-        job_title (Optional[str]): Title of the job position.
-        company (Optional[str]): Name of the company posting the job.
+        url (str): The URL of the job posting (required).
+        job_title (str): Title of the job position (required).
+        company (str): Name of the company posting the job (required).
         location (Optional[str]): Job location.
         salary_info (Optional[str]): Salary information, if available.
         posted_date (Optional[str]): Date when the job was posted.
         content (Optional[Dict[str, Any]]): Contains the job description, responsibilities, and qualifications as a dictionary.
     """
 
-    url: Optional[str] = Field(None, description="Job posting URL")
-    job_title: Optional[str] = Field(None, description="Job title")
-    company: Optional[str] = Field(None, description="Company name")
+    url: str = Field(..., description="Job posting URL")
+    job_title: str = Field(..., description="Job title")
+    company: str = Field(..., description="Company name")
     location: Optional[str] = Field(None, description="Job location")
     salary_info: Optional[str] = Field(None, description="Salary information")
     posted_date: Optional[str] = Field(None, description="Job posting date")

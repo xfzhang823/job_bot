@@ -1,6 +1,6 @@
 """
 Filename: webpage_reader_async.py
-Last updated: 2024 Aug 26
+Last updated: 2024 Dec
 
 Description: Utilities functions to read and/or summarize webpage(s).
 
@@ -80,10 +80,15 @@ async def load_webpages_with_playwright_async(
                 logger.debug(f"Raw content from Playwright for {url}: {content}\n")
                 if content and content.strip():
                     clean_content = clean_webpage_text(content)
-                    content_dict[url] = clean_content
+                    content_dict[url] = {
+                        "url": url,
+                        "content": clean_content,
+                    }  # include url (needed for later parsing by LLM)
+
                     logger.info(
                         f"Playwright successfully processed content for {url}\n"
                     )
+
                 else:
                     logger.error(f"No content extracted for {url}\n")
                     failed_urls.append(url)
@@ -98,7 +103,7 @@ async def load_webpages_with_playwright_async(
     return content_dict, failed_urls  # Return both the content and the failed URLs
 
 
-async def read_webpages(urls: List[str]) -> Tuple[Dict[str, str], List[str]]:
+async def read_webpages_async(urls: List[str]) -> Tuple[Dict[str, str], List[str]]:
     """
     Extract and clean text content from one or multiple webpages using Playwright.
 
@@ -152,7 +157,7 @@ async def convert_to_json_with_gpt_async(
     logger.info(f"Prompt to convert job posting to JSON format:\n{prompt}")
 
     # Call the async OpenAI API
-    response_pyd_obj = await call_openai_api_async(
+    response_model = await call_openai_api_async(
         prompt=prompt,
         model_id=model_id,
         expected_res_type="json",
@@ -160,10 +165,10 @@ async def convert_to_json_with_gpt_async(
         temperature=temperature,
         max_tokens=2000,
     )
-    logger.info(f"Raw LLM Response: {response_pyd_obj}")
+    logger.info(f"Validated LLM Response Model: {response_model}")
 
     # Validate that the response is in the expected JobSiteResponseModel format
-    if not isinstance(response_pyd_obj, JobSiteResponseModel):
+    if not isinstance(response_model, JobSiteResponseModel):
         logger.error(
             "Received response is not in expected JobSiteResponseModel format."
         )
@@ -172,11 +177,11 @@ async def convert_to_json_with_gpt_async(
         )
 
     # Return the model-dumped dictionary (from Pydantic obj to dict)
-    return response_pyd_obj.model_dump()
+    return response_model.model_dump()
 
 
 # TODO: Need to integrate call llama-3 into this function later on...
-# TODO: llama3 has a context window issue.
+# TODO: llama3 has a context window issue (requires chunking first...)
 async def process_webpages_to_json_async(urls: List[str]) -> Dict[str, Dict[str, Any]]:
     """
     Read webpage content, convert to JSON asynchronously using GPT, and return the result.
@@ -197,7 +202,7 @@ async def process_webpages_to_json_async(urls: List[str]) -> Dict[str, Dict[str,
     if isinstance(urls, str):
         urls = [urls]
 
-    webpages_content, failed_urls = await read_webpages(urls)
+    webpages_content, failed_urls = await read_webpages_async(urls)
     json_results = {}
 
     for url, content in webpages_content.items():
@@ -216,7 +221,7 @@ async def process_webpages_to_json_async(urls: List[str]) -> Dict[str, Dict[str,
 
 
 def save_webpage_content(
-    content_dict: Dict[str, str],
+    content_dict: Union[Dict[str, str], Dict[str, Dict[str, Any]]],
     file_path: Union[Path, str],
     file_format: Literal["json", "txt"],
 ) -> None:
@@ -224,7 +229,8 @@ def save_webpage_content(
     Save the output content to a file in either txt or json format.
 
     Args:
-        - content_dict (Dict[str, str]): A dictionary with URLs as keys and content as values.
+        - content_dict (Union[Dict[str, str], Dict[str, Dict[str, Any]]]):
+        A dictionary with URLs as keys and content as values.
         - file_path (Union[Path, str]): The file path where the content should be saved.
         - file_format (Literal["json", "txt"]): The format to save the content as,
         either "json" or "txt".

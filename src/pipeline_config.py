@@ -1,7 +1,7 @@
 # pipeline_config.py
 
 from enum import Enum
-from config import (
+from project_config import (
     resume_json_file,
     job_posting_urls_file,
     job_descriptions_json_file,
@@ -32,7 +32,7 @@ from config import (
     PRUNED_RESPS_FILES_ITERATE_1_CLAUDE_DIR,
 )
 
-from config import (
+from project_config import (
     GPT_35_TURBO,
     GPT_35_TURBO_16K,
     GPT_4,

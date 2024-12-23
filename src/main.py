@@ -7,7 +7,7 @@ from pipelines.run_pipelines import (
     run_pipeline_async,
 )
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-from config import CLAUDE_SONNET
+from project_config import CLAUDE_SONNET
 
 # Set up logger
 logger = logging.getLogger(__name__)
