@@ -15,7 +15,9 @@ from utils.get_file_names import get_file_names
 logger = logging.getLogger(__name__)
 
 
-def add_to_json_file(new_data: Union[list, dict], file_path: str, key: str = None):
+def add_to_json_file(
+    new_data: Union[list, dict], file_path: Union[Path, str], key: str = ""
+):
     """
     Adds or updates data in a master JSON file.
 
@@ -31,6 +33,7 @@ def add_to_json_file(new_data: Union[list, dict], file_path: str, key: str = Non
     """
     try:
         # Load existing data from the file
+        file_path = Path(file_path)  # Ensure file_path ends up as a Path obj.
         with open(file_path, "r", encoding="utf-8") as f:
             master_data = json.load(f)
 
