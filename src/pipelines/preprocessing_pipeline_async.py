@@ -90,7 +90,9 @@ def extract_flatten_resps_and_reqs(resume_json_file, requirements_json_file):
 
     # Parse and flatten job requirements (as a dict) or
     # parse/flatten/conncactenate into a single string
-    job_reqs_parser = JobRequirementsParser(requirements_json_file)
+    job_reqs_parser = JobRequirementsParser(
+        requirements_json_file
+    )  # todo: missing url parameter
     reqs_flat = job_reqs_parser.extract_flatten_reqs()  # extract as a dict
 
     logger.info("Responsibilities and requirements extracted and flatted.")
@@ -98,7 +100,7 @@ def extract_flatten_resps_and_reqs(resume_json_file, requirements_json_file):
 
 
 async def run_pipeline_async(
-    job_description_url: list,
+    job_description_url: list,  # todo: this typing seems to be wrong - should be fixed!
     job_descriptions_json_file: Union[Path, str],
     requirements_json_file: Union[Path, str],
 ):
