@@ -96,12 +96,12 @@ def run_pipeline(
     processes and configurations, promoting modularity and reusability.
 
     Args:
-        pipeline_id (str): The identifier of the pipeline to execute. This ID is used to look up
-            the configuration and function name in `PIPELINE_CONFIG`.
-        llm_provider (str): The LLM provider to use, typically `"openai"` or `"claude"`.
-            Defaults to `"openai"`.
-        model_id (str, optional): The specific model ID to use. If `None`, the function uses a default
-            based on `llm_provider` or the pipeline configuration.
+        - pipeline_id (str): The identifier of the pipeline to execute. This ID is used to look up
+        the configuration and function name in `PIPELINE_CONFIG`.
+        - llm_provider (str): The LLM provider to use, typically `"openai"` or `"claude"`.
+        Defaults to `"openai"`.
+        - model_id (str, optional): The specific model ID to use. If `None`, the function uses
+        a default based on `llm_provider` or the pipeline configuration.
 
     Raises:
         FileNotFoundError: If required input/output configurations are missing for the specified
@@ -125,7 +125,7 @@ def run_pipeline(
 
         Then, to run this pipeline with OpenAI as the provider and a specific model:
 
-            run_pipeline("3b", llm_provider="openai", model_id="gpt-4-turbo")
+        *    run_pipeline("3b", llm_provider="openai", model_id="gpt-4-turbo")
 
         This will execute `run_resume_editing_pipeline` with the following arguments:
         - `mapping_file_prev` (from `io_config`)
