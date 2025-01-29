@@ -2,11 +2,25 @@
 
 # prompt_bank.py
 
-CLEAN_JOB_PAGE_PROMPT = """task: keep content related to job roles, such as "About Us" sections, company descriptions, job responsibilities, job descriptions, requirements, qualifications, benefits, salary information, and company details. Remove any content that does not fall under these categories.
-content: {content}
-response format: text
-return: filtered content only; do not include explanation
+CLEAN_JOB_PAGE_PROMPT = """
+Task: Filter job posting content to retain only the following elements:
+- About Us / Company descriptions
+- Job titles and descriptions
+- Core responsibilities
+- Required qualifications
+- Benefits and compensation
+- Company details and information
+
+Content: {content}
+
+Instructions:
+- Remove all content not related to the categories above
+- Return only the filtered text
+- Do not include explanations or annotations
+
+Format: Plain text output
 """
+
 
 # !You need to use Escaping Curly Braces, "{{ }}", for JSON output examples!
 # !When use .format() method in Python strings, any curly braces {} in the string
@@ -61,7 +75,12 @@ Extract all job-relevant information, but exclude website-specific content and g
 """
 
 EXTRACT_JOB_REQUIREMENTS_PROMPT = """
-As a job description analyzer, extract and categorize qualifications, responsibilities, skills, and other criteria from the following job description. Include technical and soft skills, educational and experience requirements, and cultural fit aspects.
+As a job description analyzer, extract and categorize qualifications, responsibilities, skills, and other criteria from \
+the following job description. 
+Ensure to:
+- Include technical and soft skills, educational and experience requirements, and cultural fit aspects.
+- Exclude any content related to benefits, perks, or compensation (e.g., health insurance, remote work options, \
+401(k) matching, paid time off, bonuses, stock options).
 
 **Job Description:**
 {content}
@@ -227,8 +246,16 @@ Return only the JSON block without any additional text, explanations, or markdow
 STRUCTURE_TRANSFER_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Analyze the **source text** at a high level.
-2. Apply the **source text's** sentence structure or syntactic dependencies to the **target text**, ensuring that the original meaning of the **target text** is preserved as much as possible.
-3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+2. Apply the **source text's** sentence structure or syntactic dependencies to the **target text**, ensuring \
+that the original meaning of the **target text** is preserved as much as possible.
+3. If the source text has an active tone, retain it. Use strong action verbs such as 'led,' 'managed,' 'developed,' \
+'executed,' etc., and explicitly avoid role-based constructions like 'professional who is,' 'was involved in,' or \
+'held a position of.' Instead, focus on action-based descriptions that highlight what was achieved or done, \
+such as 'led a team,' 'implemented strategies,' or 'drove improvements.'
+3. Do not copy specific experience durations directly from the reference text \
+(e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). \
+Instead, express relevant experience in more general terms or use ranges that encompass the candidate's \
+actual experience.
 
 **Target Text:**
 "{content_1}"
@@ -250,7 +277,9 @@ Return only the JSON block without any additional text, explanations, or markdow
 MATCHING_KEYWORDS_AGAINST_TEXT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Given the following **resume keywords** in JSON, extract keywords from the {content_1} sections.
-2. Match these extracted keywords with the **job description** in JSON provided below, replace or modify the **resume keywords** if they are similar to **job description keywords**, and then prioritize them based on their importance to the job description.
+2. Match these extracted keywords with the **job description** in JSON provided below, replace or modify \
+the **resume keywords** if they are similar to **job description keywords**, and then prioritize them based on \
+their importance to the job description.
 
 **Resume keywords** in JSON:
 {content_2}

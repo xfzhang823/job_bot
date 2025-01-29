@@ -1,0 +1,441 @@
+Table Parsing Made Simple with Homegrown Neural Networks - Part 4: Training Pipeline Coding Insights
+Introduction
+Modular code design is the backbone of scalable machine learning pipelines.
+This article explores:
+•	The coding aspect of the training pipeline: how modularity shapes key components like embedding generation, model training, and evaluation.
+•	Training results and analysis, with insights into model performance and areas for improvement.
+________________________________________
+Quick Outline
+1.	Recap of Previous Articles: A brief overview of topics covered, from structured data preprocessing to neural network training.
+2.	Key Components of the Training Pipeline: Modular structure of the pipeline, with each file and function serving a distinct purpose.
+3.	Embedding Generation: Using BERT for contextual embeddings, dynamic batching, and precomputing for efficiency.
+4.	Training Process: Addressing class imbalance, leveraging Adam for optimization, and integrating early stopping.
+5.	Evaluation: Generating confusion matrices and classification reports to assess performance.
+6.	What’s Next: A teaser for the inference pipeline and its integration with the training workflow.
+________________________________________
+Recap of Previous Articles
+•	Article 1: Provided an overview of the pipeline, emphasizing the importance of structured tabular data and the role of preprocessing in preparing datasets for machine learning tasks.
+•	Article 2: Explored preprocessing techniques in detail, comparing asynchronous processing and multithreading approaches for handling large datasets efficiently.
+•	Article 3: Focused on the mathematical intuition and core concepts behind training a neural network, covering techniques like dropout, L2 regularization, and class weighting for robust model performance.
+________________________________________
+Key Components of the Training Pipeline
+Training Pipeline Overview
+Here's a breakdown of its core components:
+•	training_utils.py: Provides essential utility functions for data batching, generating embeddings, and managing the training process. It ensures efficient handling of data while preserving table and group integrity.
+•	simple_nn.py: Defines the neural network architecture with four hidden layers, incorporating dropout and L2 regularization to prevent overfitting.
+•	train_model.py: The primary script for training, integrating batching, feature embeddings, class weighting for imbalanced datasets, and early stopping to optimize model performance.
+•	evaluate_model.py: Handles model evaluation, including computing metrics like accuracy/recall and confusion matrices for detailed performance insights.
+•	training_pipeline.py: Orchestrates the entire training workflow, from loading data to saving the trained model and evaluation results.
+________________________________________
+Code Workflow
+Below is a detailed workflow of how the training pipeline operates, starting from the main script and flowing through the pipeline.
+Workflow Diagram:
+
+
+Main Entry Point (main.py) calls the run_training_pipeline function.
+Training Pipeline (training_pipeline.py)
+Step 1: Load & Prepare Data 
+Reads and preprocesses training data, applying batching and embedding generation using tools from helper module, training_utils.py.
+Step 2: Model Initialization 
+Loads the SimpleNN architecture from simple_nn.py with the appropriate input dimension and hidden layers.
+Step 3: Training 
+Executes the training process using train_model.py, which handles:
+•	Dynamic batching and embeddings (the most computationally heavy part of the project.)
+•	Class weighting for imbalanced datasets.
+•	Early stopping based on validation performance.
+Step 4: Evaluation Evaluates the trained model with evaluate_model.py, including detailed confusion matrix analysis.
+Step 5: Save Results Saves the trained model, embeddings, evaluation metrics, and other artifacts for reuse in inference or further analysis.
+________________________________________
+Heads-Up on PyTorch and CUDA Setup on Local Machine
+The code examples in this section are simplified for demonstration purposes only. For the full implementation, please refer to the GitHub Repo.
+Heads-Up on PyTorch and CUDA Setup
+Before diving into the code, ensure your GPU is properly set up to handle computationally intensive tasks like embedding generation. Using a GPU significantly accelerates these operations, but setting up PyTorch with CUDA can be tricky due to version mismatches between PyTorch, CUDA toolkit, and NVIDIA drivers.
+What is CUDA?
+CUDA (Compute Unified Device Architecture) is NVIDIA’s platform that enables GPUs to handle complex computations efficiently, essential for deep learning tasks like matrix operations and neural network training.
+Avoiding Common Setup Issues
+1.	Check Compatibility: Refer to the PyTorch installation page to ensure your PyTorch and CUDA versions align.
+2.	Verify GPU and Drivers: Ensure your GPU supports the required CUDA version and that your drivers are up-to-date.
+3.	Test GPU Availability: Confirm PyTorch can detect your GPU: import torch print(torch.cuda.is_available()) # Should return True
+Using CUDA in PyTorch
+Set up your device to prioritize GPU over CPU:
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+Remember, data does not move between CPU and GPU automatically. You need to move data back to CPU from GPU sometimes (i.e. doing analysis.)
+output = model(input_data)  # Runs on GPU
+output = output.cpu()       # Moves output to CPU
+output_numpy = output.numpy()  # Converts to NumPy array
+
+________________________________________
+Neural Network Design (simple_nn.py)
+The code examples in this section are simplified for demonstration purposes only. For the full implementation, please refer to the GitHub Repo.
+The neural network is a fully connected model designed to classify text embeddings with positional and logical features. 
+It is only responsible for the computation of passing data through each neural layer. Back prorogation is handled by the optimizer.
+The architecture includes:
+•	Four Hidden Layers: Dynamically defined using hidden_dims = [128, 64, 32, 16].
+•	Dropout and L2 Regularization: To prevent overfitting by randomly disabling neurons and penalizing large weights.
+•	Customizable Design: Allows easy adjustment of input size (input_dim) and regularization strength (l2_lambda).'
+Below is a simplified version of the model code:
+import torch
+import torch.nn as nn
+
+class SimpleNN(nn.Module):
+    def __init__(self, input_dim, hidden_dims=[128, 64, 32, 16], l2_lambda=0.01):
+        super(SimpleNN, self).__init__()
+        self.hidden_layers = nn.ModuleList()
+        self.l2_lambda = l2_lambda
+
+        # Define hidden layers
+        prev_dim = input_dim
+        for hidden_dim in hidden_dims:
+            self.hidden_layers.append(nn.Linear(prev_dim, hidden_dim))
+            prev_dim = hidden_dim
+
+        # Define output layer
+        self.output_layer = nn.Linear(prev_dim, 5)  # 5 classes
+
+        # Activation and dropout
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        for layer in self.hidden_layers:
+            x = self.relu(layer(x))
+            x = self.dropout(x)
+        return self.output_layer(x)
+
+    def get_l2_regularization_loss(self):
+        return self.l2_lambda * sum(torch.norm(param) for param in self.parameters())
+________________________________________
+Embedding Generation
+The code examples in this section are simplified for demonstration purposes only. For the full implementation, please refer to the GitHub Repo.
+I used BERT (a transformer model) for embedding. BERT embeddings, not only transforms words into vector space, but also capture contextual relationships between the words. It can be very slow. To compensate this, I used the following to optimize performance:
+•	Dynamic Batching ensures table integrity by grouping rows from the same table while limiting batch sizes to fit GPU memory.
+•	Parallel Processing accelerates embedding generation by processing multiple large batches concurrently.
+•	Precomputing and Saving Embeddings avoids redundant computations, enabling reusability for both training and inference.
+________________________________________
+Dynamic Batching
+•	Large Batch Processing: Groups tables into batches while preserving table integrity (no rows from the same table are split across batches). The large batch size is 128 rows.
+•	Small Batch Processing: For actual embedding generation, the batch size must be kept small to avoid memory overload. To achieve this, each large batch is divided into smaller sub-batches, with each sub-batch processing only 32 rows at a time.
+Simplified Code for Dynamic Batching
+def dynamic_batch_processing(df, process_batch, batch_size=128):
+    grouped = df.groupby("group")  # Group by table to preserve integrity
+    results = []
+    current_batch = []
+    current_batch_size = 0
+
+    for group_name, group_data in grouped:
+        current_batch.append(group_data)
+        current_batch_size += len(group_data)
+
+        # If batch size exceeds the limit, process it
+        if current_batch_size >= batch_size:
+            batch_df = pd.concat(current_batch)
+            results.append(process_batch(batch_df))  # Process the batch
+            current_batch = []
+            current_batch_size = 0
+
+    # Process any remaining data
+    if current_batch:
+        batch_df = pd.concat(current_batch)
+        results.append(process_batch(batch_df))
+
+    return results
+
+________________________________________
+Embedding Generation
+•	Embedding Generation: Tokenize text data and use BERT to generate embeddings in small batches (32 rows at a time).
+•	Feature Enrichment: Combine BERT embeddings with additional features (row_id, is_title).
+Code for Embedding Generation
+from transformers import BertTokenizer, BertModel
+import torch
+import numpy as np
+
+def process_batch(batch_df):
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    bert_model = BertModel.from_pretrained("bert-base-uncased").to(device)
+
+    # Tokenize text and split into small sub-batches
+    inputs = tokenizer(batch_df["text"].tolist(), padding=True, truncation=True, return_tensors="pt").to(device)
+    small_batch_size = 32
+    embeddings = []
+
+    for i in range(0, len(inputs["input_ids"]), small_batch_size):
+        batch_inputs = {k: v[i : i + small_batch_size].to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            outputs = bert_model(**batch_inputs)
+            embeddings.append(outputs.last_hidden_state.mean(dim=1).cpu().numpy())
+
+    # Combine embeddings
+    embeddings = np.vstack(embeddings)
+
+    # Add additional features
+    row_ids = batch_df["row_id"].values[:, None]
+    is_title = batch_df["is_title"].map({"yes": 1, "no": 0}).values[:, None]
+    final_features = np.concatenate([embeddings, row_ids, is_title], axis=1)
+
+    return final_features
+
+________________________________________
+Precompute and Save Embeddings
+I precomputed embeddings for the entire dataset, which includes both the training and inference datasets. This approach ensures efficiency and reusability across both stages of the pipeline.
+Code for Saving Embeddings
+import pickle
+
+def save_embeddings(embeddings, labels, path):
+    with open(path, "wb") as f:
+        pickle.dump({"embeddings": embeddings, "labels": labels}, f)
+    print(f"Embeddings saved to {path}")
+________________________________________
+Training Process
+After embedding, the data is split into train and test dataset (most are familiar with the concept, I will not explain it here.)
+Class Weight Redistribution
+The dataset is imbalanced, with many rows labeled as table_data but very few labeled as metadata. This is a common issue in machine learning. For example, in IT helpdesk or IT security-related applications, failure event data is often too sparse, making it challenging to classify and predict future failures.
+To address this imbalance, weights are redistributed inversely proportional to class frequencies. These weights are passed to the loss function, ensuring underrepresented classes (e.g., metadata) are prioritized during training.
+PyTorch doesn’t provide a direct method to calculate class weights automatically from class counts. Libraries like sklearn offer automated methods, such as oversampling or undersampling, which modify the dataset by adding or removing samples. However, I prefer to maintain the integrity of the dataset and manually adjust weights to modify the cost function instead.
+# Step 1: Example class counts (manually provided or calculated from the dataset)
+class_counts = torch.tensor([500, 100, 20, 80, 300], dtype=torch.float32).to(device)  # Example counts
+total_samples = class_counts.sum()  # Total number of samples
+num_classes = len(class_counts)  # Number of classes
+
+# Step 2: Compute class weights
+class_weights = total_samples / (num_classes * class_counts)
+print("Class Weights:", class_weights)
+
+# Step 3: Define the loss function with manual weights
+criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+Note on penalty in the cost function:
+In imbalanced datasets, the penalty concept ensures the model pays more attention to underrepresented classes by assigning them higher weights in the loss function. When the model misclassifies a minority class (e.g., metadata), it incurs a larger penalty compared to errors on majority classes like table_data.
+Example: 
+Imagine grading two classrooms:
+•	Class 1: 100 students, where 95 passed (majority).
+•	Class 2: 5 students, where 3 failed (minority).
+Without balancing, Class 1 would dominate the grading focus, ignoring Class 2. By assigning higher penalties to Class 2’s errors, both classrooms are treated fairly, ensuring no group is overlooked.
+________________________________________
+Optimizer 
+The Adam optimizer is the backbone of the backpropagation process, which is essential for model learning. During backpropagation, the gradients of the loss function (in this case, cross-entropy loss) are computed with respect to the model’s parameters, such as weights and biases. These gradients indicate how much each parameter contributes to the loss and, consequently, how they should be adjusted to reduce it.
+Adam steps in after the gradients are calculated. It applies these gradients to update the parameters in a way that balances speed and stability. Adam dynamically adjusts the learning rate for each parameter based on past updates and gradient magnitudes, making it well-suited for deep neural networks.
+Here’s how the optimizer integrates into the training loop:
+# Initialize loss function and optimizer
+criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  # Adjust for class imbalance
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # Dynamically adjust learning rates
+
+# Training loop
+for epoch in range(num_epochs):
+    optimizer.zero_grad()  # Clear previous gradients
+    outputs = model(X_train)  # Forward pass to compute predictions
+    loss = criterion(outputs, y_train)  # Compute cross-entropy loss
+    loss.backward()  # Compute gradients through backpropagation
+    optimizer.step()  # Update model parameters
+
+Adam learns patterns from the data while mitigating issues like sparse gradients or noisy updates. 
+Note: Adam stands for Adaptive Moment Estimation, and cross-entropy measures how well predicted probabilities align with true class labels, penalizing incorrect or low-confidence predictions. Both Adam and cross-entropy are popular go-to techniques in deep learning because they are relatively simple to set up and surprisingly effective.
+________________________________________
+Training Loop
+The training process is computationally "light." The pipeline processes the entire dataset, skipping batching. 
+Key Steps in the Training Loop
+1.	Full Dataset Training: The entire training dataset is processed in one step during each epoch, ensuring straightforward gradient computation and parameter updates.
+2.	Forward and Backward Pass: The model computes predictions and calculates the total loss, which includes both cross-entropy and L2 regularization. Gradients are then calculated and applied to update the model parameters.
+3.	Validation and Early Stopping: After each epoch, the model's performance is evaluated on the validation set. Early stopping monitors validation loss and halts training if no improvement is detected, saving the best-performing model.
+# Training configuration
+num_epochs = 10
+patience, no_improvement = 3, 0
+best_val_loss = float("inf")
+
+# Training loop
+for epoch in range(num_epochs):
+    model.train()
+    optimizer.zero_grad()
+
+    # Forward pass
+    outputs = model(X_train)
+    loss = criterion(outputs, y_train)
+    l2_loss = model.get_l2_regularization_loss()
+    total_loss = loss + l2_loss
+
+    # Backward pass and optimization
+    total_loss.backward()
+    optimizer.step()
+
+    # Validation
+    model.eval()
+    with torch.no_grad():
+        val_outputs = model(X_val)
+        val_loss = criterion(val_outputs, y_val)
+
+    # Early stopping
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        no_improvement = 0
+        torch.save(model.state_dict(), "best_model.pth")
+        print(f"Epoch {epoch+1}: Validation loss improved to {val_loss:.4f}. Model saved.")
+    else:
+        no_improvement += 1
+        if no_improvement >= patience:
+            print(f"Early stopping at epoch {epoch+1}. No improvement for {patience} epochs.")
+            break
+
+    # Print training and validation loss
+    print(f"Epoch {epoch+1}: Training Loss = {total_loss.item():.4f}, Validation Loss = {val_loss.item():.4f}")
+The logic behind the training loop is simple compared to embedding, regularization, optimizer, and other core concepts. But it takes attention to details. The process is mainly controlled by these three:
+Batch Size
+•	Definition: Number of samples used to update model weights.
+•	Too High: Overfits, requires excessive computational resources.
+•	Too Low: Noisy gradients, slow convergence.
+Epochs
+•	Definition: Number of complete passes through the training dataset.
+•	Too High: Overfits, computationally wasteful.
+•	Too Low: Underfits, suboptimal performance.
+Learning Rate
+•	Definition: Rate at which model weights are updated.
+•	Too High: Overshoots, diverges, or converges slowly.
+•	Too Low: Converges slowly, gets stuck in local minima.
+________________________________________
+Evaluation with Confusion Matrix and Report
+The training pipeline integrates a confusion matrix and evaluation report to analyze the model's performance. This process persists the results to disk.
+Simplified Code: Generating the Evaluation Report
+import torch
+import pandas as pd
+import altair as alt
+from sklearn.metrics import confusion_matrix, classification_report
+
+# Step 1: Load the testing file
+test_data_path = "path/to/test_data.pth"  # Replace with your actual test data path
+test_data = torch.load(test_data_path)
+
+X_test = torch.tensor(test_data["X_test"])
+y_test = torch.tensor(test_data["y_test"])
+class_names = ["table_data", "title", "metadata", "header", "empty"]
+
+# Step 2: Model prediction
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = SimpleNN(test_data["input_dim"]).to(device)  # Initialize model with input dimension
+model.load_state_dict(torch.load("path/to/model.pth"))  # Load trained model
+model.eval()
+
+with torch.no_grad():
+    outputs = model(X_test.to(device))
+y_pred = torch.argmax(outputs, dim=1).cpu().numpy()
+y_test = y_test.numpy()
+
+# Step 3: Generate confusion matrix
+cm = confusion_matrix(y_test, y_pred, labels=range(len(class_names)))
+cm_df = pd.DataFrame(cm, columns=class_names, index=class_names).reset_index().melt(id_vars="index")
+cm_df.columns = ["Actual", "Predicted", "Count"]
+
+# Altair visualization for confusion matrix
+confusion_chart = (
+    alt.Chart(cm_df)
+    .mark_rect()
+    .encode(
+        x=alt.X("Predicted:N", title="Predicted Class"),
+        y=alt.Y("Actual:N", title="Actual Class"),
+        color=alt.Color("Count:Q", scale=alt.Scale(scheme="blues")),
+        tooltip=["Actual", "Predicted", "Count"],
+    )
+    .properties(title="Confusion Matrix", width=400, height=300)
+)
+
+text_chart = (
+    confusion_chart.mark_text(align="center", baseline="middle")
+    .encode(text="Count:Q")
+)
+
+(confusion_chart + text_chart).display()
+
+# Step 4: Generate and save classification report
+report = classification_report(y_test, y_pred, target_names=class_names, output_dict=True)
+report_df = pd.DataFrame(report).transpose()
+report_df.to_csv("path/to/evaluation_report.csv", index=True)
+
+# Example: Accessing data from the report
+print("Precision for metadata:", report_df.loc["metadata", "precision"])
+
+Access Testing Data: Load embeddings, labels, and model from the testing file (usually no need for the actual model, no need for the training dataset, unless you want to do detailed comparison.)
+Report Analysis:
+•	Use the classification report to extract key metrics like precision, recall, and F1-score for each class.
+•	Example: Use report_df.loc["metadata", "precision"] to access precision for the metadata class.
+Confusion Matrix: 
+Typically, maplotlib (a common Python library for quick plotting) is the go-to plotting tool for confusion matrix, due to its simplicity and easy integration with pandas. I used Altair (a JavaScript based Python charting library) instead because of it is more visually appealing. 
+________________________________________
+Training Results: Analysis of Classification Report, Confusion Matrix, and Key Insights
+The results show strong performance overall, but meta_data classification still faces challenges.
+Classification Report Summary
+Minimize image
+Edit image
+Delete image
+ 
+
+
+Key Takeaways:
+•	table_data, title, header, and empty perform well with balanced precision/recall. 
+•	metadata has low precision (0.53) but high recall (0.98), indicating severe false positives. 
+Definitions: 
+- Precision: Accuracy of positive predictions. Formula: TP / (TP + FP). 
+- Recall: Coverage of actual positives. Formula: TP / (TP + FN). 
+- F1 Score: Balance of precision and recall. Formula: 2 (Precision Recall) / (Precision + Recall). 
+- Support: Number of actual occurrences of a class in the dataset (number of rows.) 
+- Macro Avg: Average of metrics (precision, recall, F1) across classes, equally weighted. 
+- Weighted Avg: Average of metrics across classes, weighted by support (accounts for class imbalance). 
+Macro Avg treats all classes equally; Weighted Avg prioritizes larger classes.
+________________________________________
+Confusion Matrix Breakdown 
+The confusion matrix reveals critical misclassifications: 
+Minimize image
+Edit image
+Delete image
+ 
+
+
+________________________________________
+Analysis 
+Metadata’s Low Precision (0.53) 
+False Positives: 
+•	136 table_data and 4 header instances are misclassified as metadata. 
+•	Total predicted as metadata = 156 (correct) + 136 + 4 = 296. 
+•	Precision = 156 / 296 ≈ 0.53. 
+Likely Cause: 
+•	Feature Overlap: Metadata and table_data likely share structural/textual patterns (e.g., numerical data). 
+•	Class Imbalance: Metadata has the smallest support (159 vs. table_data’s 2,501), making it harder to distinguish. 
+Table_data Misclassifications 
+- 136 table_data → metadata errors dominate the confusion matrix. 
+- Despite high precision (1.00), 6% of table_data instances are misclassified (≈150/2,501), primarily as metadata. 
+Header and Title Performance 
+•	Header: Strong performance (precision=0.91, recall=0.96), with minor confusion with title (3 errors) and metadata (4 errors). 
+•	Title: Perfect recall (69/69), no misclassifications. 
+Empty Class 
+Near-perfect precision (0.98) and recall (0.99), with only 5 misclassified as header (not surprising.)
+Why Metadata is the Primary Issue 
+•	Low Precision: 47% of metadata predictions are false positives, primarily from table_data. 
+•	High Recall: The model captures 98% of metadata instances but at the cost of over-predicting. 
+•	Impact: Metadata errors could propagate downstream (e.g., incorrect document tagging). 
+Note: analysis was aided by DeepSeek (R1) model.
+________________________________________
+Where to Improve
+Feature Engineering: 
+•	Use more positional cues (e.g., metadata often appears at the top/bottom of documents). 
+•	Add keyword-based rules (e.g., "Author:", "Date:") to distinguish metadata. 
+More training data:
+•	Data Augmentation: Add synthetic metadata examples to balance the dataset. For example, use In-Context Learning for Augmentation with large language models to generate synthetic labeled data for underrepresented classes.
+Error Analysis: Investigate the 136 table_data → metadata misclassifications to identify patterns (e.g., specific tables resembling metadata). 
+________________________________________
+Conclusion and Next Steps
+This project highlights the value of modularity and efficiency in building scalable machine learning pipelines. By precomputing embeddings, redistributing class weights, and leveraging dynamic batching, the workflow balances simplicity and effectiveness to address challenges like class imbalance and computational overhead.
+________________________________________
+Lessons Learned
+1.	Modularity Enhances Flexibility: Separating tasks like preprocessing, embedding generation, and training ensures clarity, scalability, and ease of maintenance.
+2.	Efficient Handling of Imbalanced Data: Manually redistributing class weights avoids modifying the dataset while improving performance on minority classes.
+3.	Optimizing Resource Use: Precomputing embeddings streamlines training and inference, saving both time and computational resources.
+________________________________________
+What’s Next?
+Now that the training pipeline is complete, stay tuned for the next article, where we’ll dive into how inference is seamlessly integrated with this training workflow to create a complete, end-to-end machine learning pipeline.
+How do you approach inference workflows in your projects? Let me know your favorite techniques or challenges in building inference systems!
+
+About this article
+Welcome to the 4th part of my “Table Parsing Made Easy with Simple Neural Networks” series.
+This article dives into the coding architecture of a scalable machine learning training pipeline. We’ll explore how modular design streamlines embedding generation, training, and evaluation while addressing real-world challenges like class imbalance and computational overhead.
+Key Highlights:
+•	Leveraging BERT embeddings with dynamic batching and precomputation for efficiency.
+•	Redistributing class weights to handle imbalanced datasets without altering the data.
+•	Using confusion matrices and classification reports for actionable insights.
+Stay tuned for a sneak peek into the next stage: integrating an inference pipeline to complete the end-to-end workflow.
+#MachineLearning #AI #DataScience #CodingPipelines #DeepLearning #NLP #NeuralNetworks

@@ -1,0 +1,266 @@
+Table Parsing Made Simple with Homegrown Neural Networks - Part 3: Building a Neural Network with Semantic & Positional Features
+
+ 
+
+
+Xiao-Fei Zhang
+
+Experienced Industry Analyst | I TALK DIGITAL & DO DIGITAL
+January 15, 2025
+Quick Recap & Introduction
+•	Article 1: Introduced the problem of human-friendly but "machine challenged" Excel tables and the need for an automated solution.
+•	Article 2: Explained how the preprocessing pipeline combines asynchronous I/O (for concurrent file reads/writes) and multithreading (for parallel CPU-bound tasks) to handle large volumes of messy tables, addressing issues like merged cells, intelligible headers, row gaps, etc.
+In the next two articles, we’ll explore a training pipeline that combines text embeddings and positional features to classify table rows as headers, data, titles, or other types - an essential step in understanding a table’s structure in the table parsing phase.
+•	This article will go over the overall concept & walk through the neural network module itself.
+•	The next article will be more about the coding aspect of the pipeline. 
+The training pipeline uses a very simple 4-layer, forward feed neural network (NN). 
+Neural network (NN) sounds intimidating, but it is no brain surgery. The heavy lifting is done by Pytorch or Tensorflow (Python libraries) already. 
+In this article, I will walk go over the key concepts in NN focusing more on the intuition instead of the math and coding themselves (if I am "stating the obvious" to you, feel free to skip this and go to the code - see GitHub Repo for project code.)
+Outline
+•	Lessons Learned: Insights on preprocessing, LLMs for labeling, and embedding generation.
+•	Recap: Problem overview and how preprocessing prepared the data for training.
+•	From Tables to Labeled Data: Key steps in cleaning and labeling the dataset.
+•	Neural Network Overview: Explanation of the SimpleNN structure and forward pass.
+•	Regularization: How L2 regularization and dropout prevent overfitting.
+•	Next Steps: A look ahead at coding the training pipeline.
+________________________________________
+Lessons Learned
+1.	Preprocess Thoroughly: Better preprocessing could have reduced noise, simplified training, and improved accuracy. Clean data leads to better results.
+2.	Automate data annotation: Use LLMs for labeling. Instead of manual labeling, LLMs could have done it for me faster and more consistently using in-context learning (ICL) with example prompts. While fine-tuning remains an option, prompting has improved so much lately that ICL is likely to achieve similar results with significantly less effort.
+3.	Try GPT for Embeddings: GPT could have simplified the embedding process by combining tokenization, context, and feature generation in one step, saving time and effort.
+Note:
+In-Context Learning (ICL) has been a hot research (as well as implementation) topic last year. It's showing the LLM a few examples and saying, "See how I answered these? Now use the same logic to answer this new question." No need to spend hours and days to setting up fine-tuning, just smart prompt design for the API.
+Example:
+Prompt: "Here’s how I categorize M&A deals based on type:
+1.	Example 1: Company A acquires Company B to expand its product line. → Category: Horizontal Integration
+2.	Example 2: Company X acquires a supplier to secure its supply chain. → Category: Vertical Integration
+3.	Example 3: Company Y acquires an unrelated tech startup to diversify its portfolio. → Category: Conglomerate Acquisition
+Now, categorize the following deal:
+New Deal: Company Z acquires a logistics firm to improve delivery operations."
+LLM Output: Category: Vertical Integration.
+This is In-Context Learning. Potentially, you can even prompt deal values in there and guestimate new deal valuations. But that will take a decent amount training data, preprocessing, and smart design.
+________________________________________
+Quick Recap: From Raw Tables to Labeled Training Data
+The dataset contains 1,482 raw CSV files from the National Bureau of Statistics Yearbooks (2012 and 2022).
+After preprocessing—converting rows to lists of strings, unmerging cells, filling missing headers, and removing irrelevant rows—1,476 cleaned tables were obtained.
+From these, 345 tables were manually labeled with row categories like headers, metadata, and table data. Metadata, such as units or footnotes, can be tricky to classify due to their irregular placement.
+________________________________________
+Key Steps:
+•	Preprocessing: Transformed messy tables into structured datasets by handling errors and filling gaps.
+•	Labeling: Manually labeled 345 tables with categories and added metadata fields like row_id, is_title, and label.
+At this point, the cleaned and labeled data is ready for training the model.
+For a detailed breakdown, see Appendix A.
+________________________________________
+Training Pipeline Overview
+Main Steps
+Here is a schematic workflow of my model training process:
+ 
+Step 1. Embed the texts to create a (usually) large input vector - the input layer:
+This is the vectorized representation of the training data, plus few other features. In the ML context, this vector is called a tensor (a tensors can be a vector or matrix.) Because NNs are mostly used for language or images/videos, the input tensor tends be very huge. 
+Step 2. Pass through several hidden layers (fully connected layers):
+Each layer typically has fewer neurons than the previous one. (In our example, the number of neurons goes from 128 to 64 to 32 to 16.)
+Step 3. Output a much smaller vector (output layer):
+•	For classification, the output is a vector of length equal to the number of classes (e.g., 5 classes → 5 output neurons). A SoftMax activation function is usually used in the output layer to convert the raw outputs into probabilities for each class (SoftMax is a normalization function). 
+•	For regression, the output is usually a single neuron that produces a scalar (continuous value).
+Step 4. Backpropagation (learning process):
+•	After computing the output, the network compares it to the true value from the training data.
+•	It calculates the error (how "off" the prediction is) using a loss function.
+•	Then, the network "retunes" itself by adjusting weights and biases of each neuron in each hidden layer and go back to step 2 to try again.
+•	The process repeats over many iterations (called epochs) until the output becomes close enough to the true value (the loss function is minimized.)
+Backpropagation underpins why deep learning works! But it is tricky to explain. It is like a musician tuning an instrument:
+•	The musician plays a note, compares it to the correct pitch, and adjusts the strings until it sounds right. Similarly, the neural network makes a prediction, compares it to the true value, and adjusts its internal weights to minimize the error.
+•	Both processes are mathematical at their core - such as string length and tension affecting sound frequencies or weights affecting predictions - but they also have an intuitive, "black-box" quality where adjustments are guided by "experience" rather than direct observation of every single detail.
+Note: 
+•	I am over-simplifying about the input & output: In practice, a NN expects a batch of vectors in and a batch of vectors out, which means that both INPUT and OUTPUT are matrixes. No one really just process one vector at a time - it's too slow.)
+•	The "thinning out" layer structure is not a fixed rule. It's common design choice for NLP (natural language processing). Convolutional Neural Networks (CNN) for image processing is completely the opposite (in ML, working with language is mostly dimensionality reduction - you compress and abstract; image is mostly dimensionality expansion; this is why it's much it's easy to go from image to text, describing an image, but much harder the other way around.)
+________________________________________
+Embedding Layer
+Understanding Embeddings
+The first step is to convert raw text into vectors of numbers called embeddings. Simply put, an embedding converts a word, phrase, or entire row of text into a vector of numbers. But where did the numbers come from in the first place?
+Embedding involves complicated computation of distances (word spaces between) between words in a very large corpus (a large and structured collection of text or speech data.) Different embedding systems have different techniques and corpuses, therefore, different embeddings.
+My advice: 
+Do not worry much about how they are calculated - leave that to AI researchers. Just learn how to use the tool and pay attention to the input/output data structure. At the heart of it, it is entirely arbitrary, just like computers turn characters into binary or ASCII. 
+The only difference is that we expand its dimensionality, and that higher dimensionality allows us to pack much more information. This is why embeddings capture "meaning and relationships." 
+For example, here is how simple "artificial intelligence" looks like in UTF-8 encoding:
+61 72 74 69 66 69 63 69 61 6C 20 69 6E 74 65 6C 6C 69 67 65 6E 63 65
+And here is what its embedding looks like:
+ 
+As you can see, now we have a lot more (information) to work with. For implementation, think of embedding as looking up a dictionary: a word -> strip to a token -> look up the embedding id -> look up the embedding vector. Simple as that.
+Many concepts in machine learning are grounded on the principle of transforming data into new representations - often by expanding dimensionality or pushing out of existing dimension (mapping to a different feature space) - where underlying patterns are revealed. Techniques like embeddings, kernel methods, diffusion, and neural networks let us exploit this for tasks such as classification, clustering, and generation.
+For more on embeddings and dimensionality, check out my article Quick Intuition for Understanding GenAI by Thinking in Dimensionality.
+________________________________________
+Embedding and Positional Features in My Model
+I used Google's BERT (Bidirectional Encoder Representations from Transformers) model to generate a 768-dimensional embedding for each row of text. 
+While I appreciate the power of BERT, it does introduce some complexity. For example, in BERT, a special token called [CLS] (classification token) represents the entire sequence. After tokenizing the input (splitting it into words and subwords), BERT processes the tokens, merges them into a single embedding vector, and stores this in the [CLS] token. To get the embedding for the entire input row, you need to extract the vector corresponding to [CLS].
+With traditional NLP libraries like Word2Vec, GloVe, or SpaCy, you can directly get a sentence or document embedding, which is the average of all token vectors. However, BERT uses self-attention instead, which compares the relationship between every word and every other word. It provides richer contextual meaning but takes longer to process.
+In hindsight, I might have opted for the OpenAI API instead - it’s faster, handles tokenization and embedding in one step, requires just a few lines of code, and is cost-effective.
+BERT’s output is then concatenated with 5 additional features, resulting in a final 773-dimensional input vector.
+Example Input Vector:
+[0.45, -0.12, 0.77, ..., 4, 1, 0, 2022, 3]
+•	The first 768 values represent the row’s meaning (BERT embedding).
+•	The last 5 values provide positional context (e.g., row_id, is_title, etc.).
+Here is how the embeddings and positional features work together:
+•	I treated tables as "structured images": just like an image is composed of pixels with contextual relationships (e.g., edges, gradients), a table is composed of rows and cells that have positional meaning.
+•	By vectorizing rows (turning each row into a structured representation), the project captured the relationships between cells and infer patterns like "this row looks like a header" or "this row contains data."
+•	Because each row turned each empty cell into "Empty", I expected this to capture the "column" spacing.
+•	row_id tracks the row number in each table, providing position data of each row.
+•	other features further help classifying headers, table data, title, etc.
+•	Neural networks would be able to learn the spatial patterns from data without needing explicit rules. 
+In summary, I transformed tables into a structured "grid" of features, where row content and position determine its classification. 
+Note: I could also vectorize both by row AND column - each cell to be represented by [embedding, x, y]). I expect it will make the model more accurate and versatile, but it will be much more computationally expensive.
+________________________________________
+Final Input Tensor
+As mentioned earlier, the input tensor is usually a matrix, a batch of embedding vectors. 
+Input Tensor Shape:
+•	Batch Size: 32 rows per batch (BERT's embedding takes a lot of memory; therefore, the batch size usually set low.)
+•	Input Tensor Shape: [32, 773] (100 vectors, each with 773 dimensions).
+Each batch processes 32 vectors (table rows) at a time, where each vector represents the text embedding and associated metadata for a specific row.
+________________________________________
+Hidden Layers (Fully Connected Layers)
+Each batch then passes through the actual neural network (NN.)
+Simple NN Model
+The SimpleNN is a feed-forward neural network responsible for computing the forward pass—the process of passing input data through the network’s layers to produce an output. 
+Note that the SimpleNN only handles the forward pass computation; tasks such as loss calculation and backpropagation (i.e., updating the weights based on the loss) are handled by external modules during training.
+I used PyTorch library to build the model. The model itself is easy to build. It only took around 30 lines of actual code (excluding docstrings, comments, loggings, etc.) 
+________________________________________
+Hidden Layers (Feature Transformation)
+The neural network consists of 4 fully connected (dense) layers that transform the input feature vector (embedding + positional features) into predictions for row classification.
+Layer Dimensions
+The network progressively reduces the number of neurons at each layer:
+•	First Layer: 128 neurons
+•	Second Layer: 64 neurons
+•	Third Layer: 32 neurons
+•	Fourth Layer: 16 neurons
+What Happens in the Hidden Layers?
+•	Each hidden layer processes the input by applying a linear transformation (essentially a weighted sum) followed by an activation function.
+•	The first layers detect simple relationships like "Is this row near the start of the table?"
+•	The deeper layers combine these signals into complex patterns such as "Does this structure look like a table header?"
+See Appendix B for detailed explanation.
+Note:
+This "thinning out" of neurons is a typical NN structure for language related tasks, because:
+•	the network is compressing information by extracting the most important features, and
+•	it merges and refines features into more abstract combined representations (a form of dimensionality reduction.) (See my earlier article, Quick Intuition for Understanding GenAI by Thinking in Dimensionality, for more on dimensionality reduction.)
+However, this is a common design choice, not a strict rule - some networks may maintain or increase the number of neurons depending on their purpose (e.g., autoencoders, transformers). Also, image/video related NNs are the other way around.
+________________________________________
+Activation Function (ReLU)
+Each layer uses the ReLU (Rectified Linear Unit) activation function. It defines how a neuron in a neural network processes input signals and passes the output to the next layer.
+The function set negative values to 0, passing only positive values:
+ReLU(𝑥) = max(0, 𝑥)
+Where:
+•	𝑥 is the input to the function.
+•	max(0, 𝑥) returns the maximum value between 0 and 𝑥.
+Why Use ReLU Activation?
+ReLU (Rectified Linear Unit) adds non-linearity by "cutting off" negative values and passing only positive signals (it sets negative values to zero):
+•	Without activation functions like ReLU, the network would behave like a simple weighted average (i.e., linear transformation), limiting its ability to capture complex relationships.
+•	By keeping only positive values, ReLU allows the network to capture "important signals" and learn richer patterns.
+•	The term "less linear" reflects the network’s ability to model curves and sharp changes rather than just drawing straight lines.
+________________________________________
+Regularization (Preventing Overfitting)
+Regularization helps prevent the model from simply memorizing the training data (overfitting). The SimpleNN uses two main types of regularization: L2 regularization and dropout.
+L2 Regularization (Ridge Penalty)
+What does it do?
+•	Adds a penalty to the loss function based on the size of the weights.
+•	The penalty term is proportional to the sum of the squared weights: 
+Lossₜₒₜₐₗ = Lossₒᵣᵢ₉ᵢₙₐₗ + 𝜆 ∑ᵢ 𝑤ᵢ²
+Where:
+•	Lossₒᵣᵢ₉ᵢₙₐₗ is the original loss (e.g., cross-entropy or mean squared error).
+•	𝜆 is a hyperparameter that controls the strength of regularization (e.g., 0.01).
+•	𝑤ᵢ represents the weights of the model.
+•	∑ᵢ 𝑤ᵢ² is the sum of the squared weights.
+L2 vs. L1 Intuition:
+•	L2 (Ridge) "plays it safe": It gently reduces large weights but doesn’t force any to zero. It smooths the model’s decision boundary while still preserving all features to some degree.
+•	L1 (Lasso) is more aggressive: L1 adds a penalty proportional to the absolute value of the weights (∣wi∣|w_i|∣wi∣), which tends to force small weights to exactly zero. This effectively prunes the model by removing less important features.
+Why L2 Helps:
+•	L2 penalizes large weights but retains smaller weights, making it ideal for smoothing decision boundaries without eliminating useful features.
+•	In contrast, L1 might aggressively eliminate features that could still be relevant.
+Intuition: Imagine you're drawing a line to separate clusters of points:
+•	Without regularization: The model may create a jagged, overly precise boundary that fits the outliers perfectly.
+•	With L2 regularization: The boundary becomes smoother, gently curving around the main clusters while ignoring most outliers.
+•	With L1 regularization: The model may drop unnecessary data dimensions altogether, cutting away features that contribute very little to the outcome.
+Dropout (Neuron Dropout During Training)
+What does it do?
+•	During training, dropout randomly "turns off" a percentage of neurons (e.g., 20% in this model) at each forward pass.
+•	Disabled neurons do not participate in the computation for that step, forcing the network to learn more robust representations.
+•	During inference (i.e., making predictions), dropout is disabled, and all neurons are active.
+Why it helps: Dropout prevents the network from becoming overly dependent on specific neurons and forces it to learn distributed, redundant pathways.
+Analogy: Dropout is like testing a car’s robustness by randomly disabling certain components (e.g., shutting off a cylinder in the engine or disabling the ABS) to see how well it can still perform. A robust car should still function reasonably well even with some parts temporarily disabled, just as a neural network with dropout should still perform well during training despite randomly deactivated neurons.
+________________________________________
+Output Layer
+The final output layer consists of 5 neurons corresponding to the 5 classification categories (table_data, title, metadata, header, empty). See below:
+ 
+Dummy data for illustration only
+The NN outputs logits that are passed to the cross-entropy loss function, which applies softmax to compute probabilities and compares them to true labels to calculate the loss; the loss is then backpropagated to update the network's weights, preparing for the next forward pass. And the process iterates till the model is fully trained (I'll dive deeper into the coding details of this process in the next article.)
+Note: In the context of neural networks, a logit is the raw, unnormalized output of the network before applying an activation function (like softmax or sigmoid). It represents the model's confidence scores for each class but is not yet converted into probabilities.
+________________________________________
+Key Takeaways and What's Next
+This article focused on the concepts and intuition behind the math involved in building and training a neural network for row classification.
+•	Embedding Layer: Text is transformed into 773-dimensional vectors (768 from BERT embeddings + 5 positional features like row IDs). BERT’s self-attention mechanism captures richer context but requires more computation compared to simpler methods.
+•	Hidden Layers (SimpleNN Model): The SimpleNN handles the forward pass through four dense layers (128 → 64 → 32 → 16 neurons), refining input features to make predictions. ReLU activation adds non-linearity, enabling the network to learn complex relationships.
+•	L2 Regularization (Ridge Penalty): Prevents overfitting by shrinking large weights without setting them to zero, resulting in smoother decision boundaries.
+•	Dropout: Temporarily disables 20% of neurons during training, forcing the network to learn robust, redundant pathways—like testing a car by disabling random components to ensure resilience.
+•	Output Layer and Loss Calculation: The final layer outputs logits for 5 categories (table_data, title, metadata, header, empty), which are passed to the cross-entropy loss function to compute the error.
+•	Batch Processing: The network processes 32 rows per batch due to the memory-intensive nature of BERT embeddings, iterating over many batches until the model converges.
+________________________________________
+This article provided an overview of how tables are converted into structured input for classification using embeddings, feature transformations, and regularization techniques.
+In the next article, I’ll cover the coding pipeline, including the implementation of the forward pass, loss calculation, and backpropagation. By focusing on concepts and intuition today, you're better prepared to dive into the coding details in the next article. Stay tuned! 
+
+Questions for the readers:
+•	What trade-offs have you encountered when choosing embedding models like BERT versus lighter options?
+•	How do you approach fine-tuning for better performance on table-structured data?
+•	"Have you found in-context learning (ICL) effective for data annotation? How does it compare to fine-tuning in your experience?"
+•	"What strategies have worked for you when embedding both semantic and positional features?"
+________________________________________
+Appendix A: About the Data (Updated)
+Dataset Summary
+•	Raw Data: 1,482 CSV files (representing 1,482 tables) from National Bureau of Statistics Yearbook 2012 and Yearbook 2022
+•	Preprocessed Data: 1,476 cleaned tables after handling errors and inconsistencies.
+•	Labeled Training Data: 345 tables manually labeled for supervised learning.
+From Raw Table Data to Preprocessed Rows
+As explained in Article 1 and Article 2, the pipeline transformed messy Excel tables into structured datasets by:
+•	Converting rows into lists of strings (empty cells represented as "EMPTY").
+•	Unmerging cells, filling missing headers, and removing irrelevant rows.
+Raw data
+ 
+After preprocessing
+ 
+Recap of field definition:
+•	yearbook_source: Indicates the source year of the data (e.g., "2012" or "2022") to provide context on when the data was collected.
+•	section: Represents the broader grouping or category of the data (e.g., "Economic Indicators" or "Population Data"), helping to identify the section of the yearbook where the table originates.
+•	group: A unique identifier that groups related rows together, typically corresponding to the same table or subsection (e.g., all rows from a specific statistical report).
+•	row_id: The relative position of the row within its table, used as a positional feature to capture the sequence of rows in the dataset.
+•	is_empty: A binary indicator (0 or 1) that denotes whether the row contains data or is empty (e.g., placeholder or blank rows).
+•	is_title: A binary indicator (0 or 1) that indicates whether the row is a title row or a header row (used to distinguish key sections).
+•	original_index: The index of the row in the original dataset before any preprocessing, so that the order of rows can be traced back after transformations (to be used later in the inference pipeline to load embedding data.)
+•	label: The classification label for the row (e.g., "header", "metadata", "table_data", "empty"), indicating the type of content in the row for training and evaluation.
+Manually Labeling Data
+The goal of the training phase is to build a model that can classify rows into categories like headers, metadata, and table data.
+ 
+Here, metadata refers to rows that provide descriptive information about the data, such as:
+•	Units of Measurement: e.g., "Values in millions of dollars."
+•	Source Notes: e.g., "Data collected from 2020 census reports."
+•	Footnotes or Annotations: e.g., "Excludes temporary workers."
+Unlike headers or table data, metadata often appears in irregular positions (e.g., above or below the table) and can be semantically similar to headers, likely to make it challenging for models to classify.
+________________________________________
+Appendix B: Computation In NN Layers
+When a batch of tensors passes through each layer of neurons, it undergoes a linear transformation—essentially a mathematical operation that applies a set of learned weights and biases to the input data.
+Linear transformation formula
+𝑧 = 𝑊 ⋅ 𝑥ᵀ + 𝑏
+Where:
+•	𝑊 is the weight matrix of the layer (each row represents the weights for one neuron).
+•	𝑥ᵀ is the input vector (transposed to match the matrix dimensions).
+•	𝑏 is the bias vector (shifts the output to add flexibility to the model).
+Breaking It Down
+•	Input Vector (x): The tensor (batch of values) is like a list of features, e.g., [x1, x2, ...] where each xi represents a feature (like embeddings or positional data).
+•	Neuron Weights: Each neuron in the layer has a set of weights w = [w1, w2, …] that determine how much importance is assigned to each feature.
+•	Weight Matrix (W): When all neuron weights are stacked into rows, they form a matrix WWW, representing all the neurons in the layer.
+•	Bias Term (b): The bias term allows the network to "shift" the output values, enabling it to better capture complex patterns.
+What the Formula Means
+•	The network multiplying the input features by "importance weights" (contained in WWW).
+•	Adding a small adjustment (the bias bbb) to fine-tune the output.
+This operation outputs a new vector that gets passed to the next layer of the network. By repeating this process across layers, the network refines the input features and extracts patterns to help making accurate predictions.
+Musician tuning equipment analogy
+•	Each layer in our neural network is like a different stage in a musician's process of refining sound. The first layers are like tuning the raw strings to get the basic pitch—these layers process the 128 input features, which might represent numerical aspects of structured data (such as positional metadata, row numbers, or table contents).
+•	The middle layers are like fine-tuning the overtones and harmonics, refining the sound by finding meaningful relationships between features—such as identifying if certain patterns in the data indicate headers, table data, or metadata.
+•	The final layers are like adjusting the dynamics and resonance to get a polished performance - these layers combine the refined features and make a final decision, classifying the data into one of five categories (e.g., "header," "table data," "metadata," etc.).
+•	Gifted musicians don’t just isolate single notes better than most, they perceive relationships between multiple notes and musical context instantaneously. This uncanny ability to "hear combinations" is akin to NN's ability to "process combination." GPU chips can easily what allows them to interpret, compose, and improvise complex pieces of music.
+

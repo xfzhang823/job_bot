@@ -64,5 +64,57 @@ In this project, pipelines are defined, managed, and executed in a modular fashi
 ## Notes
 - The project is modular and allows for easy adjustments to the pipeline configuration and execution flow.
 - If you want to execute only a specific part of the pipeline, you can modify `run_pipelines.py` to focus on individual steps or use flags in `main.py`.
-```
+---
 
+# Alignment Transformer Model Pipeline
+
+## Pipeline Overview
+This repository contains a modular pipeline for training and evaluating an Alignment Transformer Model. The pipeline leverages transformer-based models like BERT to align resume sections with job descriptions, incorporating a hybrid attention mechanism to refine embeddings.
+
+## Module Breakdown
+
+### 1. `alignment_preprocessing.py`
+**Purpose:** Handles data preprocessing for hybrid alignment.  
+**Key Functions:**  
+- Load composite scores and position data from CSV files.  
+- Apply logarithmic scaling to position keys.  
+
+### 2. `transformer_model.py`
+**Purpose:** Defines the architecture of the Alignment Transformer Model.  
+**Key Components:**  
+- **Input Encoder:** Uses a pre-trained BERT model to encode text.  
+- **Hybrid Attention Model:** Combines cross-attention and self-attention.  
+
+### 3. `alignment_losses.py`
+**Purpose:** Defines the loss function used for training.  
+**Key Losses:**  
+- **Alignment Loss:** Based on cosine similarity.  
+- **Substance Loss:** Preserves the original resume embedding.  
+- **Coherence Loss:** Ensures linguistic consistency.  
+
+### 4. `transformer_training.py`
+**Purpose:** Orchestrates the training loop for the model.  
+**Key Tasks:**  
+- Handles the forward pass through the model.  
+- Calculates the combined loss.  
+- Optimizes model parameters using AdamW optimizer.  
+
+### 5. `model_saver.py`
+**Purpose:** Saves the trained model and embeddings.  
+**Key Features:**  
+- Saves the model weights after training.  
+- Saves the embeddings for faster reuse.  
+
+### 6. `transformer_training_pipeline.py`
+**Purpose:** The main orchestration script.  
+**Key Functions:**  
+- Loads data and applies preprocessing steps.  
+- Initializes the model and loss function.  
+- Runs the training loop and saves the results.
+
+## How to Run the Pipeline
+
+### Step 1: Set Up Environment
+Install dependencies using:  
+```bash
+pip install -r requirements.txt
