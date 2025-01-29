@@ -1,0 +1,794 @@
+Pydantic Guardrails for LLM Pipelines: Harnessing Cognitive Drift (Part 3)
+Introduction: From Foundations to Web-Driven Pipelines
+In Part 1 <insert https://www.linkedin.com/pulse/pydantic-guardrails-llm-pipelines-harnessing-cognitive-xiao-fei-zhang-vll6e/?trackingId=eB1l7reA4%2BapgkWBOKnalg%3D%3D>  of this series, we introduced how Pydantic helps manage cognitive drift in LLM pipelines by enforcing structure and consistency. Part 2 <insert https://www.linkedin.com/pulse/pydantic-guardrails-llm-pipelines-harnessing-cognitive-xiao-fei-zhang-w13ke/?trackingId=njl3gIyDh0m0Zjgj02Eesg%3D%3D> built on that by demonstrating how to design modular LLM pipelines by focusing on two core layers:
+	Data Layer: Defining and validating inputs, outputs, and intermediate data with Pydantic models.
+	Integration Layer: Handling API interactions, cleaning raw LLM responses, and dealing with LLM provider-specific nuances (like OpenAI's single-block vs. Claude's multi-block responses).
+To recap, a modular LLM pipeline consists of the following layers:
+1.	Data Layer: Schema definitions for inputs/outputs using Pydantic.
+2.	Integration Layer: Utility functions for interacting with external APIs and validating responses.
+3.	Resource Layer: Reusable prompt templates for generating consistent LLM instructions.
+4.	Business Logic Layer: Task-specific workflows that orchestrate higher-level processes.
+This article builds on Parts 1 and 2 by showcasing how to construct a Webpage Reader Pipeline using the Integration Layer and introducing parts of the Resource Layer. You’ll learn how to:
+•	Dynamically extract content from webpages using Playwright.
+•	Convert the extracted content into structured JSON using OpenAI’s API.
+•	Validate and guardrail the JSON output with Pydantic models.
+This example highlights practical applications, such as job posting extraction, to show how to create scalable, real-world pipelines, but you can apply the same approach for other types of webpages by building your custom Pydantic models. 
+For those seeking deeper insights, full runnable code is included in the appendix.
+Workflow Overview
+Most LLMs, like OpenAI GPT or Anthropic Claude, cannot scrape web content directly but excel at analyzing provided text. This pipeline follows a two-step process:
+	Extract Webpage Content: Use Playwright to fetch and clean text from dynamic, JavaScript-heavy webpages.
+	Convert Content to JSON: Use OpenAI’s API to structure the extracted text into JSON, validated with Pydantic.
+Data Layer: Pydantic Models
+The Pydantic model should have a sensible structure for the type of webpages you are reading. In our example, we are using job posting webpages. The JobSiteResponseModel ensures that the LLM response adheres to a strict structure. It validates key details such as job title, company name, location, salary info, and content sections.
+Code Example: Pydantic Models
+<Insert code below>
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
+
+class JobSiteData(BaseModel):
+    url: Optional[str]
+    job_title: Optional[str]
+    company: Optional[str]
+    location: Optional[str]
+    salary_info: Optional[str]
+    posted_date: Optional[str]
+    content: Optional[Dict[str, Any]]
+
+class JobSiteResponseModel(BaseResponseModel):
+data: JobSiteData
+
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+
+	BaseResponseModel: The base class that includes shared attributes like status and message.
+	JobSiteResponseModel: Extends BaseResponseModel by adding a data field containing job-related information.
+This layered schema ensures that responses adhere to a strict format, making the pipeline robust.
+Although the example here reads job posting pages, you can easily create custom models for other types of webpages. 
+Example: Product Info Pages
+<insert code>
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field
+
+class ServerProductData(BaseModel):
+    """
+Model containing detailed server product page information.
+…
+
+    """
+
+    url: str = Field(…, description="Server product page URL")
+    product_name: str = Field(…, description="Server product name")
+    manufacturer: str = Field(…, description="Manufacturer or brand")
+    model_number: Optional[str] = Field(None, description="Specific server model number")
+    price: Optional[str] = Field(None, description="Pricing information")
+    specifications: Optional[Dict[str, Any]] = Field(
+        None, 
+        description="Comprehensive technical specifications"
+    )
+    features: Optional[List[str]] = Field(
+        None, 
+        description="Key features and selling points of the server"
+)
+…
+
+Example: Company Fact Page
+<insert code>
+from typing import Optional, List
+from pydantic import BaseModel, Field, ConfigDict
+from datetime import date
+
+class CompanyBasicsData(BaseModel):
+    """
+    Model containing key company financial and operational information.
+    …
+    """
+
+    # Required Fields
+    company_name: str = Field(..., description="Official company name")
+    annual_revenue: str = Field(..., description="Total annual revenue")
+    
+    # Optional Fields
+    headquarters_location: Optional[str] = Field(None, description="Primary headquarters location")
+    founded_year: Optional[int] = Field(None, description="Year company was established")
+…
+    
+    # Operational Metrics
+    total_employees: Optional[int] = Field(None, description="Total number of employees")
+    countries_of_operation: Optional[List[str]] = Field(
+        None, 
+        description="List of countries where the company operates"
+    )
+…
+    
+
+Integration Layer: API Wrapping and Validation
+Integration Layer Recap
+As we have discussed in part 2 <insert link>, to interact with LLMs, a high-level function calls one of the call API wrappers. The wrapper then in turn access the unified API handler (be it OpenAI, claude, or llama3), which makes the API call and performs two validations: 
+	Generic validation through validate_resonse_type (already covered in part 2)
+	Domain specific validation of JSON returns responses via validate_json_type
+Domain-Specific Validation (validate_json_type)
+To handle different types of JSON responses (e.g., job postings or editing tasks), the function validate_json_type maps json_type to a corresponding Pydantic model for validation.
+<Insert code>
+from typing import Union
+
+def validate_json_type(response_model: JSONResponse, json_type: str) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
+    """
+    Validate JSON responses against specific Pydantic models based on 'json_type'.
+    """
+    # Map json_type to specific validation functions
+    json_model_mapping = {
+        "job_site": JobSiteResponseModel,
+        "editing": EditingResponseModel,
+        "generic": lambda model: model,  # Return as-is for generic cases
+    }
+
+    # Get the appropriate validator or raise an error for unsupported json_type
+    validator = json_model_mapping.get(json_type)
+    if not validator:
+        raise ValueError(f"Unsupported json_type: {json_type}")
+
+    # Validate the response model using the selected validator
+return validator(**response_model.data) if json_type != "generic" else validator(response_model)
+
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+
+How It Works
+	Maps json_type (e.g., 'job_site') to a specific Pydantic model.
+	Validates the JSON response against the selected model.
+	Ensures domain-specific outputs, providing tighter control over LLM responses (in our example, it should return JobSiteResponseModel.
+The function does make the initial debugging challenging; however, after setting it up right, ongoing operation is a lot smoother and gives you tighter control over the data input/output pipeline. 
+Step 1: Extracting Webpage Content
+The read_webpages function wraps Playwright to fetch webpage content dynamically. Failed URLs are logged for further inspection.
+<Insert code below>
+from playwright.async_api import async_playwright
+
+async def load_webpages_with_playwright(urls: List[str]) -> Tuple[Dict[str, str], List[str]]:
+    """Fetch webpage content dynamically using Playwright."""
+    content_dict, failed_urls = {}, []
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)  # Run in headless mode
+        page = await browser.new_page()
+
+        for url in urls:
+            try:
+                await page.goto(url, timeout=10000)
+                await page.wait_for_load_state("networkidle")
+                content = await page.evaluate("document.body.innerText")
+                content_dict[url] = clean_webpage_text(content) if content.strip() else None
+            except Exception as e:
+                failed_urls.append(url)
+        await browser.close()
+
+    return content_dict, failed_urls
+
+async def read_webpages(urls: List[str]) -> Tuple[Dict[str, str], List[str]]:
+    """Wrapper for Playwright to load and clean webpage content."""
+    documents, failed_urls = await load_webpages_with_playwright(urls)
+    return documents, failed_urls
+
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+
+Why Playwright?
+•	Handles JavaScript-heavy, dynamic websites more effectively than alternatives like Selenium.
+•	Simplifies the extraction process by rendering the page in a browser-like environment.
+
+Step 2: Converting Content to JSON
+The convert_to_json_wt_gpt_async function sends extracted webpage content to OpenAI's API. The response is validated using the JobSiteResponseModel.
+<Insert code below>
+from utils.llm_api_utils_async import call_openai_api_async
+
+async def convert_to_json_wt_gpt_async(input_text: str) -> Dict[str, Any]:
+    """Convert extracted text into structured JSON format using OpenAI API."""
+    if not input_text:
+        raise ValueError("Input text cannot be empty.")
+
+    # Prompt for transformation
+    prompt = CONVERT_JOB_POSTING_TO_JSON_PROMPT.format(content=input_text)
+    response = await call_openai_api_async(
+        prompt=prompt,
+        model_id="gpt-4-turbo",
+        expected_res_type="json",
+        json_type="job_site"
+    )
+
+    # Validate response
+    if isinstance(response, JobSiteResponseModel):
+        return response.model_dump()
+    else:
+        raise ValueError("Invalid response format.")
+
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+How It Works:
+	Uses a prompt to instruct the LLM to structure webpage content into JSON.
+	Validates the JSON response with JobSiteResponseModel.
+You need to make your prompt to the LLM very specific and emphatic about returning in JSON format. See part of a sample prompt below:
+<insert code>
+CONVERT_JOB_POSTING_TO_JSON_PROMPT = """
+...
+
+Output structure:
+{{
+  "url": "<string or null if not found>",
+  "job_title": "<string or null if not found>",
+  "company": "<string or null if not found>",
+  "location": "<string or null if not found>",
+  "salary_info": "<string or null if not found>",
+  "posted_date": "<string or null if not found>",
+  "content": {{
+    "<section_name>": "<full text of relevant section>",
+    "<another_section>": "<full text of relevant section>",
+    "description": "<any relevant content without a clear section header>",
+    "additional_info": "<any remaining relevant content>"
+  }}
+}}
+
+JSON Formatting Instructions:
+1. Use "null" (without quotes) for any key details not found in the content.
+2. Preserve newlines within string values using \\n.
+3. Escape any double quotes within string values.
+4. Ensure the output is a valid JSON object.
+
+Extract all job-relevant information, but exclude website-specific content and generic company information not directly related to the job posting.
+"""
+
+Step 3: Orchestrating the Workflow
+The process_webpages_to_json_async function ties everything together:
+	Reads and clean webpage content
+	Converts the content into JSON format and then a validated Pydantic model
+	Logs errors and failed URLs.
+	Processed content can be dumped out of the Pydantic model and to be persisted to a JSON or text file (model_dump() and then save)
+
+Simplified Code
+<Insert code>
+async def process_webpages_to_json_async(urls: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Extract webpage content and convert it to JSON."""
+    webpages_content, failed_urls = await read_webpages(urls)
+    results = {}
+
+    for url, content in webpages_content.items():
+        try:
+            results[url] = await convert_to_json_wt_gpt_async(content)
+        except Exception as e:
+            results[url] = {"error": str(e)}
+
+return results
+
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+
+Step 1: Extract Webpage Content
+•	Playwright fetches dynamic content by rendering webpages.
+•	The raw text is cleaned using clean_webpage_text.
+•	Any URLs that fail to load are logged for review.
+Step 2: Convert to JSON
+•	The extracted text is passed to OpenAI's API via call_openai_api_async.
+•	The JobSiteResponseModel validates the response, ensuring it adheres to a strict JSON schema.
+Step 3: Save Results
+	Processed content can be saved to a file in JSON or text format.
+
+Summary
+This part of the pipeline showed how to:
+•	Extract and clean dynamic webpage content using Playwright.
+•	Convert content to structured JSON using OpenAI’s API and validate it with Pydantic models.
+By combining Playwright’s dynamic capabilities with Pydantic’s guardrails, this module provides a scalable and robust solution for extracting structured data.
+
+What’s Next?
+In future parts, we’ll explore more intricate workflows, enhanced validation models, and reusable resource templates for LLM-powered pipelines.
+Appendix: Runnable Code Examples & Detailed Explanation
+Webpage Reader Async
+<Insert code below>
+"""
+Description: Utilities functions to read and/or summarize webpage(s).
+
+This module facilitates a two-step process:
+1. Extract content from webpages using Playwright.
+   - Fetches everything visible on the page, cleans the text, and identifies URLs 
+   that fail to load.
+
+2. Transform the extracted content into structured JSON format using an LLM (OpenAI API).
+   - Converts raw webpage content into JSON representations suitable for specific use cases, 
+   such as job postings.
+"""
+
+from pathlib import Path
+import logging
+import logging_config
+import json
+from typing import Any, Dict, List, Literal, Tuple, Union
+from playwright.async_api import async_playwright
+from utils.llm_api_utils_async import call_openai_api_async
+from utils.webpage_reader import clean_webpage_text
+from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
+from models.llm_response_models import JobSiteResponseModel
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Function to load webpage content using Playwright
+async def load_webpages_with_playwright(
+    urls: List[str],
+) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Fetch webpage content using Playwright (for dynamic or complex sites).
+
+    Args:
+        urls (List[str]): List of URLs to load.
+
+    Returns:
+        Tuple[Dict[str, str], List[str]]:
+            A tuple containing:
+            - A dictionary where keys are URLs (str) and values are cleaned webpage content (str).
+            - A list of URLs (str) that failed to load.
+
+    Raises:
+        Exception: Logs errors for individual URLs that fail to load.
+    """
+    content_dict = {}
+    failed_urls = []
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=False
+        )  # Set headless=False for debugging if needed
+        page = await browser.new_page()
+
+        for url in urls:
+            try:
+                logger.info(
+                    f"Attempting to load content with Playwright for URL: {url}"
+                )
+                await page.goto(url)
+
+                # Wait for network to be idle
+                await page.wait_for_load_state("networkidle")
+
+                # Try using page.evaluate() to directly access the text content via JavaScript
+                # This gives you a more "how readers see it" format - cleaner
+                content = await page.evaluate("document.body.innerText")
+                logger.debug(f"Extracted content: {content}")
+
+                # The page.text_content("body") extracts everything, including all the HTML
+                # and CSS stuff
+                # For this, evaluate is better
+                logger.debug(f"Raw content from Playwright for {url}: {content}\n")
+                if content and content.strip():
+                    clean_content = clean_webpage_text(content)
+                    content_dict[url] = clean_content
+                    logger.info(
+                        f"Playwright successfully processed content for {url}\n"
+                    )
+                else:
+                    logger.error(f"No content extracted for {url}\n")
+                    failed_urls.append(url)
+
+            except Exception as e:
+                logger.error(f"Error occurred while fetching content for {url}: {e}")
+                logger.debug(f"Failed URL: {url}")
+                failed_urls.append(url)  # Mark the URL as failed
+
+        await browser.close()
+
+    return content_dict, failed_urls  # Return both the content and the failed URLs
+
+async def read_webpages(urls: List[str]) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Extract and clean text content from one or multiple webpages using Playwright.
+
+    Args:
+        urls (List[str]): List of URLs to load and process.
+
+    Returns:
+        Tuple[Dict[str, str], List[str]]:
+            A tuple containing:
+            - A dictionary where keys are URLs (str) and values are cleaned webpage content (str).
+            - A list of URLs (str) that failed to load.
+
+    Logs:
+        Warnings for any URLs that failed to load.
+    """
+    documents, failed_urls = await load_webpages_with_playwright(urls)
+
+    if failed_urls:
+        logger.warning(f"Failed to load the following URLs: {failed_urls}\n")
+
+    return documents, failed_urls
+
+async def convert_to_json_wt_gpt_async(
+    input_text: str, model_id: str = "gpt-4-turbo", temperature: float = 0.3
+) -> Dict[str, Any]:
+    """
+    Parse and convert job posting content to JSON format using OpenAI API asynchronously.
+
+    Args:
+        - input_text (str): The cleaned text to convert to JSON.
+        - model_id (str, optional): The model ID to use for OpenAI (default is "gpt-4-turbo").
+        - temperature (float, optional): temperature for the model (default is 0.3).
+
+    Returns:
+        Dict[str, Any]: A dictionary representation of the extracted JSON content.
+
+    Raises:
+        ValueError: If the input text is empty or the response is not in the expected format.
+
+    Logs:
+        Information about the prompt and raw response.
+        Errors if the response does not match the expected model format.
+    """
+    if not input_text:
+        logger.error("Input text is empty or invalid.")
+        raise ValueError("Input text cannot be empty.")
+
+    # Set up the prompt
+    prompt = CONVERT_JOB_POSTING_TO_JSON_PROMPT.format(content=input_text)
+    logger.info(f"Prompt to convert job posting to JSON format:\n{prompt}")
+
+    # Call the async OpenAI API
+    response_pyd_obj = await call_openai_api_async(
+        prompt=prompt,
+        model_id=model_id,
+        expected_res_type="json",
+        json_type="job_site",
+        temperature=temperature,
+        max_tokens=2000,
+    )
+    logger.info(f"Raw LLM Response: {response_pyd_obj}")
+
+    # Validate that the response is in the expected JobSiteResponseModel format
+    if not isinstance(response_pyd_obj, JobSiteResponseModel):
+        logger.error(
+            "Received response is not in expected JobSiteResponseModel format."
+        )
+        raise ValueError(
+            "Received response is not in expected JobSiteResponseModel format."
+        )
+
+    # Return the model-dumped dictionary (from Pydantic obj to dict)
+    return response_pyd_obj.model_dump()
+
+# TODO: Need to integrate call llama-3 into this function later on...
+# TODO: llama3 has a context window issue.
+async def process_webpages_to_json_async(urls: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Read webpage content, convert to JSON asynchronously using GPT, and return the result.
+
+    Args:
+        urls (List[str]): List of URLs to process.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: A dictionary where keys are URLs (str) and values are:
+            - JSON representation of the processed content (Dict[str, Any]) if successful.
+            - Error messages (str) if the processing fails for a URL.
+
+    Logs:
+        Information about successfully processed URLs.
+        Errors for URLs that fail during processing.
+        Lists of URLs that failed to load.
+    """
+    if isinstance(urls, str):
+        urls = [urls]
+
+    webpages_content, failed_urls = await read_webpages(urls)
+    json_results = {}
+
+    for url, content in webpages_content.items():
+        try:
+            json_result = await convert_to_json_wt_gpt_async(content)
+            logger.info(f"Successfully converted content from {url} to JSON.")
+            json_results[url] = json_result
+        except Exception as e:
+            logger.error(f"Error processing content for {url}: {e}")
+            json_results[url] = {"error": str(e)}
+
+    if failed_urls:
+        logger.info(f"URLs failed to process:\n{failed_urls}")
+
+    return json_results
+
+def save_webpage_content(
+    content_dict: Dict[str, str],
+    file_path: Union[Path, str],
+    file_format: Literal["json", "txt"],
+) -> None:
+    """
+    Save the output content to a file in either txt or json format.
+
+    Args:
+        - content_dict (Dict[str, str]): A dictionary with URLs as keys and content as values.
+        - file_path (Union[Path, str]): The file path where the content should be saved.
+        - file_format (Literal["json", "txt"]): The format to save the content as,
+        either "json" or "txt".
+
+    Returns:
+        None
+
+    Raises:
+        Exception: If there is an error saving the content to the specified file path.
+
+    Logs:
+        Information about successful save operations.
+        Errors if the save operation fails.
+    """
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            if file_format == "json":
+                json.dump(content_dict, f, ensure_ascii=False, indent=4)
+            else:
+                for url, content in content_dict.items():
+                    f.write(f"--- Content from URL: {url} ---\n{content}\n\n")
+        logger.info(f"Content saved successfully to {file_path}")
+    except Exception as e:
+        logger.error(f"Error saving content: {e}")
+        raise
+
+
+Workflow Overview
+Step 1. process_webpages_to_json_async
+	Top-level orchestrator: This method coordinates the entire pipeline. 
+	Calls read_webpages to extract webpage content.
+	Iterates over the content and calls convert_to_json_wt_gpt_async for JSON transformation.
+Step 2. read_webpages
+	Wraps load_webpages_with_playwright to dynamically fetch webpage content.
+	Calls load_webpages_with_playwright to load webpage content and handles failures.
+Step 3. load_webpages_with_playwright
+	Uses Playwright to fetch and clean visible webpage content.
+	Directly interacts with the Playwright library to process webpages.
+	Returns content to read_webpages.
+Step 4. convert_to_json_wt_gpt_async
+	Converts extracted webpage content to JSON using an LLM (e.g., OpenAI).
+	Calls call_api_async to interact with the LLM API.
+	Calls validate_json_type to validate the domain-specific output.
+Step 5. call_api_async
+	Handles API interactions with OpenAI, Claude, or other LLMs.
+	Part of the Integration Layer.
+	Validates raw LLM responses using validate_response_type.
+Step 6. validate_json_type
+	Performs domain-specific validation of JSON outputs (e.g., JobSiteResponseModel).
+	Extends generic validation from validate_response_type.
+	Called within convert_to_json_wt_gpt_async for structured JSON validation.
+<insert image webpage reader workflow>
+
+load_webpages_with_playwright
+	Iterates through a list of URLs, loads each webpage, and extracts its visible text using JavaScript (document.body.innerText).
+	Cleans the extracted text with a helper function (clean_webpage_text).
+	Logs URLs that fail to load and adds them to a failed_urls list.
+	Returns a tuple of cleaned webpage content (content_dict) and the list of failed URLs.
+read_webpages
+	Calls load_webpages_with_playwright to extract content.
+	Logs warnings for any URLs that failed to load.
+	Returns a dictionary of cleaned content and a list of failed URLs.
+convert_to_json_wt_gpt_async
+	Formats a prompt using CONVERT_JOB_POSTING_TO_JSON_PROMPT to instruct the LLM on how to convert the input text.
+	Sends the prompt to the OpenAI API (call_openai_api_async) and expects a JSON response.
+	Validates the response against a domain-specific schema (JobSiteResponseModel) to ensure it adheres to expected structure.
+	Returns the validated JSON as a Python dictionary.
+process_webpages_to_json_async
+	Calls read_webpages to extract webpage content.
+	Iterates through the extracted content, passing each item to convert_to_json_wt_gpt_async for JSON conversion.
+	Logs errors for any URLs that fail during JSON processing.
+	Returns a dictionary with the URLs as keys and either the JSON result or an error message as the value.
+save_webpage_content
+	Accepts a dictionary of content, a file path, and a format (json or txt).
+	Writes the content to a file, either as JSON or plain text.
+	Logs save successful operations and raise exceptions for failures.
+Why Use Playwright?
+Playwright is a robust, JavaScript-rich web scraper, surpassing alternatives like Selenium. Originally based on Google’s Puppeteer, it was developed further by Microsoft in 2020 and has become integral to Python testing frameworks like pytest. While Playwright has a learning curve and is slightly slower, it handles dynamic, JavaScript-heavy webpages effectively, making it ideal for extracting complex content.
+Initially, I tried lightweight scrapers like Trafalgar and then requests (library) as a backup, but they could not handle all the pages. I then committed to learning Playwright. Though it required effort, the trade-off was while worth it - once set up, it reliably extracts webpage content.
+Key Takeaways:
+•	Go Async: Use Playwright’s asynchronous API for scalability and modern app design.
+•	Set Headless to False: Running with the browser visible avoids detection by some sites and mimics user behavior, though it’s slower.
+By combining Playwright’s dynamic scraping capabilities with Pydantic’s validation guardrails, this approach ensures reliable and scalable AI-powered pipelines.
+.
+Pydantic Models
+Base Model
+<Insert code below as “code”>
+class BaseResponseModel(BaseModel):
+    """
+    Base model that provides common fields for various response models.
+
+    Attributes:
+        status (str): Indicates the success status of the response, defaults to "success".
+        message (Optional[str]): Optional field to provide additional feedback or a message.
+
+    Config:
+        arbitrary_types_allowed (bool): Allows non-standard types like pandas DataFrame.
+
+    *Allows validation functions to add status and message easily!
+    """
+
+    status: str = "success"
+    message: Optional[str] = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+Core Data Model
+<Insert code below as “code”>
+class JobSiteData(BaseModel):
+    """
+    Inner model containing detailed job site information.
+
+    Attributes:
+        url (str): The URL of the job posting (required).
+        job_title (str): Title of the job position (required).
+        company (str): Name of the company posting the job (required).
+        location (Optional[str]): Job location.
+        salary_info (Optional[str]): Salary information, if available.
+        posted_date (Optional[str]): Date when the job was posted.
+        content (Optional[Dict[str, Any]]): Contains the job description, responsibilities, and qualifications as a dictionary.
+    """
+
+    url: str = Field(..., description="Job posting URL")
+    job_title: str = Field(..., description="Job title")
+    company: str = Field(..., description="Company name")
+    location: Optional[str] = Field(None, description="Job location")
+    salary_info: Optional[str] = Field(None, description="Salary information")
+    posted_date: Optional[str] = Field(None, description="Job posting date")
+    content: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Dictionary containing job description, responsibilities, and qualifications",
+    )
+
+
+Job Site Response Model
+<Insert code below as “code”>
+class JobSiteResponseModel(BaseResponseModel):
+    """
+    Model for handling job site response data, standardizing job-related information.
+
+    Attributes:
+        data (JobSiteData): Holds detailed job site information as a nested JobSiteData instance.
+
+    Config:
+        json_schema_extra (dict): Provides an example structure for documentation.
+    """
+
+    data: JobSiteData
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Job site data processed successfully.",
+                "data": {
+                    "url": "https://example.com/job-posting",
+                    "job_title": "Software Engineer",
+                    "company": "Tech Corp",
+                    "location": "San Francisco, CA",
+                    "salary_info": "$100,000 - $120,000",
+                    "posted_date": "2024-11-08",
+                    "content": {
+                        "description": "We are looking for a Software Engineer...",
+                        "responsibilities": [
+                            "Develop software",
+                            "Collaborate with team",
+                        ],
+                        "qualifications": [
+                            "BS in Computer Science",
+                            "2+ years experience",
+                        ],
+                    },
+                },
+            }
+        }
+JobSiteData contains the core data of the content of the page:
+	url, job_title, and company are required fields: Field(…, ) means that it’s a required field
+	other fields are optional: Optional[xxx] = Field(None, …)
+
+Prompt Template
+Sample Code
+<Insert code below as “code”>
+CONVERT_JOB_POSTING_TO_JSON_PROMPT = """
+You are a skilled professional at analyzing job descriptions. Extract key information and relevant content from the provided job description, converting it into a comprehensive, valid JSON format. Exclude purely website-related information or general company boilerplate not specific to the job.
+
+Instructions:
+1. Identify and extract the following key details if present:
+   - url
+   - Job title
+   - Company name
+   - Location
+   - Salary information
+   - Posted date (if available)
+2. Capture the job-specific content, preserving its structure as much as possible.
+3. Use clear section headers as keys in the JSON structure when present.
+4. For content without clear section headers, use general keys like "description" or "additional_info".
+5. Exclude information that is:
+   - Purely related to website navigation or functionality
+   - Generic company information not specific to the job role
+   - Legal disclaimers or privacy policies unrelated to the job
+   - Repetitive footer information
+
+Content to process: {content}
+
+Output structure:
+{{
+  "url": "<string or null if not found>",
+  "job_title": "<string or null if not found>",
+  "company": "<string or null if not found>",
+  "location": "<string or null if not found>",
+  "salary_info": "<string or null if not found>",
+  "posted_date": "<string or null if not found>",
+  "content": {{
+    "<section_name>": "<full text of relevant section>",
+    "<another_section>": "<full text of relevant section>",
+    "description": "<any relevant content without a clear section header>",
+    "additional_info": "<any remaining relevant content>"
+  }}
+}}
+
+JSON Formatting Instructions:
+1. Use "null" (without quotes) for any key details not found in the content.
+2. Preserve newlines within string values using \\n.
+3. Escape any double quotes within string values.
+4. Ensure the output is a valid JSON object.
+
+Extract all job-relevant information, but exclude website-specific content and generic company information not directly related to the job posting.
+"""
+
+
+Prompting Recommendations
+Escaping Curly Braces in JSON Output
+When using the `.format()` method to create prompt templates, it's crucial to escape curly braces correctly. Standard curly braces `{}` are interpreted as placeholders for variable substitution. To represent literal curly braces in your template, use double curly braces: `{{ }}`.
+
+Prompt Design Considerations
+Anthropic's suggested prompt template tends to be more precise and elegant compared to those of other large language models (at least based on my experience.)
+
+Curly Brace Usage
+Avoid overusing curly braces in prompts. Use them only when necessary for variable insertion. While some individuals attempt to format entire prompts in JSON, modern large language models respond better to clean, concise bullet points. Excessive formatting can potentially confuse the language model.
+Domain Specific Validation (Validate JSON Type)
+<insert code>
+def validate_json_type(
+    response_model: JSONResponse, json_type: str
+) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
+    """
+    Validates JSON data against a specific Pydantic model based on 'json_type'.
+
+    Args:
+        response_model (JSONResponse): The generic JSON response to validate.
+        json_type (str): The expected JSON type ('job_site', 'editing', or 'generic').
+
+    Returns:
+        Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
+        Validated model instance.
+
+    Raises:
+        ValueError: If 'json_type' is unsupported or validation fails.
+    """
+    # Map json_type to the correct model class
+    json_model_mapping = {
+        "editing": validate_editing_response,
+        "job_site": validate_job_site_response,
+        "generic": lambda model: model,  # Return as is
+    }
+
+    # Pick the right function
+    validator = json_model_mapping.get(json_type)
+    if not validator:
+        raise ValueError(f"Unsupported json_type: {json_type}")
+
+    return validator(response_model)
+
+
+The function, validate_json_type, is part of the call API module (in the integration layer). I will not go into the rest of the call API functions here (see Part 1 <insert link>).
+Validate_json_type validates a JSON response against a specific Pydantic model based on the provided json_type. It maps the json_type to a corresponding validation function and applies it to the input response_model.
+Input Arguments
+	response_model: A generic JSON response (of type JSONResponse) to validate.
+	json_type: A string indicating the type of JSON validation required (e.g., 'job_site', 'editing', 'generic').
+Output: a validated model instance
+	JobSiteResponseModel
+	EditingResponseModel
+	The original JSONResponse (for generic cases).
+Logic
+	A dictionary (json_model_mapping) maps each json_type to a corresponding validation function: "editing" → validate_editing_response, "job_site" → validate_job_site_response, "generic" → Returns the input model as-is.
+	The function retrieves the appropriate validator using the json_type and applies it to response_model.
+Error Handling: Raises a ValueError if the json_type is unsupported, or validation fails.
+The method ensures that the LLM returns only domain specific responses, and only in the expected formats. 
+
+About this Article
+In Part 3 of the Pydantic Guardrails for LLM Pipelines series, we explore how to integrate dynamic web scraping with AI workflows:  
+	Extract dynamic content using Playwright.  
+	Transform it into structured JSON with OpenAI.  
+	Validate outputs using **Pydantic** for domain-specific reliability.  
+
+Whether you're working on job postings, product data, or company profiles, this guide provides scalable solutions for building dependable pipelines. Full runnable code and detailed explanations are included in the appendix section for a deeper dive!
+#AI #Pydantic #WebScraping #Playwright #OpenAI #MachineLearning #DataEngineering #LLMPipelines #DataValidation #JSON
+

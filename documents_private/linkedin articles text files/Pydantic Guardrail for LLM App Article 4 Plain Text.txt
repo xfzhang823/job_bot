@@ -1,0 +1,877 @@
+Pydantic Guardrails for LLM Pipelines: Harnessing Cognitive Drift (Part 4)
+
+Introduction
+In Part 1 <insert https://www.linkedin.com/pulse/pydantic-guardrails-llm-pipelines-harnessing-cognitive-xiao-fei-zhang-vll6e/?trackingId=eB1l7reA4%2BapgkWBOKnalg%3D%3D>  of this series, we introduced how Pydantic enforces structure and consistency in LLM pipelines to manage cognitive drift.  Part 2 <insert https://www.linkedin.com/pulse/pydantic-guardrails-llm-pipelines-harnessing-cognitive-xiao-fei-zhang-w13ke/?trackingId=njl3gIyDh0m0Zjgj02Eesg%3D%3D> demonstrated how to design modular pipelines using two core layers: the data layer and the integration layer.  Part 3<insert https://www.linkedin.com/pulse/pydantic-guardrails-llm-pipelines-harnessing-cognitive-xiao-fei-zhang-vrrne/?trackingId=kknhz309R%2B2j6OEka4sX4g%3D%3D> explored integrating dynamic web scraping with AI workflows using Pydantic as a guardrail. 
+Cognitive drift refers to subtle shifts in focus or interpretation during multi-step processing, which can unlock creativity by allowing new patterns to emerge.
+This article will focus on editing text to align with another text by leveraging Pydantic models to manage input/output validation. We will explore how to process complex, nested structures iteratively and break down tasks into systematic steps that unlock creativity and improve precision.
+<insert divider>
+Data Layer: Pydantic Models
+Validating Data Input and Output with Pydantic Models: A Modular Framework for Complex Pipelines
+Editing text to align responsibilities with job requirements is a nuanced task, especially when dealing with multiple responsibilities and requirements stored in separate JSON files. Each responsibility must be iteratively optimized against various requirements, generating tailored texts (optimized texts).
+The challenge lies in the data input/output complexity:
+•	Responsibilities and requirements are spread across separate files or folders, sharing a consistent structure but varying content.
+•	The data is access by multiple pipelines.
+•	Some pipelines have multiple steps and nested iterations, making them fragile and bug-prone unless the data is validated and structured in a standardized way.
+Using Pydantic models, we can enforce consistency, modularity, and reliability throughout the process. Here's a framework to manage input validation, optimization, and output generation effectively.
+<insert divider>
+Models to Manage Data Input: Responsibilities and Requirements
+These models validate raw input data, ensuring it adheres to expected structures before further processing.
+Code Example
+<insert code>
+from pydantic import BaseModel
+from typing import Dict
+
+# Model to validate responsibility input
+class Responsibilities(BaseModel):
+    responsibilities: Dict[str, str]  # Maps responsibility keys to their descriptions
+
+# Model to validate requirement input
+class Requirements(BaseModel):
+    requirements: Dict[str, str]  # Maps requirement keys to their details
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+Responsibilities: 
+Structure: A dictionary of responsibilities (e.g., from a resume). 
+	Keys: Responsibility identifiers (e.g., "0.responsibilities.0").
+	Values: Strings describing responsibilities.
+Role: Manages the structure of input data for editing by LLMs.
+Requirements: 
+Structure: A dictionary of requirements (e.g., from a job posting). 
+	Keys: Requirement identifiers (e.g., "0.pie_in_the_sky.0").
+	Values: Strings detailing requirements.
+Role: Manages the structure of target data against which responsibilities are optimized.
+Example Data Structures
+<insert code>
+Responsibilities: 
+{
+    "0.responsibilities.0": "Provided strategic insights.",
+    "0.responsibilities.1": "Assisted international service providers."
+}
+Requirements: 
+{
+    "0.pie_in_the_sky.0": "10+ years of experience.",
+    "0.pie_in_the_sky.1": "Ph.D. in Data Science."
+}
+Models to Manage Data Output: OptimizedText, ResponsibilityMatch, ResponsibilityMatches
+These models validate processed or optimized data, ensuring nested structures adhere to the desired format.
+Code Example
+<insert code>
+from pydantic import BaseModel
+from typing import Dict
+
+# Simplified model for individual optimized text
+class OptimizedText(BaseModel):
+    optimized_text: str
+
+# Simplified model for matching requirements to optimized texts
+class ResponsibilityMatch(BaseModel):
+    optimized_by_requirements: Dict[str, OptimizedText]
+
+# Simplified model for aggregating multiple responsibility matches
+class ResponsibilityMatches(BaseModel):
+responsibilities: Dict[str, ResponsibilityMatch]
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+
+Explanation
+OptimizedText: 
+Structure: Contains a single field, optimized_text, holding a string for a tailored responsibility description.
+Role: Ensures the smallest unit of optimized data is valid.
+ResponsibilityMatch: 
+Structure: A dictionary 
+	Keys: Requirement identifiers.
+	Values: OptimizedText instances.
+Role: Maps a single responsibility to its requirement-specific optimizations.
+ResponsibilityMatches: 
+Structure: A dictionary 
+	Keys: Responsibility identifiers.
+	Values: ResponsibilityMatch instances.
+Role: Aggregates multiple responsibilities, validating the overall nested structure.
+
+Example Data Structures
+<insert code>
+OptimizedText: 
+{"optimized_text": "Led strategic initiatives."}
+ResponsibilityMatch: 
+{
+  "optimized_by_requirements": {
+    "0.pie_in_the_sky.0": {"optimized_text": "Led strategic initiatives."},
+    "0.pie_in_the_sky.1": {"optimized_text": "Optimized the service partner ecosystem."}
+  }
+}
+ResponsibilityMatches: 
+{
+    "0.responsibilities.0": {
+        "optimized_by_requirements": {
+            "0.pie_in_the_sky.0": {"optimized_text": "Led strategic initiatives for a global IT corporation."},
+            "0.pie_in_the_sky.1": {"optimized_text": "Optimized the service partner ecosystem."}
+        }
+    },
+    "0.responsibilities.1": {
+        "optimized_by_requirements": {
+            "1.down_to_earth.0": {"optimized_text": "11 years of strategic insights."},
+            "1.down_to_earth.1": {"optimized_text": "Experience in the Asia-Pacific region."}
+        }
+    }
+}
+How These Models Work Together
+1.	Input Validation: Use Responsibilities and Requirements to validate raw input data.
+2.	Optimization Process: Map validated responsibilities to requirements and generate optimized text for each pairing.
+3.	Output Validation: Use OptimizedText, ResponsibilityMatch, and ResponsibilityMatches to validate the processed data.
+Key Benefits
+	Modularity: Separating input and output management simplifies maintenance and scalability.
+	Validation: Pydantic ensures data integrity at every step.
+	Clarity: Hierarchical models align with nested data structures, making debugging and processing straightforward.
+By using this approach, you can ensure that even complex, fragile pipelines - like optimizing a list of texts to match another list of text (iteratively) - are robust, structured, and reliable.
+<insert divider>
+Business Logic Layer: Edit A List of Texts by Targeting Another List of Texts with LLMs
+Simplified Code Examples
+	modify_multi_resps_based_on_reqs: Handles multiple responsibilities.
+	modify_resp_based_on_reqs: Handles one responsibility.
+High Level Function: Modify Multiple Responsibilities by Targeting Multiple Requirements
+<insert code>
+def modify_multi_resps_based_on_reqs(
+    responsibilities: dict[str, str],
+    requirements: dict[str, str],
+    llm_provider: str = "openai",
+    model_id: str = "gpt-3.5-turbo"
+) -> ResponsibilityMatches:
+    """
+    Processes multiple responsibilities by aligning each one with multiple requirements.
+    """
+    # Validate input with Pydantic models
+    validated_responsibilities = Responsibilities(responsibilities=responsibilities)
+    validated_requirements = Requirements(requirements=requirements)
+
+    # Directly access attributes from Pydantic models
+    raw_responsibilities = validated_responsibilities.responsibilities
+    raw_requirements = validated_requirements.requirements
+
+    # Initialize the result dictionary
+    modified_responsibilities = {}
+
+    # Loop over responsibilities
+    for resp_key, resp in raw_responsibilities.items():
+        # Call lower-level function
+        resp_key, responsibility_match = modify_resp_based_on_reqs(
+            resp_key=resp_key,
+            resp=resp,
+            reqs=raw_requirements,  # Directly pass raw_requirements
+            llm_provider=llm_provider,
+            model_id=model_id,
+        )
+        # Store the results
+        modified_responsibilities[resp_key] = responsibility_match
+
+    # Validate and return the final output using ResponsibilityMatches
+    return ResponsibilityMatches(responsibilities=modified_responsibilities)
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+Lower-Level Function: Modify Single Responsibilities by Targeting Multiple Requirements
+<insert code>
+def modify_resp_based_on_reqs(
+    resp_key: str, resp: str, reqs: dict[str, str], llm_provider: str, model_id: str
+) -> tuple[str, ResponsibilityMatch]:
+    """
+    Processes a single responsibility by aligning it with multiple requirements in 3 steps:
+    - Semantic alignment: Adjusts for high-level meaning.
+    - Entailment alignment: Ensures logical support for the requirement.
+    - Dependency parsing alignment: Preserves the grammatical structure.
+    """
+    # Initialize the dictionary to store results
+    modified_texts = {}
+
+    # Simulate processing for each requirement
+    for req_key, req in reqs.items():
+        print(f"Processing responsibility '{resp}' with requirement '{req}'")
+
+        # Step 1: Semantic Alignment
+        semantic_aligned = f"{resp} (reworded for semantics with {req_key})"
+        print(f"Step 1 - Semantic Alignment: {semantic_aligned}")
+
+        # Step 2: Entailment Alignment
+        entailment_aligned = f"{semantic_aligned} (ensures entailment with {req_key})"
+        print(f"Step 2 - Entailment Alignment: {entailment_aligned}")
+
+        # Step 3: Dependency Parsing Alignment
+        dp_aligned = f"{entailment_aligned} (restructured for readability)"
+        print(f"Step 3 - Dependency Parsing Alignment: {dp_aligned}")
+
+        # Store the final optimized text as an OptimizedText object
+        modified_texts[req_key] = OptimizedText(optimized_text=dp_aligned)
+
+    # Wrap all results in a ResponsibilityMatch object
+    responsibility_match = ResponsibilityMatch(optimized_by_requirements=modified_texts)
+    
+    return resp_key, responsibility_match
+Note: The code is for demonstration purposes only and focuses on illustrating key workflows. See Appendix for full runnable code examples.
+
+Code Overview
+modify_multi_resps_based_on_reqs
+The high-level function (modify_multi_resps_based_on_reqs) manages multiple responsibilities and requirements. It accepts Pydantic models (preferred) or raw dictionaries (validated into Pydantic models) from a pipeline, iterates over the responsibilities, and calls the lower-level function (modify_resp_based_on_reqs) to process each responsibility.
+
+Input:
+Preferred: Pydantic models: 
+	Responsibilities: Contains a dictionary of responsibility texts.
+	Requirements: Contains a dictionary of requirement texts.
+Optional: Raw dictionaries: 
+	responsibilities: dict[str, str]
+	requirements: dict[str, str]
+
+Process:
+Validation: If raw dictionaries are provided, convert them into Pydantic models immediately: 
+<insert code>
+if isinstance(responsibilities, dict):
+    validated_responsibilities = Responsibilities(responsibilities=responsibilities)
+else:
+    validated_responsibilities = responsibilities
+
+if isinstance(requirements, dict):
+    validated_requirements = Requirements(requirements=requirements)
+else:
+validated_requirements = requirements
+
+Direct Attribute Access:
+Access validated_responsibilities.responsibilities and validated_requirements.requirements directly.
+(Note: no need to unpack the model with Pydantic’s model_dump() method. Avoid packing/unpacking the models unless it’s absolutely necessary - better to pack in the beginning and unpack all the way in the end of the pipeline.) 
+
+Iterate Over Responsibilities:
+	For each resp_key (key) and resp (value) in validated_responsibilities.responsibilities, Call modify_resp_based_on_reqs with the current responsibility, all requirements, and the LLM configuration.
+Collect Results: Store the result (resp_key, ResponsibilityMatch) as a key-value pair in a dictionary.
+Validate & Return Output: Wrap the aggregated results in a ResponsibilityMatches Pydantic model and return.
+Output
+Pydantic Model ResponsibilityMatches (Contains a mapping of responsibility IDs to ResponsibilityMatch objects.)
+
+Lower-Level Function: modify_resp_based_on_reqs
+Input:
+	resp_key: Responsibility ID (e.g., "resp1").
+	resp: Responsibility text (e.g., "Managed a team of developers").
+	reqs: Dictionary of requirements from validated_requirements.requirements.
+	llm_provider and model_id for LLM configuration.
+<insert image multi-step alignment>
+Process:
+Call on the TextEditor class from another custom module to handle the execution of the “modify to align” process (including calling call_llm_api functions.)
+Each responsibility is modified to align with each requirement not in a single shot but in 3 steps: 
+	optimize semantic similarity between responsibility (from resume) and requirement (from job posting/description).
+	further strengthen the entailment between the two.
+	boost the dependency parsing (DP) between the modified responsibility with its original text.
+(See next section for more detail.)
+Validate and Structure Output:
+	Each aligned text is wrapped in an OptimizedText model.
+	All aligned texts are stored in a ResponsibilityMatch model.
+Output: Tuple
+	Key: resp_key.
+	Value: ResponsibilityMatch: Contains optimized_by_requirements, a dictionary mapping requirement keys to OptimizedText models.
+The lower-level API calling and related functions (in integration layer), including the validate_json_type method that validates the edited text model for this type of response, have been covered in the previous parts; therefore, therefore, is omitted here.
+More on Multi-Step Alignment
+When aligning one text to another, why not just use one long prompt (single-shot)? Why break it into three steps (multi-shot)?
+Two reasons:
+1.	Break Problems into Steps: Break complex problems into smaller parts for more focused, accurate results, even with cheaper models. (This doesn’t apply to problems where "we don’t even know what we don’t know.")
+2.	Leverage Cognitive Drift: Iterative generation unlocks creative rephrasing and nuanced insights. Embrace output variations to refine ideas and uncover solutions beyond single-step responses.
+
+The Three Steps of Multi-Step Alignment
+Semantic Alignment:
+•	Adjusts the responsibility text to match the meaning of the requirement.
+•	Example: "Led a software team of developers."
+Entailment Alignment:
+•	Ensures logical inference between the responsibility and the requirement.
+•	Entailment Explained:
+Entailment ensures the responsibility text logically supports the requirement (hypothesis). The relationship is directional: the responsibility (premise) must support the requirement (hypothesis), but the reverse isn’t always true. 
+o	Example: Premise (Responsibility): "Built a feedforward neural network with PyTorch."
+Hypothesis (Requirement): "Expertise in machine learning."
+Entailment is high because building a neural network demonstrates ML expertise. However, the reverse isn’t necessarily true—you could be an ML expert using TensorFlow, for instance.
+Dependency Parsing (DP) Alignment:
+•	Refines the structure of the modified text to retain the original text’s grammatical integrity. This step ensures alignment while keeping the output authentic.
+
+What the Three Steps Do:
+	Make texts more similar in meaning.
+	Strengthen the "if A is true, then B is true" (directional) relationship.
+	Tie the output back to the original text to ensure authenticity.
+See Appendix 2 for example (optimize sales message for client needs)
+Data Output Example
+Input: High-Level Function Input (Pydantic or Raw Dictionary)
+	responsibilities = {"resp1": "Managed a team of developers"}
+	requirements = {"req1": "Experience leading teams", "req2": "Proven leadership skills"}
+Processing
+High-Level Function: 
+Validates inputs if they are raw dictionaries; iterate over responsibilities and calls the low-level function.
+
+Low-Level Function (for "resp1"): 
+Refines "Managed a team of developers" against each requirement
+	"req1": "Experience leading teams"
+	"req2": "Proven leadership skills"
+Outputs: 
+<insert code>
+ResponsibilityMatch(
+    optimized_by_requirements={
+        "req1": OptimizedText(optimized_text="Managed a team of developers with leadership experience."),
+        "req2": OptimizedText(optimized_text="Managed a team of developers demonstrating proven leadership.")
+    }
+)
+Aggregation (High-Level): Wraps all ResponsibilityMatch objects in a ResponsibilityMatches model.
+
+Final Output
+<insert code>
+ResponsibilityMatches(
+    responsibilities={
+        "resp1": ResponsibilityMatch(
+            optimized_by_requirements={
+                "req1": OptimizedText(optimized_text="Managed a team of developers with leadership experience."),
+                "req2": OptimizedText(optimized_text="Managed a team of developers demonstrating proven leadership.")
+            }
+        )
+    }
+)
+
+Appendix A: Runnable Code
+Pydantic Models
+<insert code>
+# Model to validate the initial output: optimized text for a single responsibility
+# to requirement match
+class OptimizedText(BaseModel):
+    """
+    Pydantic base model for higher level models such as ResponsibilityMatch.
+
+    Exmaple data:
+        {
+            "optimized_text": "Led strategic initiatives for a leading multinational IT corporation."
+        }
+    """
+
+    optimized_text: str
+
+# Model to validate the next output: optimized texts for multiple requirements
+class ResponsibilityMatch(BaseModel):
+    """
+    Pydantic model that validates the structure mapping requirement_keys to
+    their corresponding optimized text objects.
+
+    Example Output:
+        A dictionary where:
+        - Keys are `requirement_key`s (e.g., "0.pie_in_the_sky.0").
+        - Values are objects containing the optimized text for the corresponding requirement.
+
+    Structure:
+        {
+            "0.pie_in_the_sky.0": {
+                "optimized_text": "Led strategic initiatives for a leading multinational IT corporation."
+            },
+            "0.pie_in_the_sky.1": {
+                "optimized_text": "Optimized the service partner ecosystem for a major global IT vendor."
+            }
+        }
+
+    Attributes:
+        - optimized_by_requirements (Dict[str, OptimizedText]):
+            A dictionary mapping requirement keys to their corresponding `OptimizedText` objects.
+    """
+
+    optimized_by_requirements: Dict[str, OptimizedText]
+
+# *Model to validate final output: multiple resp to requirements matches
+class ResponsibilityMatches(BaseModel):
+    """
+    Pydantic model for validating nested responsibilities and their associated requirement matches.
+
+    This model is designed to handle the hierarchical structure of responsibilities and
+    their corresponding requirement-based optimized texts. It validates the format of
+    nested JSON files where responsibilities map to multiple requirement-based optimizations.
+
+    Main purpose: validate I/O in the resume editing process, and validate responsibilities
+    json files in iteration 1 and beyond.
+
+    Structure Overview:
+    - At the top level, the keys represent `responsibility_key`s (e.g., "0.responsibilities.0").
+    - Each responsibility key maps to a dictionary of `requirement_key`s.
+    - Each `requirement_key` maps to an object containing the `optimized_text`.
+
+    Example JSON Structure:
+    ```json
+    {
+        "0.responsibilities.0": {
+            "0.pie_in_the_sky.0": {
+                "optimized_text": "Led strategic initiatives for a leading multinational IT
+                corporation..."
+            },
+            "0.pie_in_the_sky.1": {
+                "optimized_text": "Optimized the service partner ecosystem for
+                a major global IT vendor..."
+            }
+        },
+        "0.responsibilities.1": {
+            "1.down_to_earth.0": {
+                "optimized_text": "11 years of experience providing strategic insights
+                to a major global IT vendor..."
+            },
+            "1.down_to_earth.1": {
+                "optimized_text": "Experience optimizing the service partner ecosystem
+                in Asia Pacific..."
+            }
+        }
+    }
+    ```
+
+    Attributes:
+    - responsibilities (Dict[str, ResponsibilityMatch]):
+        A dictionary where:
+        - The keys represent `responsibility_key`s (e.g., "0.responsibilities.0").
+        - The values are instances of `ResponsibilityMatch` that contain the
+          nested dictionary of `requirement_key`s to `OptimizedText` mappings.
+
+    Usage Example:
+    ```python
+    from pydantic import ValidationError
+    import json
+
+    # Load the JSON data from a file
+    with open("path_to_responsibilities_json_file.json", 'r') as f:
+        json_data = json.load(f)
+
+    try:
+        # Validate the JSON structure using the ResponsibilityMatches model
+        validated_data = ResponsibilityMatches.parse_obj({"responsibilities": json_data})
+        print("Validation successful:", validated_data)
+
+    except ValidationError as e:
+        print(f"Validation error: {e}")
+    ```
+
+    Models Used:
+    - OptimizedText:
+        Validates the inner `optimized_text` for each requirement.
+        Contains a single string field for the text itself.
+    - ResponsibilityMatch:
+        Maps `requirement_key`s (e.g., "0.pie_in_the_sky.0") to instances of `OptimizedText`.
+
+    This model ensures the correct format for nested responsibilities and their corresponding
+    requirement matches, facilitating easier processing and validation of complex nested data.
+    """
+
+    responsibilities: Dict[str, ResponsibilityMatch] = Field(
+        ..., description="Mapping from responsibilty keys to nested requirement matches"
+    )
+
+# Model to validate responsibility input
+class Responsibilites(BaseModel):
+    """
+    Usage example:
+    responsibilities_input = {
+        "0.responsibilities.0": "Provided strategic insights to a major global IT vendor...",
+        "0.responsibilities.1": "Assisted a U.S.-based international services provider...",
+        # more responsibilities...
+    }
+
+    # Load the input data into Pydantic models for validation
+    validated_responsibilities = ResponsibilityInput(
+        responsibilities=responsibilities_input
+    )
+
+    # Accessing validated data
+    print(validated_responsibilities.responsibilities["0.responsibilities.0"])
+    """
+
+    responsibilities: Dict[str, str]
+
+# Model to validate requirement input
+class Requirements(BaseModel):
+
+Modify a Single Responsibility Text Based on Multiple Requirements
+<insert code>
+def modify_resp_based_on_reqs(
+    resp_key: str, resp: str, reqs: dict, llm_provider: str, model_id: str
+) -> Tuple[str, ResponsibilityMatch]:
+    """
+    *This is the sequential version of the modify_resps_based_on_reqs function.
+
+    Modify a single responsibility text by aligning it with multiple job requirements.
+
+    This function modifies one responsibility (`resp`) by matching it against multiple
+    job requirements (`reqs`). The alignment process involves three stages:
+    semantic alignment, entailment alignment, and dependency parsing (DP) alignment.
+    The TextEditor class is used for these modifications based on the provided model.
+
+    The process includes:
+    1. **Semantic Alignment**: Adjusting the responsibility text to ensure it semantically
+       aligns with the job requirement.
+    2. **Entailment Alignment**: Ensuring that the responsibility text can be logically
+       inferred from the job requirement.
+    3. **Dependency Parsing Alignment (DP)**: Refining the final responsibility text
+       while maintaining its original structure as much as possible.
+
+    Args:
+        resp_key (str): Unique identifier for the responsibility.
+        resp (str): The responsibility text to be modified.
+        reqs (dict): A dictionary of job requirements, where keys are unique requirement
+            identifiers and values are the requirement texts.
+        llm_provider (str): The language model provider (e.g., "openai").
+        model_id (str): The specific model version to be used (e.g., "gpt-3.5-turbo").
+
+    Returns:
+        tuple: A tuple containing:
+            - 'resp_key' (str): The same responsibility_key passed to the function.
+            - 'validated_modifications' (ResponsibilityMatch): A Pydantic model containing
+              a dictionary of modified responsibility texts for each requirement, keyed by
+              the requirement identifier, with each entry containing the final
+              `optimized_text`.
+
+    Example:
+        >>> modify_resp_based_on_reqs(
+                resp_key="resp1",
+                resp="Managed a team of 5 developers",
+                reqs={"req1": "Experience leading software development teams."},
+                llm_provider="openai",
+                model_id="gpt-3.5-turbo"
+            )
+
+        Returns:
+            ResponsibilityMatch(
+                optimized_by_requirements={
+                    "req1": OptimizedText(optimized_text="Fallback responsibility text for req1."),
+                    "req2": OptimizedText(optimized_text="Fallback responsibility text for req2."),
+                    # Additional requirements as necessary
+                }
+            )
+    """
+    # Instantiate the client within the function for each responsibility
+    openai_api_key = get_openai_api_key()  # Fetch the API key
+    client = OpenAI(api_key=openai_api_key)  # Instantiate the OpenAI client here
+
+    text_editor = TextEditor(
+        llm_provider=llm_provider, model_id=model_id, client=client, max_tokens=1024
+    )
+
+    local_modifications = {}
+
+    try:
+        for req_key, req in reqs.items():
+            logger.info(f"Modifying responsibility: {resp} \nwith requirement: {req}")
+
+            # Step 1: Align Semantic
+            revised = text_editor.edit_for_semantics(
+                candidate_text=resp,
+                reference_text=req,
+                temperature=0.5,
+            )
+            revised_text_1 = revised.data.optimized_text
+
+            # Step 2: Align Entailment
+            revised = text_editor.edit_for_entailment(
+                premise_text=revised_text_1,
+                hypothesis_text=req,
+                temperature=0.6,
+            )
+            revised_text_2 = revised.data.optimized_text
+
+            # Step 3: Align Original Sentence's DP
+            revised = text_editor.edit_for_dp(
+                target_text=revised_text_2,
+                source_text=resp,
+                temperature=0.9,
+            )
+            revised_text_3 = revised.data.optimized_text
+
+            # Validate the final optimized text using a pydantic model
+            optimized_text = OptimizedText(optimized_text=revised_text_3)
+
+            # Store the modification for this requirement
+            local_modifications[req_key] = optimized_text.model_dump()
+
+        # Validate the entire set of modifications for this responsibility
+        validated_modifications = ResponsibilityMatch(
+            optimized_by_requirements=local_modifications
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to modify responsibility {resp_key}: {e}")
+        # Ensure a fallback for this responsibility in case of an error
+        validated_modifications = ResponsibilityMatch(
+            optimized_by_requirements={
+                "req1": OptimizedText(optimized_text="Fallback responsibility text."),
+                "req2": OptimizedText(
+                    optimized_text="Another fallback responsibility text."
+                ),
+                # Add more requirements if necessary
+            }
+        )
+
+    return (resp_key, validated_modifications)  # Returns a Pydantic object
+
+Note: The code is the sequential version to illustrate workflow. Actual pipelines need to run parallel or async versions for performance. 
+Code Explanation
+This function modifies a single responsibility text to align it with multiple job requirements. Let’s follow the steps:
+Input Parameters:
+	resp_key: A unique identifier for the responsibility.
+	resp: The responsibility text, e.g., "Managed a team of 5 developers."
+	reqs: A dictionary of job requirements, e.g., {"req1": "Experience leading software development teams."}
+	llm_provider: Specifies the LLM provider, e.g., "openai".
+	model_id: Specifies the model version, default to "gpt-3.5-turbo".
+Instantiate LLM API Instance:
+	Fetch an OpenAI API key using get_openai_api_key().
+	Instantiate a client for interacting with the LLM (e.g., OpenAI).
+	Due to rate limitations, computation effort, and the option to batch and/or run concurrently, we need to instantiate LLM API instance at this level. 
+TextEditor Initialization:
+	A TextEditor object is instantiated.
+	TextEditor is a separate custom class that handles loading prompts, calling the Call LLM API functions, etc.
+
+Iteration over Requirements
+Now processing each requirement by looping over Requirements. For each job requirement in the reqs dictionary, execute the following steps: 
+Stage 1: Semantic Alignment (Make meaning similar)
+Use the edit_for_semantics method of TextEditor to modify the responsibility text so that its meaning aligns with the job requirement.
+Input: 
+	Candidate text: "Managed a team of 5 developers."
+	Reference text: "Experience leading software development teams."
+Output: 
+	Revised text (e.g., "Led a team of software developers to achieve project goals.").
+Stage 2: Entailment Alignment (Strengthen Responsibility -> Requirement relationship)
+Use the edit_for_entailment method of TextEditor to ensure that the revised text logically aligns with the job requirement.
+Input: 
+	Premise text: Output of Stage 1.
+	Hypothesis text: Job requirement.
+Output: 
+	Further refined text (e.g., "Successfully led a team of developers, meeting leadership expectations.").
+Stage 3: Dependency Parsing (DP) Alignment (Make it authentic)
+Use the edit_for_dp method to preserve the structure of the original responsibility text while keeping it aligned with the requirement.
+Input: 
+	Target text: Output of Stage 2.
+	Source text: Original responsibility.
+Output: 
+	Final aligned text (e.g., "Managed a team of developers with proven leadership experience.").
+Validation (--> Pydantic Model)
+	Wrap the final aligned text in a Pydantic model (OptimizedText).
+	Store the result in a dictionary, associating the requirement key (req_key) with the aligned text.
+
+Final Output
+Validate the dictionary of aligned texts for all requirements using the ResponsibilityMatch Pydantic model.
+Return a tuple: 
+	Original responsibility key (resp_key).
+	Validated results (ResponsibilityMatch).
+
+Modify Multiple Responsibility Texts Based on Multiple Requirements
+<insert code>
+def modify_multi_resps_based_on_reqs(
+    responsibilities: Union[dict[str, str], Responsibilites],
+    requirements: Union[dict[str, str], Requirements],
+    llm_provider: str = "openai",
+    model_id: str = "gpt-3.5-turbo",
+) -> ResponsibilityMatches:
+    """
+    This is the Sequential version of the modify_multi_resps_based_on_reqs function.
+
+    Modify multiple responsibilities by aligning them with multiple job requirements.
+
+    This function processes multiple responsibilities by aligning each responsibility
+    with multiple job requirements. It uses the `TextEditor` class to perform the
+    modifications and executes the processing in parallel using 'joblib' to speed up
+    the process, especially when dealing with large datasets.
+
+    Each responsibility undergoes a three-step modification process:
+    1. Semantic Alignment: Ensures that the responsibility text matches the meaning of the
+       job requirement.
+    2. Entailment Alignment: Ensures that the responsibility text can be logically inferred
+       from the job requirement.
+    3. Dependency Parsing Alignment (DP): Ensures that the structure of the responsibility
+       text is preserved while aligning it with the job requirement.
+
+    Args:
+        -responsibilities (dict): A dictionary of responsibility texts, where keys are
+            unique identifiers and values are the responsibility texts.
+        -requirements (dict): A dictionary of job requirement texts, where keys are unique
+            requirement identifiers and values are the requirement texts.
+        -TextEditor (callable): The class responsible for performing the text modifications.
+        -llm_provider (str, optional): The name of the model to be used (e.g., "openai").
+            Defaults to "openai".
+        -model_id (str, optional): The specific model version to be used (e.g., "gpt-3.5-turbo").
+            Defaults to "gpt-3.5-turbo".
+        -n_jobs (int, optional): The number of parallel jobs to run. Defaults to -1,
+            which means using all available processors.
+
+    Returns:
+        Pydantic object of a dictionary where keys are responsibility identifiers
+        and values are dictionaries of modified responsibility texts, each aligned
+        with multiple job requirements.
+
+    Example:
+        >>> modify_multi_resps_based_on_reqs(
+                responsibilities={"resp1": "Managed a team of 5 developers"},
+                requirements={"req1": "Experience leading software development teams."},
+                TextEditor=TextEditor,
+                model="openai",
+                model_id="gpt-3.5-turbo",
+                n_jobs=-1
+            )
+    """
+    # Validate the input responsibilities using Pydantic models
+    # Ensure responsibilities and requirements are Pydantic models
+    if isinstance(responsibilities, dict) and isinstance(requirements, dict):
+        validated_responsibilities = Responsibilites(responsibilities=responsibilities)
+        validated_requirements = Requirements(requirements=requirements)
+    else:
+        validated_responsibilities = responsibilities
+        validated_requirements = requirements
+
+    # Debugging: Check length of responsibilities and requirements
+    logger.info(
+        f"Number of responsibilities: {len(validated_responsibilities.responsibilities)}"
+    )
+    logger.info(f"Number of requirements: {len(validated_requirements.requirements)}")
+
+    # Initialize the result dictionary
+    modified_responsibilities = {}
+
+    # Sequential processing of responsibilities
+    for resp_key, resp in validated_responsibilities.responsibilities.items():
+        try:
+            # Call the function to modify a single responsibility based on the requirements
+            reqs = validated_requirements.requirements
+            result = modify_resp_based_on_reqs(
+                resp_key=resp_key,
+                resp=resp,
+                reqs=validated_requirements.requirements,
+                llm_provider=llm_provider,
+                model_id=model_id,
+            )
+
+            # If the result is a valid tuple (resp_key, modifications), add it to the output dictionary
+            if result and isinstance(result, tuple):
+                modified_responsibilities[result[0]] = result[1]
+
+        except Exception as e:
+            logger.error(f"Error processing responsibility {resp_key}: {e}")
+
+    # Validate the entire output with ResponsibilityMatches model
+    validated_output = ResponsibilityMatches(responsibilities=modified_responsibilities)
+
+    # Log the number of requirements for debugging
+    logger.info(f"Number of requirements: {len(validated_requirements.requirements)}")
+
+    return validated_output
+
+Note: The code is the sequential version to illustrate workflow. Actual pipelines need to run parallel or async versions for performance. 
+The modify_multi_resps_based_on_reqs processes multiple responsibilities, calling modify_resp_based_on_reqs for each one.
+Input Parameters:
+	responsibilities: A dictionary of responsibilities, e.g., {"resp1": "Managed a team of 5 developers."}, or designated Pydantic model
+	requirements: A dictionary of job requirements, e.g., {"req1": "Experience leading software development teams."}, or designated Pydantic model
+	llm_provider and model_id: Same as before.
+Validation (ensure inputs are Pydantic models):
+	Check if the inputs are dictionaries or Pydantic models.
+	If they are dictionaries, wrap them in Responsibilities and Requirements Pydantic models.
+
+Processing Each Responsibility
+Uses Direct Attribute Access: Instead of using model_dump() to unpack the Pydantic models into raw dictionaries:
+	Directly access the responsibilities and requirements attributes of the validated Pydantic models (Responsibilities and Requirements).
+	These attributes hold dictionaries that can be iterated over.
+Iterates Over Responsibilities
+	Loop through the responsibilities dictionary, which is an attribute of the Responsibilities model.
+	For each resp_key (responsibility ID) and resp (responsibility text): Call the lower-level function (modify_resp_based_on_reqs).
+Call modify_resp_based_on_reqs
+Pass the following as arguments to modify_resp_based_on_reqs:
+	resp_key: The current responsibility key.
+	resp: The current responsibility text.
+	reqs: The requirements dictionary (directly accessed from the Requirements Pydantic model).
+	Other necessary parameters (e.g., llm_provider, model_id).
+Example Output: returns a tuple
+	Key: resp_key (e.g., "resp1").
+	Value: A ResponsibilityMatch object containing the aligned texts for all requirements.
+Store Results: Add the result (key-value pair) to a dictionary (modified_responsibilities).
+
+Final Output
+Validation: Validate the entire dictionary of modified responsibilities using the ResponsibilityMatches Pydantic model.
+Return the validated ResponsibilityMatches object.
+
+Prompt Templates
+Semantic Alignment Prompt
+<insert code>
+SEMANTIC_ALIGNMENT_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Optimize the **candidate text** to increase semantic precision and similarity with the **reference text**.
+2. Reduce the semantic distance between them.
+3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+
+**Candidate text:**
+"{content_1}"
+
+**Reference text:**
+"{content_2}"
+
+**Return Format:**
+Return only a valid JSON object, without markdown formatting, as follows:
+
+{{
+  "optimized_text": "Edited version of candidate text"
+}}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax.
+"""
+
+
+Entailment Alignment Prompt
+<insert code>
+ENTAILMENT_ALIGNMENT_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Modify the **premise text** to enhance its entailment relationship with the **hypothesis text**.
+2. Improve the overall alignment and relevance between the two texts without changing the directional relationship.
+3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+4. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+
+**Premise text:**
+"{content_1}"
+
+**Hypothesis text:**
+"{content_2}"
+
+**Return Format:**
+Return only a valid JSON object, without markdown formatting, as follows:
+
+{{
+  "optimized_text": "Edited version of premise text"
+}}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax.
+"""
+
+
+Dependency Parsing (DP) Alignment Prompt
+<insert code>
+STRUCTURE_TRANSFER_PROMPT = """
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Analyze the **source text** at a high level.
+2. Apply the **source text's** sentence structure or syntactic dependencies to the **target text**, ensuring that the original meaning of the **target text** is preserved as much as possible.
+3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+
+**Target Text:**
+"{content_1}"
+
+**Source Text:**
+"{content_2}"
+
+**Return Format:**
+Return only a valid JSON object, without markdown formatting, as follows:
+
+{{
+  "optimized_text": "Edited version of the target text"
+}}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax.
+"""
+
+
+Appendix B: Text Optimization Example:  Modify Sales Message Based on Client Needs - with Claude Haiku
+Text to Match (client needs):
+We are looking for a solution to streamline internal operations by ensuring optimal resource utilization across teams, reducing bottlenecks, and achieving consistent delivery times without overburdening employees.
+Text to Modify (sales message):
+•	Original:
+Our cloud-based platform offers advanced workload optimization by dynamically redistributing tasks across your organization’s teams. With built-in analytics and predictive models, you can better allocate resources, improve turnaround times, and maintain a more balanced workload distribution across departments.
+•	More Similar in Meaning:
+Our cloud-based platform provides advanced workload optimization capabilities, dynamically redistributing tasks across your organization's teams to enhance resource utilization and operational efficiency. Leveraging built-in analytics and predictive models, the solution enables you to better allocate resources, improve turnaround times, and maintain a more balanced workload distribution across departments, addressing your need to streamline internal operations, reduce bottlenecks, and achieve consistent delivery times without overburdening employees.
+•	Strengthen Inference:
+Our advanced cloud-based platform offers comprehensive workload optimization capabilities, dynamically redistributing tasks across your organization's teams to enhance resource utilization and operational efficiency. Leveraging powerful analytics and predictive models, the solution enables you to better allocate resources, improve turnaround times, and maintain a balanced workload distribution across departments, addressing your need to streamline internal operations, reduce bottlenecks, and achieve consistent delivery times without overburdening employees.
+•	Make Authentic:
+“Our advanced cloud-based platform offers comprehensive workload optimization capabilities, dynamically redistributing tasks across your organization’s teams to enhance resource utilization and operational efficiency. Leveraging powerful analytics and predictive models, the solution enables you to better allocate resources, improve turnaround times, and maintain a balanced workload distribution across departments, addressing your need to streamline internal operations, reduce bottlenecks, and achieve consistent delivery times.”
+
+About This LinkedIn Article
+This article, "Pydantic Guardrails for LLM Pipelines: Harnessing Cognitive Drift (Part 4: Streamlining Text Alignment with Multi-Step Processing)", explores how to align and optimize text in LLM workflows using Pydantic models for validation and multi-step alignment techniques. Building on previous parts of the series, it dives into the challenges of handling complex, nested data structures and showcases how a systematic, iterative approach improves accuracy and creativity in text generation.
+Key highlights include:
+•	Leveraging Pydantic models for validating responsibilities and requirements data.
+•	Designing robust input/output pipelines with modularity and scalability in mind.
+•	Breaking down text alignment tasks into three focused steps: Semantic Alignment, Entailment Alignment, and Dependency Parsing Alignment.
+•	Real-world examples and simplified code snippets for multi-step alignment workflows.
+Whether you're managing AI pipelines or enhancing text editing for professional use cases, this article provides practical insights and actionable solutions for making your workflows reliable and efficient.
+
+#LLMPipelines #Pydantic #CognitiveDrift #MultiStepAlignment #AIWorkflow #TextEditing #MachineLearning #DataValidation #PythonDevelopment #NaturalLanguageProcessing

@@ -75,7 +75,27 @@ async def modify_resp_based_on_reqs_async(
                 model="openai",
                 model_id="gpt-4-turbo"
             )
+
+    !Note: Rationale for Temperature Settings in Text Alignment:
+        *1. Semantic Alignment (Temperature = 0.3):
+        - Low temperature ensures **minimal and controlled changes** to preserve the core meaning of
+        the candidate text while aligning it with the job requirement. This avoids excessive rewording
+        and keeps the semantic alignment subtle.
+        *2. Entailment Alignment (Temperature = 0.4):
+        - Slightly higher temperature provides a bit more flexibility to introduce **moderate changes**
+        that ensure the premise (candidate text) is logically supported by the hypothesis (job requirement).
+        This balances between maintaining structure and strengthening entailment without drastically
+        altering the original text.
+        *3. Dependency Parsing Alignment (Temperature = 0.7):
+        - High temperature allows for **larger structural modifications** to align the modified text with
+        the original candidate text's structure and tone. This step provides more freedom to reshape
+        the sentence while retaining authenticity and consistency with the original style of the resume.
+
+        Overall, the temperature strategy balances precision in alignment (low temperature) and
+        structural freedom (high temperature) to ensure a result that is both semantically aligned with
+        the job posting and consistent with the original resume's tone and style.
     """
+
     # Initialize the client based on llm_provider if needed
     if llm_provider == "openai":
         openai_api_key = get_openai_api_key()
@@ -107,20 +127,20 @@ async def modify_resp_based_on_reqs_async(
 
             # Step 1: Semantic Alignment
             revised = await text_editor.edit_for_semantics_async(
-                candidate_text=resp, reference_text=req
-            )
+                candidate_text=resp, reference_text=req, temperature=0.3
+            )  # Set temperature low to make the change light
             revised_text_1 = revised.data.optimized_text
 
             # Step 2: Entailment Alignment
             revised = await text_editor.edit_for_entailment_async(
-                premise_text=revised_text_1, hypothesis_text=req
-            )
+                premise_text=revised_text_1, hypothesis_text=req, temperature=0.4
+            )  # set temp low to make the change moderate
             revised_text_2 = revised.data.optimized_text
 
-            # Step 3: Dependency Parsing Alignment
+            # Step 3: Dependency Parsing Alignment -> Original Text
             revised = await text_editor.edit_for_dp_async(
-                target_text=revised_text_2, source_text=resp
-            )
+                target_text=revised_text_2, source_text=resp, temperature=0.8
+            )  # set temp high to make large change to retain original text's structure and tone
             revised_text_3 = revised.data.optimized_text
 
             # Store the optimized text

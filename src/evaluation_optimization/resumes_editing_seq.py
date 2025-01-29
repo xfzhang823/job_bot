@@ -80,6 +80,25 @@ def modify_resp_based_on_reqs(
                     # Additional requirements as necessary
                 }
             )
+
+        !Note: Rationale for Temperature Settings in Text Alignment:
+        *1. Semantic Alignment (Temperature = 0.3):
+        - Low temperature ensures **minimal and controlled changes** to preserve the core meaning of
+        the candidate text while aligning it with the job requirement. This avoids excessive rewording
+        and keeps the semantic alignment subtle.
+        *2. Entailment Alignment (Temperature = 0.4):
+        - Slightly higher temperature provides a bit more flexibility to introduce **moderate changes**
+        that ensure the premise (candidate text) is logically supported by the hypothesis (job requirement).
+        This balances between maintaining structure and strengthening entailment without drastically
+        altering the original text.
+        *3. Dependency Parsing Alignment (Temperature = 0.8):
+        - High temperature allows for **larger structural modifications** to align the modified text with
+        the original candidate text's structure and tone. This step provides more freedom to reshape
+        the sentence while retaining authenticity and consistency with the original style of the resume.
+
+        Overall, the temperature strategy balances precision in alignment (low temperature) and
+        structural freedom (high temperature) to ensure a result that is both semantically aligned with
+        the job posting and consistent with the original resume's tone and style.
     """
     # Instantiate the client within the function for each responsibility
     openai_api_key = get_openai_api_key()  # Fetch the API key
@@ -99,7 +118,7 @@ def modify_resp_based_on_reqs(
             revised = text_editor.edit_for_semantics(
                 candidate_text=resp,
                 reference_text=req,
-                temperature=0.5,
+                temperature=0.3,
             )
             revised_text_1 = revised.data.optimized_text
 
@@ -107,7 +126,7 @@ def modify_resp_based_on_reqs(
             revised = text_editor.edit_for_entailment(
                 premise_text=revised_text_1,
                 hypothesis_text=req,
-                temperature=0.6,
+                temperature=0.4,
             )
             revised_text_2 = revised.data.optimized_text
 
@@ -115,7 +134,7 @@ def modify_resp_based_on_reqs(
             revised = text_editor.edit_for_dp(
                 target_text=revised_text_2,
                 source_text=resp,
-                temperature=0.9,
+                temperature=0.8,
             )
             revised_text_3 = revised.data.optimized_text
 

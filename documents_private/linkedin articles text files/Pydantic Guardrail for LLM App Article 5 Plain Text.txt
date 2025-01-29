@@ -1,0 +1,1661 @@
+Pydantic Guardrails for LLM Pipelines: Harnessing Cognitive Drift (Part 5: Generate Ideas with Array of Thoughts)
+Xiao-Fei Zhang
+December 26, 2024
+Introduction
+•	Part 1 introduced how Pydantic ensures structure and consistency in LLM pipelines, managing cognitive drift effectively.
+•	Part 2 explored modular pipeline design, focusing on the data layer and integration layer.
+•	Part 3 demonstrated integrating dynamic web scraping with AI workflows, using Pydantic models as a safeguard.
+•	Part 4 covered text alignment through iterative validation of complex nested structures.
+In Part 5 of this series, we explore the "thought_generation" pipeline, a novel approach for systematically organizing ideas into an "array of thoughts." By leveraging Pydantic models and "horizontal" and "vertical" thought generation workflows, the pipeline creates structured outputs for applications such as agent-guided conversations, website design, content creation, and more. 
+The code samples are from a pipeline of an open-source project (building a multi-agent system) that I have been collaborating with my friend Walid Negm.
+________________________________________
+What Does Thoughts Generation Pipeline Do
+•	Step 1: Horizontal Thought Generation Start with an idea, generate diverse sub-topics (horizontal thoughts), and validate them using Pydantic models to create a high-level conceptual map.
+•	Step 2: Vertical Thought Generation Break down each horizontal thought into detailed sub-thoughts using structured patterns, ensuring consistency and coherence through validation.
+•	Step 3: Final Output: Array of Thoughts Combine validated horizontal and vertical thoughts into a nested array, forming a structured hierarchy of ideas and sub-concepts.
+________________________________________
+Example. Future of edge computing in smart cities
+ 
+LLM Model: Claude Haiku
+________________________________________
+In our open-source project, the generated hierarchical topics/sub-topics are used to guide agents' conversations; therefore, a small, low-dimensional array suffices. But theoretically, you can add as many dimensions as you need. Array of thoughts can be adopted for other complex content creation and organization tasks, such as:
+•	Applications of the Array of Thoughts Beyond guiding agents, the array of thoughts pipeline supports diverse tasks:
+•	Rapid Website Design: Generate and organize web page concepts and features systematically.
+•	Product Development: Brainstorm product ideas, prioritize features, and plan implementation steps.
+•	Marketing Videos: Create scripts or prompts for AI video tools by refining hierarchical ideas.
+•	Training Datasets: Structure concepts for high-quality, labeled datasets in AI models.
+________________________________________
+What’s in This Article
+This article will cover the following:
+•	Data Layer: Pydantic Models
+•	Business Logic (pipeline design) and Integration.
+•	Pydantic in Action
+•	Appendix: Runnable Code & Explanation
+________________________________________
+Data Layer: Pydantic Models as Guardrails
+The thought generation pipeline relies on a 3-tier hierarchical structure of Pydantic models to enforce validation and maintain logical consistency across all stages:
+1. Idea Level
+•	Definition: Represents the overarching topic or main concept.
+•	Model: IdeaJSONModel
+•	Fields: idea (required): The primary topic or theme; thoughts (optional): A list of ThoughtJSONModel instances representing major thoughts under the idea.
+2. Thought Level
+•	Definition: Represents high-level sub-concepts derived from the idea.
+•	Model: ThoughtJSONModel
+•	Fields: thought (required): Name of the thought or concept; description (optional): A brief explanation of the thought; sub_thoughts (optional): A list of SubThoughtJSONModel instances providing further details.
+3. Sub-Thought Level
+•	Definition: Represents detailed components related to each thought.
+•	Model: SubThoughtJSONModel
+•	Fields: name (required): Name of the sub-thought; description (required): Detailed explanation of the sub-thought; importance (optional): Significance of the sub-thought; connection_to_next (optional): Links the sub-thought to the next one for logical progression.
+Clustering Level (Optional)
+•	Definition: Groups thoughts into clusters for refinement or reorganization.
+•	Model: IdeaClusterJSONModel
+•	Fields: idea (required): The overarching idea being clustered; clusters (required): A list of ClusterJSONModel instances, each representing a cluster of thoughts; ClusterJSONModel Fields
+________________________________________
+Validation Workflow
+The pipeline uses these models iteratively to validate outputs at each stage:
+•	Horizontal Thought Generation: Each generated horizontal thought is validated against IdeaJSONModel to ensure it fits within the conceptual space and maintains relevance.
+model = IdeaJSONModel(**data)  # Unpacks data into the model for validation
+•	Vertical Thought Generation: Detailed sub-thoughts for each horizontal thought are validated using ThoughtJSONModel and SubThoughtJSONModel. This ensures that every level of the hierarchy remains logically consistent and well-structured.
+model = ThoughtJSONModel.(**data)
+This ensures the hierarchical array of thoughts remains structured and reliable, ready for downstream tasks like conversational agents or content generation.
+Note: All code snippets in this section are for illustration only. Full, runnable examples are provided in the Appendix.
+________________________________________
+Why Pydantic Matters
+As we have already talked about in Part 1 of this series, LLMs are powerful tools, but their outputs are susceptible to cognitive drift, where subtle deviations in focus or structure occur during iterative or multi-step workflows.
+In complex pipelines like ours here, which involve multiple nested loops for horizontal and vertical thought generation, agent interactions, evaluation, etc., it can get messy really fast: errors like missing fields, malformed data, or tangential outputs could cascade and break the entire system.
+Therefore, Pydantic models serve as the guardrails, ensuring consistency, structure, and reusability throughout.
+Cognitive Drift Mitigation
+Pydantic models enforce strict schemas (IdeaJSONModel, ThoughtJSONModel, SubThoughtJSONModel) to validate outputs at every stage of the pipeline:
+•	Error detection: Detects errors, validates structure, and aligns outputs across iterations.
+•	Consistency Across Iterations: Validates each step, ensuring logical alignment while allowing incremental refinement.
+•	Prevention of Cascading Issues: Maintains the hierarchy of ideas, thoughts, and sub-thoughts, preventing system-wide errors.
+Code Example: Validation in Action
+from pydantic import ValidationError
+
+try:
+    idea_model = IdeaJSONModel.parse_obj(horizontal_data)
+except ValidationError as e:
+    print(f"Validation error: {e}")Copy code
+FastAPI Integration and Scalability
+Additionally, my collaborator Walid Negm is building the front-end with FastAPI. FastAPI's automatic schema generation simplifies development, reducing time-to-deployment for front-end systems. FastAPI uses Pydantic heavily. Pydantic also simplifies integration with our FastAPI-powered front end:
+•	Input Validation: Ensures user-submitted data conforms to the pipeline’s schema.
+•	Output Serialization: Returns hierarchical data as validated JSON, ready for front-end consumption.
+•	Automatic Documentation: FastAPI auto-generates OpenAPI specs using Pydantic models, providing clear, interactive documentation.
+Example FastAPI Endpoint
+from fastapi import FastAPI
+
+@app.post("/generate-thoughts/")
+async def generate_thoughts(input_data: IdeaJSONModel):
+    result = run_pipeline_openai(idea=input_data.idea, ...)
+    return result
+________________________________________
+Key Takeaways
+•	Mitigating LLM Drift: Catch errors early and maintain task alignment.
+•	Iterative Validation: Ensure consistency and logical progression at every step.
+•	Seamless Integration: Simplify workflows with FastAPI compatibility.
+•	Scalable Design: Handle complex hierarchies and large datasets efficiently.
+•	Versatility: Adaptable to diverse domains, from content creation to training datasets.
+This modular, validated approach streamlines workflows, mitigates cognitive drift, and ensures the pipeline delivers reliable, reusable results.
+________________________________________
+Few Simplified Core Examples
+IdeaJSONModel
+The IdeaJSONModel represents the top-level structure for the main idea and its associated thoughts. It serves as the starting point for "thought generation" and ensures the primary concept is consistently represented throughout the pipeline.
+Key Features:
+•	Encapsulates Thoughts: Holds both the main idea and its associated horizontal thoughts (instances of ThoughtJSONModel).
+•	Reusability: Enables agents to reuse the structured outputs for downstream tasks.
+•	Validation: Guarantees alignment with the expected schema.
+from pydantic import BaseModel
+from typing import List, Optional
+
+class IdeaJSONModel(BaseModel):
+    idea: str
+    thoughts: Optional[List["ThoughtJSONModel"]]
+
+# Example JSON
+{
+    "idea": "sustainable energy",
+    "thoughts": [
+        {
+            "thought": "renewable resources",
+            "sub_thoughts": [
+                {"name": "solar energy", "description": "Energy from the sun"},
+                {"name": "wind energy", "description": "Energy from the wind"}
+            ]
+        }
+    ]
+}
+ThoughtJSONModel
+The ThoughtJSONModel defines high-level sub-concepts derived from the main idea. It serves as a bridge between broad horizontal thoughts and deeper vertical explorations.
+Key Features:
+•	Hierarchical Structure: Represents a single thought with an optional description and nested sub-thoughts (instances of SubThoughtJSONModel).
+•	Flexible Schema: Accommodates additional context or details through optional attributes.
+class ThoughtJSONModel(BaseModel):
+    thought: str
+    description: Optional[str]
+    sub_thoughts: Optional[List["SubThoughtJSONModel"]]
+
+# Example JSON
+{
+    "thought": "renewable resources",
+    "description": "Resources that can replenish naturally",
+    "sub_thoughts": [
+        {"name": "solar energy", "description": "Energy harnessed from sunlight"}
+    ]
+} 
+________________________________________
+SubThoughtJSONModel
+The SubThoughtJSONModel represents the most detailed layer in the hierarchy. It defines sub-thoughts associated with a main thought, enabling vertical progression within the pipeline.
+Key Features:
+•	Detailed Definitions: Includes required attributes (name and description) and optional fields (importance and connection_to_next) to enrich relationships and significance.
+•	Supports Logical Coherence: Ensures all sub-thoughts are meaningfully connected and structured.
+class SubThoughtJSONModel(BaseModel):
+    name: str
+    description: str
+    importance: Optional[str]
+    connection_to_next: Optional[str]
+
+# Example JSON
+{
+    "name": "solar energy",
+    "description": "Energy harnessed from sunlight",
+    "importance": "high",
+    "connection_to_next": "Supports grid decarbonization"
+} 
+Notes:
+1.	These snippets illustrate how core models are structured and validated to ensure consistency throughout the pipeline. Full, runnable examples are available in the Appendix.
+2.	In the actual pipeline, a "mirror" version of these models with indices was created to facilitate seamless integration with agent pipelines.
+________________________________________
+Business Logic Layer: Thought Generation Pipelines
+High-Level Pipeline Flow
+Step 1: Horizontal Thought Generation
+•	Start with a main topic, called Idea.
+•	Generate a range of sub-topics, called horizontal thoughts.
+•	Use clustering and ranking techniques to ensure relevance and diversity in the generated sub-topics.
+•	Validate the horizontal thoughts using a schema, creating a high-level "map" of the conceptual space (Pydantic models).
+Step 2: Vertical Thought Generation
+•	For each horizontal thought, follow specific patterns (e.g., simple-to-complex, implementation steps) to break it down into sub-thoughts meaningfully.
+•	Validate each vertical chain to maintain consistency and logical coherence.
+Step 3: Final Output: Array of Thoughts
+•	Combine the validated "horizontal" and "vertical thoughts" into a nested array of thoughts, creating a structured hierarchy.
+•	This hierarchy progresses systematically from the overarching idea to a refined network of concepts and sub-concepts.
+________________________________________
+Horizontal Thought Generation
+Horizontal Thought Generation is the first step in the pipeline, designed to create a broad range of sub-topics (horizontal thoughts) under a main idea (you can also tweak the default ratio.) This process ensures that the pipeline starts with diverse, high-quality concepts while aligning them with the overarching theme.
+How It Works: The "10-7-5" Rule
+The process follows a simple reduction logic that readers can easily visualize:
+1.	Generate 10 Thoughts: Start by generating 10 diverse sub-topics for the main idea.
+2.	Shrink to 7: Use clustering techniques to group similar thoughts and refine the output to 7 meaningful sub-topics.
+3.	Take the Top 5: Rank the refined thoughts and select the top 5 most relevant ones for further use.
+This step-by-step reduction ensures that only the most impactful and meaningful thoughts are carried forward while maintaining diversity.
+Process Overview
+1.	Input: A main idea (e.g., "sustainable energy").
+2.	Output: A high-quality, validated list of 5 horizontal thoughts.
+3.	Techniques Used: Clustering and ranking to refine the output.
+4.	Validation: All results are validated against the IdeaJSONModel schema to ensure alignment with the expected format.
+________________________________________
+Example: From Idea to Top Thoughts
+Main Idea: "Sustainable Energy"
+Generated 10 Thoughts: 
+[ {"thought": "renewable resources", "description": "Energy that replenishes naturally"}, {"thought": "energy storage", "description": "Methods for storing energy efficiently"}, {"thought": "energy efficiency", "description": "Reducing energy waste"}, {"thought": "off-grid solutions", "description": "Energy independence in remote areas"}, {"thought": "carbon capture", "description": "Reducing carbon emissions"}, {"thought": "nuclear energy", "description": "Harnessing atomic power"}, {"thought": "geothermal energy", "description": "Tapping into Earth's heat"}, {"thought": "biofuels", "description": "Fuel from organic materials"}, {"thought": "tidal energy", "description": "Harnessing ocean currents"}, {"thought": "smart grids", "description": "Modernizing power distribution"} ]
+Shrunk to 7: Clustering combines overlapping ideas like "energy efficiency" and "off-grid solutions," reducing the list to 7 distinct thoughts.
+Top 5 Selected: Ranking prioritizes the most impactful sub-topics, such as: 
+[ {"thought": "renewable resources", "description": "Energy that replenishes naturally"}, {"thought": "energy storage", "description": "Methods for storing energy efficiently"}, {"thought": "carbon capture", "description": "Reducing carbon emissions"}, {"thought": "smart grids", "description": "Modernizing power distribution"}, {"thought": "geothermal energy", "description": "Tapping into Earth's heat"} 
+Code Example
+from typing import List, Dict
+from pydantic import BaseModel
+
+# Core Pydantic models
+class ThoughtJSONModel(BaseModel):
+    thought: str
+    description: str
+
+class IdeaJSONModel(BaseModel):
+    idea: str
+    thoughts: List[ThoughtJSONModel]
+
+# ThoughtGenerator class (simplified to show main usage)
+class ThoughtGenerator:
+    def __init__(self, model_id: str = "gpt-4-turbo", temperature: float = 0.7):
+        self.model_id = model_id
+        self.temperature = temperature
+
+    def generate_initial_thoughts(self, idea: str, num_thoughts: int) -> List[Dict]:
+        """Simulate generating initial thoughts with an LLM."""
+        # Simulated LLM output
+        return [
+            {"thought": "renewable resources", "description": "Energy that replenishes naturally"},
+            {"thought": "energy storage", "description": "Methods for storing energy efficiently"},
+            {"thought": "energy efficiency", "description": "Reducing energy waste"},
+            {"thought": "off-grid solutions", "description": "Energy independence in remote areas"},
+            {"thought": "carbon capture", "description": "Reducing carbon emissions"},
+            {"thought": "nuclear energy", "description": "Harnessing atomic power"},
+            {"thought": "geothermal energy", "description": "Tapping into Earth's heat"},
+            {"thought": "biofuels", "description": "Fuel from organic materials"},
+            {"thought": "tidal energy", "description": "Harnessing ocean currents"},
+            {"thought": "smart grids", "description": "Modernizing power distribution"}
+        ]
+
+    def shrink_to_clusters(self, thoughts: List[Dict], num_clusters: int) -> List[Dict]:
+        """Simulate clustering logic."""
+        return thoughts[:num_clusters]  # Simplified clustering logic
+
+    def rank_and_select_top(self, thoughts: List[Dict], top_n: int) -> List[Dict]:
+        """Simulate ranking and selecting the top thoughts."""
+        return thoughts[:top_n]  # Simplified ranking logic
+
+# Pipeline function using ThoughtGenerator
+def generate_horizontal_thoughts(idea: str) -> Dict:
+    # Initialize the ThoughtGenerator
+    thought_generator = ThoughtGenerator()
+
+    # Step 1: Generate 10 initial thoughts
+    initial_thoughts = thought_generator.generate_initial_thoughts(idea, num_thoughts=10)
+
+    # Step 2: Shrink to 7 by clustering
+    clustered_thoughts = thought_generator.shrink_to_clusters(initial_thoughts, num_clusters=7)
+
+    # Step 3: Rank and select top 5
+    top_thoughts = thought_generator.rank_and_select_top(clustered_thoughts, top_n=5)
+
+    # Validate and return the final output
+    return IdeaJSONModel(idea=idea, thoughts=top_thoughts).dict()
+
+# Example usage
+result = generate_horizontal_thoughts("sustainable energy")
+print(result)
+Why This Works
+•	Clarity: The "10-7-5" rule makes the process easy to follow and implement.
+•	Efficiency: By gradually refining the list, the pipeline ensures relevance while maintaining diversity.
+•	Validation: Using IdeaJSONModel ensures outputs are consistently formatted and immediately usable for downstream tasks.
+Note: All code snippets in this section are for illustration only. Full, runnable examples are provided in the Appendix.
+________________________________________
+Vertical Thought Expansion
+Vertical Thought Expansion is the second step in the pipeline, designed to dive deeper into specific horizontal thoughts. This process breaks down each horizontal thought into sub-thoughts, exploring the concept in greater detail and following structured progression patterns (e.g., simple-to-complex, implementation steps). The goal is to enrich the hierarchical array of thoughts by adding depth and ensuring logical coherence.
+How It Works
+The process for vertical thought expansion follows these steps:
+1.	Select a Horizontal Thought: Start with one of the validated horizontal thoughts (e.g., "renewable resources").
+2.	Apply Progression Patterns: Follow specific patterns like chronological order, problem-solution, or simple-to-complex to structure the sub-thoughts meaningfully.
+3.	Generate Sub-Thoughts: Use the pipeline to create 5–7 detailed sub-thoughts under the selected horizontal thought.
+4.	Validate Outputs: Each vertical chain is validated against the ThoughtJSONModel and SubThoughtJSONModel schemas to ensure consistency and coherence.
+Why This Works
+•	Depth: Vertical expansion provides a deeper understanding of each horizontal thought.
+•	Structure: Progression patterns ensure that the sub-thoughts are logically organized.
+•	Validation: Using ThoughtJSONModel and SubThoughtJSONModel guarantees consistent outputs for further use.
+About Progression Patterns
+Progression Patters are achieved through prompting. Here are the four types:
+ 
+Progression patterns are set through prompting (see Appendix for prompt example)
+________________________________________
+Example
+Horizontal Thought: "Renewable Resources"
+1.	Generated Sub-Thoughts:
+2.	Structured with a Pattern: Sub-thoughts are organized following a simple-to-complex progression.
+Simplified Code Example
+from typing import List, Dict
+from pydantic import BaseModel
+
+# Pydantic model for sub-thoughts
+class SubThoughtJSONModel(BaseModel):
+    name: str
+    description: str
+
+class ThoughtJSONModel(BaseModel):
+    thought: str
+    description: str
+    sub_thoughts: List[SubThoughtJSONModel]
+
+# ThoughtGenerator class (simplified to show main usage)
+class ThoughtGenerator:
+    def __init__(self, model_id: str = "gpt-4-turbo", temperature: float = 0.7):
+        self.model_id = model_id
+        self.temperature = temperature
+
+    def generate_sub_thoughts(self, thought: str, num_sub_thoughts: int) -> List[Dict]:
+        """Simulate generating sub-thoughts with an LLM."""
+        # Simulated LLM output
+        return [
+            {"name": "solar energy", "description": "Energy harnessed from sunlight"},
+            {"name": "wind energy", "description": "Energy derived from wind currents"},
+            {"name": "hydropower", "description": "Energy from flowing water"},
+            {"name": "biomass", "description": "Organic materials as fuel"},
+            {"name": "geothermal energy", "description": "Harnessing Earth's heat"}
+        ]
+
+# Pipeline function for vertical thought expansion
+def expand_vertical_thought(thought: str) -> Dict:
+    # Initialize the ThoughtGenerator
+    thought_generator = ThoughtGenerator()
+
+    # Generate 5 sub-thoughts for the given horizontal thought
+    sub_thoughts_data = thought_generator.generate_sub_thoughts(thought, num_sub_thoughts=5)
+
+    # Validate and return the final output
+    return ThoughtJSONModel(
+        thought=thought,
+        description=f"Sub-thoughts for {thought}",
+        sub_thoughts=sub_thoughts_data
+    ).dict()
+
+# Example usage
+result = expand_vertical_thought("renewable resources")
+print(result) 
+________________________________________
+Integrating Horizontal and Vertical Pipelines
+The integration combines the breadth of horizontal thought generation with the depth of vertical expansion, with validated hierarchy of main concept -> concept -> sub-concepts. By systematically validating and structuring outputs, the pipeline creates reusable, hierarchical outputs that guide agents or content creation tasks effectively.
+How It Works
+The integration is handled by the run thought generation pipeline function (run_pipeline_openai or run_pipeline_claude), which orchestrates the entire process. This function:
+1.	Generates Horizontal Thoughts: Starts by intaking a phrase, generating and validating a broad range of sub-topics using the horizontal pipeline.
+2.	Expands Vertical Thoughts: For each validated horizontal thought, it dives deeper to generate detailed sub-thoughts using the vertical pipeline.
+3.	Combines Results: Outputs a nested hierarchy of ideas, thoughts, and sub-thoughts as IdeaJSONModel and save as a structured JSON file
+Why This Integration Matters
+•	Systematic Structure: Combining horizontal and vertical pipelines ensures a well-rounded exploration of ideas, from breadth to depth.
+•	Reusability: The nested array of thoughts can be easily used by downstream systems like conversational agents or content generation tools.
+•	Validation: Pydantic models throughout every step enforcing consistency, eliminating errors and maintaining logical coherence.
+________________________________________
+Code Example
+Here’s a simplified version of how the run_pipeline_openai integrates horizontal and vertical thought generation:
+from typing import Union, Dict
+from pathlib import Path
+
+# Simulating the pipeline for OpenAI
+def run_pipeline_openai(
+    idea: str,
+    num_of_thoughts: int,
+    output_file: Union[Path, str],
+    model_id: str = "gpt-4-turbo"
+) -> Dict:
+    # Step 1: Generate Horizontal Thoughts
+    parellel_thoughts_generation_wt_openai_pipeline(
+        idea=idea,
+        num_of_thoughts=num_of_thoughts,
+        json_file=output_file,
+        model_id=model_id
+    )
+
+    # Step 2: Read Horizontal Thoughts
+    horizontal_data = read_from_json_file(output_file)
+
+    # Step 3: Generate Vertical Thoughts for each Horizontal Thought
+    for thought in horizontal_data["thoughts"]:
+        vertical_thought_wt_openai_pipeline(
+            input_json_file=output_file,
+            output_json_file=output_file,
+            model_id=model_id,
+            num_of_sub_thoughts=5
+        )
+
+    # Return the final nested array of thoughts
+    return read_from_json_file(output_file)
+
+# Example usage
+result = run_pipeline_openai(
+    idea="sustainable energy",
+    num_of_thoughts=10,
+    output_file="output/sustainable_energy.json"
+)
+print(result)
+________________________________________
+Appendix: Full Runnable Code Snippets & Explanation
+Here is the related full codebase for reference. As the project is still ongoing, the GitHub is not yet public.
+Pydantic Models
+Sub Thought Model
+class SubThoughtJSONModel(BaseModel):
+    """
+    Represents a sub-thought within a broader main thought,
+    with optional fields for indicating the importance of the sub-thought and
+    how it connects to other sub-thoughts.
+
+    Attributes:
+        - name (str): The name of the sub-thought (required).
+        - description (str): A description of the sub-thought (required).
+        - importance (Optional[str]): The importance of the sub-thought,
+        if applicable (optional).
+        - connection_to_next (Optional[str]): Description of the connection
+        between this sub-thought and the next, if applicable (optional).
+    """
+
+    name: str = Field(..., description="The name of the sub-thought")
+    description: str = Field(..., description="A description of the sub-thought")
+    importance: Optional[str] = Field(
+        None, description="The importance of the sub-thought, optional"
+    )
+    connection_to_next: Optional[str] = Field(
+        None,
+        description="Description of how this sub-thought connects to the next, optional",
+    )
+Thought Model
+class ThoughtJSONModel(BaseModel):
+    """
+    Represents a main thought associated with one or more sub-thoughts.
+    This model ensures that the thought data follows the required structure and validates that
+    each sub-thought meets the specified requirements.
+
+    Attributes:
+        - thought (str): The main thought or concept (required).
+        - description (str): A description of the main thought (required).
+        - sub_thoughts (Optional[List[SubThoughtJSONModel]]): An optional list of sub-thoughts
+          associated with the main thought.
+    """
+
+    thought: str = Field(..., description="The main thought or concept")
+    description: Optional[str] = Field(
+        None, description="A description of the main thought"
+    )  # *defines thought's description (in pydantic, if the definition
+    # *immediately follows an attribute, then it defines the attribute.)
+    sub_thoughts: Optional[List[SubThoughtJSONModel]] = Field(
+        None,
+        description="An optional list of sub-thoughts associated with the main thought",
+    )
+
+    class Config:
+        "Remove None values"
+        from_attributes = True
+
+        # Exclude None values from JSON output
+        json_encoders = {Optional: lambda v: v or None}
+
+        # Exclude fields with None values in JSON output
+        exclude_none = True
+Idea Model
+class IdeaJSONModel(BaseModel):
+    idea: str = Field(..., description="The overarching theme or idea.")
+    thoughts: Optional[List[ThoughtJSONModel]] = Field(
+        None, description="A list of individual thoughts without clustering."
+    )
+    # clusters: Optional[List[ClusterJSONModel]] = Field(
+    #     None, description="A list of clusters, each containing grouped thoughts."
+    # )
+
+    class Config:
+        "Remove None values"
+        from_attribute = True
+        # Exclude None values from JSON output
+        json_encoders = {Optional: lambda v: v or None}
+Idea Cluster
+class ClusterJSONModel(BaseModel):
+    name: str = Field(..., description="Name of the cluster")
+    description: Optional[str] = Field(None, description="Description of the cluster")
+    thoughts: List[str] = Field(
+        ..., description="List of thought names within the cluster"
+    )
+
+    class Config:
+        "Remove None values"
+        from_attribute = True
+        # Exclude None values from JSON output
+        json_encoders = {Optional: lambda v: v or None}
+
+
+class IdeaClusterJSONModel(BaseModel):
+    idea: str = Field(..., description="The overarching theme or idea")
+    clusters: List[ClusterJSONModel] = Field(..., description="List of clusters")
+________________________________________
+Prompt Templates
+The following are prompt examples to generate structured responses from LLMs (JSON response). 
+In general, I recommend use multiple LLMs to help design the prompts, or at especially let Claude evaluate them once. 
+Thought Generation Prompt
+THOUGHT_GENERATION_PROMPT = """
+You are an expert in organizing complex topics into distinct, high-level thoughts.
+
+Perform the following tasks:
+1. Analyze the given overarching theme or idea: "{idea}"
+2. Identify and break down this idea into {num_sub_thoughts} key thoughts. 
+   Ensure each thought is distinct from the others and represents a significant aspect of the idea.
+3. For each thought, provide a brief description (1-2 sentences) that captures its essence and 
+   importance within the idea.
+
+Return your analysis in the following JSON format:
+
+{{
+  "idea": "{idea}",
+  "thoughts": [
+    {{
+      "thought": "Thought 1",
+      "description": "Brief description of Thought 1"
+    }},
+    # Additional thoughts
+  ]
+}}
+
+Ensure your response is a valid JSON object with the exact structure provided above, 
+without any additional text, explanations, or markdown syntax.
+"""
+Sub Thought Generation Prompt
+SUB_THOUGHT_GENERATION_PROMPT = """
+You are an expert in breaking down large and complex topics or thoughts into simpler parts.
+
+Perform the following tasks:
+1. Analyze the given topic or thought: {thought}
+2. Break down this thought into {num_sub_thoughts} key sub-thoughts. Ensure that each sub-thought is 
+   distinct from the others.
+3. For each sub-thought, provide a very brief description (1-2 sentences).
+
+Return your analysis in the following JSON format:
+
+{{
+  "idea": "{idea}",
+  "thought": "{thought}",
+  "sub_thoughts": [
+    {{
+      "name": "Sub-thought 1",
+      "description": "Brief description of Sub-thought 1"
+    }},
+    # Additional sub-thoughts
+  ]
+}}
+
+Ensure your response is a valid JSON object with the exact structure provided above, 
+without any additional text, explanations, or markdown syntax.
+"""
+Vertical Thoughts Generation Prompt
+VERTICAL_SUB_THOUGHT_GENERATION_PROMPT = """
+You are an expert in the field of {idea}.
+Your goal is to provide structured, step-by-step explanations that break down complex topics 
+within these domains. You should always ensure that the explanation builds on foundational knowledge 
+and leads to a deeper understanding of advanced concepts.
+
+Task:
+Break down and explain the key aspects of a main thought following a {progression_type} progression.
+
+Main Thought: {thought}
+
+Progression Types:
+1. "simple_to_complex": Start with the most basic concepts and gradually introduce more advanced ideas.
+2. "implementation_steps": Describe the key areas or steps one would need to consider when implementing or working with the main thought.
+3. "chronological": If applicable, explain the evolution or historical development of the main thought.
+4. "problem_solution": Introduce problems or challenges related to the main thought, followed by their solutions or approaches.
+
+Instructions:
+1. Based on the specified progression type **{progression_type}**, determine the most appropriate starting point for explaining {thought}.
+2. For each subsequent step, explain the sub-thought that logically follows from the previous one, 
+   adhering to the chosen progression type.
+3. For each step, provide:
+   - A clear explanation of the sub-thought
+   - Why it's important in the context of {thought}
+   - How it connects to the next step (except for the final step)
+4. Provide a total of {num_sub_thoughts} steps in your explanation.
+5. **For the final step, omit the "connection_to_next" field entirely. \
+  Do not include any explanation or comment about the omission. Simply leave it out.**
+
+Your response must be a valid JSON object with the following format:
+
+{{
+  "idea": "{idea}",
+  "thought": "{thought}",
+  "progression_type": "{progression_type}",
+  "sub_thoughts": [
+    {{
+      "name": "Name of the sub-thought",
+      "description": "Succinct explanation of the sub-thought (2-3 sentences)",
+      "importance": "Why this sub-thought is important",
+      "connection_to_next": "How this sub-thought leads to the next one"
+    }}
+  ]
+}}
+
+IMPORTANT: Ensure your response is a valid JSON object with the exact structure provided above, without any additional text, comments, explanations, or markdown syntax.
+"""
+________________________________________
+Thought Generation
+Horizontal Thoughts Generation Pipeline
+The function parellel_thoughts_generation_wt_openai_pipeline generates horizontal thoughts (sub-topics) for a given main idea using GPT. It processes the idea, clusters and ranks sub-topics, and saves the results to a JSON file.
+def parellel_thoughts_generation_wt_openai_pipeline(
+    idea: str,
+    num_of_thoughts: int,
+    json_file: Union[Path, str],
+    llm_provider: str = "openai",
+    model_id: str = GPT_4_TURBO,  # default to 4-turbo (a lot cheaper than 4 but better than 3.5 turbo)
+    to_update: bool = False,
+) -> None:
+    """
+    Generates "horizontal thoughts" (sub-topics) for a given idea using
+    OpenAI's models and saves the results to a JSON file.
+
+    Horizontal thoughts are sub-topics or concepts generated from the main topic (idea)
+    based on clustering and ranking logic.
+
+    Args:
+        idea (str): The main idea or topic for which horizontal thoughts will be generated.
+        num_thoughts (int): Number of horizontal thoughts to generate.
+        json_file (Union[Path, str]): Path to the output JSON file where results will be saved.
+        llm_provider (str): The LLM provider to use (default is "openai").
+        to_update (bool, optional): If True, overwrite the existing output file. Defaults to False.
+            - If `json_file` exists:
+                - When `to_update=True`, the file is overwritten.
+                - When `to_update=False`, the pipeline is skipped (early return).
+
+    Raises:
+        FileNotFoundError: If the specified directory for the output file does not exist.
+        ValueError: If an unexpected error occurs during thought generation or file saving.
+
+    Workflow:
+        - Verifies if the output file exists; skips processing if `to_update=False`.
+        - Ensures the directory for the output file exists.
+        - Configures thought generation parameters (clustering and ranking).
+        - Instantiates the `ThoughtGenerator` class with OpenAI's models and parameters.
+        - Generates horizontal thoughts using the `process_horizontal_thought_generation` method.
+        - Saves the results to the specified JSON file.
+
+    Example Usage:
+        parellel_thoughts_generation_wt_openai_pipeline(
+            idea="Sustainable Energy",
+            num_thoughts=10,
+            json_file="output/sustainable_energy_thoughts.json"
+        )
+    """
+    logger.info(
+        f"Start running horizontal thoughts generation pipeline with {llm_provider}."
+    )
+
+    # Ensure json file is Path obj.
+    json_file = Path(json_file)
+
+    # Check if the output file path already exist
+    if json_file.exists() and not to_update:
+        logger.info(f"Output file {json_file} already exists. Skip pipeline.")
+        return  # Early return
+
+    # Check if output file's directory exist
+    directory = os.path.dirname(json_file)
+    if not os.path.exists(directory):
+        raise FileNotFoundError(f"The file or directory at {directory} does not exist.")
+
+    # Set the thought reduction numbers (cluster, ranking)
+    num_clusters = int(round(10 * 0.7))  # reclustered sub-thoughts
+    top_n = round(num_clusters * 0.7)  # number of top sub-thoughts to display
+
+    # Process to generate sub-topics/concepts
+    thought_generator = ThoughtGenerator(
+        llm_provider=llm_provider, model_id=model_id, temperature=0.8
+    )  # Instantiate thought_generator class and set the llm parameters
+
+    idea_model = thought_generator.process_horizontal_thought_generation(
+        thought=idea,
+        num_sub_thoughts=num_of_thoughts,
+        num_clusters=num_clusters,
+        top_n=top_n,
+    )
+
+    logger.info(f"Thoughts created: {idea_model}")
+
+    # Save results to json file
+    thought_generator.save_results(idea_model, json_file)
+
+    logger.info(
+        f"Finished running horizontal thoughts generation pipeline with {llm_provider}."
+    )
+Code Explanation
+Function parameter:
+•	idea (str): The main topic to generate sub-topics for.
+•	num_of_thoughts (int): Number of sub-topics (horizontal thoughts) to generate.
+•	json_file (Union[Path, str]): Path to the JSON file where results will be saved.
+•	llm_provider (str): The language model provider (default: "openai").
+•	model_id (str): Specifies the OpenAI model to use (default: GPT_4_TURBO).
+•	to_update (bool): If True, overwrites the existing JSON file; otherwise, skips processing if the file already exists.
+
+Thought Generation Workflow
+Clustering and Ranking Parameters
+•	The function dynamically calculates clustering and ranking parameters:num_clusters: Number of clusters for organizing sub-thoughts (70% of 10 by default).
+•	top_n: Top-ranked sub-thoughts to select (70% of num_clusters).
+num_clusters = int(round(10 * 0.7))  # reclustered sub-thoughts
+top_n = round(num_clusters * 0.7)  # top-ranked sub-thoughts
+Instantiate ThoughtGenerator: create a ThoughtGenerator object, specifying the language model provider, model ID, and temperature for generation.
+thought_generator = ThoughtGenerator(
+    llm_provider=llm_provider, model_id=model_id, temperature=0.8
+)
+Note: must set temperature close to 1.0, because text generation is a "creative" task, which typically requires temperature to be 0.8 to 1.
+Save Results: Saves the generated thoughts to the specified JSON file.
+________________________________________
+Example Usage
+parellel_thoughts_generation_wt_openai_pipeline(
+    idea="Embedded Software Development in Automotive",
+    num_of_thoughts=10,
+    json_file="output/sustainable_energy_thoughts.json"
+)
+This example generates 10 horizontal thoughts for the idea "Sustainable Energy", clusters and ranks them, and saves the output to a JSON file.
+________________________________________
+Key Features
+•	Modular Design: reusable for different models and configurations.
+•	Dynamic Parameters: Clustering and ranking parameters (num_clusters and top_n) are dynamically calculated to ensure flexibility.
+•	Output Validation: Results are saved in a structured JSON format for easy downstream use.
+________________________________________
+Vertical Thoughts Generation Pipeline
+The vertical_thought_wt_openai_pipeline function generates vertical thoughts (detailed sub-thoughts) for concepts derived from a horizontal thought pipeline and saves the results to a JSON file. It iterates through thoughts (concepts), generating sub-thoughts for each, and ensures the output file structure is validated.
+def vertical_thought_wt_openai_pipeline(
+    input_json_file: Union[str, Path],
+    output_json_file: Union[Path, str],
+    llm_provider: str = "openai",
+    model_id: str = GPT_4_TURBO,
+    num_of_sub_thoughts: int = 5,
+    to_update: bool = False,
+) -> None:
+    """
+    *OpenAI pipeline
+    Pipeline to generate "vertical thoughts" based on a main concept and
+    save the results to a JSON file.
+
+    This function generates a specified number of sub-thoughts for a given main concept following a
+    vertical thought process. It ensures the output is saved to a specified JSON file. The function
+    uses an external thought generation model (e.g., GPT-4 turbo) to create the sub-thoughts,
+    considering the context provided, and checks for the existence of the target file directory
+    before proceeding.
+
+    Args:
+        - input_json_file (str.): JSON file w/t topics/concepts generated in the horizontal thought
+        creation process from the OpenAI input output data pipeline.
+        - output_json_file (str): output JSON file path from the OpenAI input output data pipeline.
+        - to_update (bool): Determine whether to update the output file (indexed_model_file)
+          Default to False.
+          When the output file exists already,
+            if to_update is True: replace it with the new file
+            if False: early return -> skip
+
+    Return: None
+
+    Raises:
+        FileNotFoundError: If the specified directory for the JSON file does not exist.
+
+    Example:
+        vertical_thought_pipeline(
+            input_json_file = "path to horizontal thought json file")
+            output_json_file = "path to array of thoughts json file to be saved")
+        )
+    """
+    logger.info(f"Starting vertical thoughts generation pipeline with {llm_provider}.")
+
+    input_json_file, output_json_file = Path(input_json_file), Path(output_json_file)
+
+    # Check if the output file path already exist
+    if output_json_file.exists() and not to_update:
+        logger.info(f"Output file {output_json_file} already exists. Skip pipeline.")
+        return  # Early return
+
+    # Check if the input file paths exist or not
+    if not input_json_file.exists():
+        raise FileNotFoundError(f"Input data file {input_json_file} does not exist.")
+
+    # Read horizontal sub thoughts from JSON
+    thoughts_data = read_from_json_file(input_json_file)
+
+    logger.info(f"Data is read from JSON file:\n{thoughts_data}")
+
+    # Instantiate thought_generator class and process the method to create sub thoughts
+    # by iterating through the already created horizontal/parallel thoughts
+    thought_generator = ThoughtGenerator(
+        llm_provider=llm_provider, model_id=model_id, temperature=0.8
+    )
+    array_of_thoughts = thought_generator.generate_array_of_thoughts(
+        input_data=thoughts_data, num_sub_thoughts=num_of_sub_thoughts
+    )
+
+    logger.info(f"sub_thought_list: \n{array_of_thoughts}")  # debugging
+
+    # Save results to file if json_file is provided
+    if output_json_file:
+        thought_generator.save_results(array_of_thoughts, output_json_file)
+
+    logger.info(f"Finished vertical thoughts generation pipeline with {llm_provider}.")
+Code Explanation
+Function Parameters
+•	input_json_file (Union[str, Path]): Path to the input JSON file containing horizontal thoughts.
+•	output_json_file (Union[Path, str]): Path to save the vertical thoughts JSON output.
+•	llm_provider (str): The language model provider (default: "openai").
+•	model_id (str): Specifies the OpenAI model to use (default: GPT_4_TURBO).
+•	num_of_sub_thoughts (int): Number of sub-thoughts to generate for each concept (default: 5).
+•	to_update (bool): Determines whether to overwrite the output file if it exists (default: False).
+
+Thought Generation Workflow
+File Validation & Reading Data from JSON File
+•	Checks whether the output file and input file already exist
+•	Read & validate data (horizontal thoughts (concepts)) from input JSON file with custom read JSON utils function.
+thoughts_data = read_from_json_file(input_json_file) 
+Instantiate ThoughtGenerator
+•	Creates a ThoughtGenerator object with specified model and parameters:
+thought_generator = ThoughtGenerator(
+    llm_provider=llm_provider, model_id=model_id, temperature=0.8
+)
+Note: must set temperature close to 1.0, because text generation is a "creative" task, which typically requires temperature to be 0.8 to 1.
+Generate Vertical Thoughts
+Calls the generate_array_of_thoughts method to generate sub-thoughts for each concept:
+array_of_thoughts = thought_generator.generate_array_of_thoughts(
+    input_data=thoughts_data, num_sub_thoughts=num_of_sub_thoughts
+)
+This method:
+•	Iterates through each concept in the horizontal thoughts.
+•	Expands each concept into a set of sub-thoughts using the vertical thought generation process.
+Save Results
+Saves the generated array of thoughts to the specified JSON file:
+________________________________________
+Example Usage
+vertical_thought_wt_openai_pipeline(
+    input_json_file="input/horizontal_thoughts.json",
+    output_json_file="output/vertical_thoughts.json",
+    num_of_sub_thoughts=5
+)
+This example reads horizontal thoughts from input/horizontal_thoughts.json, generates 5 sub-thoughts for each concept, and saves the output to output/vertical_thoughts.json.
+________________________________________
+Key Features
+•	Iterative Thought Expansion
+•	Modular Design
+•	Structured Outputs
+•	Customizable: can set the number of sub-thoughts generated per concept
+________________________________________
+Thought Generator (Core Execution)
+The ThoughtGenerator class is a core component for generating, validating, and structuring thoughts and sub-thoughts using LLMs (Large Language Models). It supports both horizontal thought generation (high-level concepts) and vertical thought expansion (detailed sub-concepts), while ensuring all outputs conform to strict schemas.
+class ThoughtGenerator:
+    """
+    A class to generate thoughts and sub-thoughts using an LLM API, compute similarity,
+    and perform clustering.
+
+    This class supports generating both high-level thoughts (concepts) from an idea,
+    as well as detailed sub-thoughts under each concept. It dynamically validates
+    the generated responses using appropriate Pydantic models (`IdeaJSONModel` or
+    'ThoughtJSONModel') based on the generation context (horizontal or vertical).
+
+    Methods:
+        - generate_parallell_thoughts: Generates high-level thoughts from a main idea
+        (horizontal generation).
+        - generate_vertical_thoughts: Generates sub-thoughts under a main concept
+        (vertical generation).
+        - compute_similarity_and_cluster: Computes self-attention-based similarity and
+        clusters distinct sub-thoughts.
+        - save_results: Saves generated thoughts and sub-thoughts to files.
+        - generate_prompt_template: Formats the prompt for the API call based on
+        input templates.
+        - call_llm: Calls the LLM API with the prompt and validates response based on
+        the specified model.
+    """
+
+    def __init__(
+        self,
+        llm_provider: str = "openai",
+        model_id: str = "gpt-4-turbo",
+        temperature: float = 0.7,
+        max_tokens: int = 1056,
+    ):
+        """
+        Initializes the ThoughtGenerator class with API client details for interacting with LLMs.
+
+        Args:
+            llm_provider (str): The LLM provider to use ("openai", "claude", etc.). Defaults to "openai".
+            model_id (str): The model ID to use for the LLM (e.g., "gpt-4-turbo"). Defaults to "gpt-4-turbo".
+            temperature (float): Temperature setting for response creativity. Defaults to 0.7.
+            max_tokens (int): Maximum tokens for each response. Defaults to 1056.
+
+        Raises:
+            ValueError: If the specified LLM provider is unsupported.
+
+        Example:
+            >>> generator = ThoughtGenerator(
+                    llm_provider="openai",
+                    model_id="gpt-4-turbo",
+                    temperature=0.7,
+                    max_tokens=1056
+                )
+        """
+        self.llm_provider = llm_provider
+        self.model_id = model_id
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+        # Instantiate the API client based on llm_provider
+        if llm_provider == "openai":
+            self.client = OpenAI(api_key=get_openai_api_key())
+        elif llm_provider == "claude":
+            self.client = Anthropic(api_key=get_claude_api_key())
+        else:
+            raise ValueError(f"Unsupported llm_provider: {llm_provider}")
+
+    def create_prompt(self, prompt_template: str, **kwargs: Dict[str, str]) -> str:
+        """
+        Formats a prompt using a specified template and arguments.
+
+        Args:
+            prompt_template (str): The template to format.
+            **kwargs: Keyword arguments to fill in the template placeholders.
+
+        Returns:
+            str: The formatted prompt.
+
+        Raises:
+            ValueError: If required template placeholders are missing in the kwargs.
+
+        Example:
+            >>> prompt = generator.create_prompt(
+                    prompt_template="Generate {num_sub_thoughts} thoughts about {idea}.",
+                    idea="artificial intelligence",
+                    num_sub_thoughts=5
+                )
+            >>> print(prompt)
+            "Generate 5 thoughts about artificial intelligence."
+        """
+
+        try:
+            return prompt_template.format(**kwargs)
+        except KeyError as e:
+            missing_key = str(e).strip("'")
+            logger.error(f"Error formatting prompt: Missing key {missing_key}")
+            raise ValueError(f"Missing key in the template: {missing_key}")
+
+    def call_llm(
+        self,
+        prompt: str,
+        temperature: float = None,
+        validation_model: str = "thought_json",
+    ) -> Optional[Union[IdeaClusterJSONModel, IdeaJSONModel, ThoughtJSONModel]]:
+        """
+        Call the specified LLM API (OpenAI, Claude, or LLaMA3) with the provided prompt
+        and return the response as a validated ThoughtJSONResponse.
+
+        Args:
+            - prompt (str): The formatted prompt to send to the LLM API.
+            - temperature (float, optional): Temperature setting for this specific API call.
+            If None, uses the class-level temperature.
+            *- validation_model: key value to specify which pydantic model to validate
+            *the LLM response.
+            Default to "thought_json" (ThoughtJSONModel)
+
+            *expected_response_type not an input variable becasue we expect strictly JSON response
+            *for all LLM calls from the ThoughtReader class
+
+        Returns:
+            Optional[Union[ClusterJSONModel, IdeaJSONModel, ThoughtJSONResponse]]: The validation model to apply,
+            either "idea_json" or "thought_json" model.
+
+
+        Raises:
+            ValueError: If the llm_provider is unsupported.
+
+        Example:
+        >>> response = generator.call_llm(
+                prompt="Generate 5 thoughts about machine learning.",
+                validation_model="idea_json"
+            )
+        """
+        try:
+            thought_response_model = None
+
+            if self.llm_provider.lower() in {"openai", "gpt"}:
+                # Call OpenAI API with the instantiated client
+                thought_response_model = call_openai_api(
+                    prompt=prompt,
+                    client=self.client,
+                    model_id=self.model_id,
+                    expected_res_type="json",
+                    temperature=temperature or self.temperature,
+                    max_tokens=self.max_tokens,
+                    json_type=validation_model,
+                )
+
+            elif self.llm_provider.lower() in {"anthropic", "claude"}:
+                # Call Claude API with the instantiated client
+                thought_response_model = call_claude_api(
+                    prompt=prompt,
+                    client=self.client,
+                    model_id=self.model_id,
+                    expected_res_type="json",
+                    temperature=temperature or self.temperature,
+                    max_tokens=self.max_tokens,
+                    json_type=validation_model,
+                )
+
+            elif self.llm_provider.lower() in {"llama3", "llama"}:
+                # Call LLaMA3 API without a client instance
+                thought_response_model = call_llama3(
+                    prompt=prompt,
+                    model_id=self.model_id,
+                    expected_res_type="json",
+                    temperature=temperature or self.temperature,
+                    max_tokens=self.max_tokens,
+                    json_type=validation_model,
+                )
+
+            else:
+                raise ValueError(f"Unsupported llm_provider: {self.llm_provider}")
+
+            logger.debug(
+                f"Response type: {type(thought_response_model)}, Value: {thought_response_model}"
+            )
+            return thought_response_model
+
+        except Exception as e:
+            logger.error(
+                f"Error calling LLM API for provider '{self.llm_provider}': {e}"
+            )
+            return None
+
+    def save_results(
+        self,
+        data: Union[ThoughtJSONModel, List[ThoughtJSONModel]],
+        json_file: Union[Path, str],
+    ):
+        """
+        Saves generated thoughts or sub-thoughts to a JSON file.
+
+        Args:
+            - data (Union[ThoughtJSONModel, List[ThoughtJSONModel]]): The data to save,
+                either a single ThoughtJSONModel instance or a list of them.
+            - json_file (Union[Path, str]): The path to save the JSON file.
+
+        Raises:
+            IOError: If an error occurs during the file saving process.
+        """
+
+        try:
+            # If data is a list, convert each ThoughtJSONResponse to a dictionary
+            if isinstance(data, list):
+                data_dict = [item.model_dump() for item in data]
+
+            else:
+                # Convert the Pydantic model to a dictionary
+                data_dict = data.model_dump()
+
+            logger.info(f"Data before saving: \n{data_dict}")
+
+            # Write the dictionary or list of dictionaries to a JSON file with indentation
+            save_to_json_file(data=data_dict, file_path=json_file)
+
+            logger.info(f"Data saved to {json_file}.")
+        except Exception as e:
+            logger.error(f"Error saving data to {json_file}: {e}")
+
+    def generate_parallell_thoughts(
+        self,
+        thought: str,
+        prompt_template: str,
+        num_sub_thoughts: int = 10,
+        temperature: float = None,
+    ) -> IdeaJSONModel:
+        """
+        Generates high-level thoughts based on an idea using horizontal thought generation.
+
+        Args:
+            - thought (str): The main idea or theme to break down into high-level concepts.
+            - prompt_template (str): The template to use for generating the prompt.
+            - num_sub_thoughts (int): Number of thoughts (concepts) to generate.
+            - temperature (float): Optional temperature setting for the API call.
+
+        Returns:
+            IdeaJSONModel: A validated model containing the main idea and generated
+            high-level thoughts.
+
+        Raises:
+            ValueError: If the API fails to generate thoughts for the specified idea.
+
+        Example:
+            >>> idea_model = generator.generate_parallell_thoughts(
+                    thought="AI in Healthcare",
+                    prompt_template=THOUGHT_GENERATION_PROMPT,
+                    num_sub_thoughts=5
+                )
+            >>> print(idea_model.json(indent=4))
+            {
+                "idea": "AI in Healthcare",
+                "thoughts": [
+                    {
+                        "thought": "Predictive Diagnostics",
+                        "description": "AI's role in identifying diseases early based on patient data."
+                    },
+                    {
+                        "thought": "AI-Powered Surgical Tools",
+                        "description": "Enhancing precision and reducing human error during surgery."
+                    }
+                ]
+            }
+        """
+        prompt = self.create_prompt(
+            prompt_template=prompt_template,
+            idea=thought,
+            num_sub_thoughts=num_sub_thoughts,
+        )
+        thought_response_model = self.call_llm(
+            prompt=prompt,
+            temperature=temperature or self.temperature,
+            validation_model="idea_json",
+        )
+
+        if thought_response_model is None:
+            raise ValueError(
+                f"Failed to generate parallel thoughts for thought {thought}."
+            )
+
+        return thought_response_model
+
+    def generate_vertical_thoughts(
+        self,
+        thought: str,
+        idea: str,  # high level concept input by user or system-record keeping in json
+        progression_type: str = "implementation_steps",
+        num_sub_thoughts: int = 7,
+        temperature: int = None,
+    ) -> ThoughtJSONModel:
+        """
+        Generates multiple vertical sub-thoughts based on the progression type, returning
+        a Thought model.
+
+        Args:
+            - thought (str): The main topic to generate sub-thoughts for.
+            * idea (str): The overarching idea or theme containing the highest level concept.
+            - progression_type (str): The type of progression
+            (e.g., "simple_to_complex", "implementation_steps").
+                4 types of progression_type:
+                    "simple_to_complex",
+                    "implementation_steps",
+                    "chronological",
+                    "problem_solution",
+            - num_sub_thoughts (int): The number of sub-thoughts to generate.
+            - global_context (str): The domain or field for contextualizing
+            the thought generation.
+
+        Returns:
+            ThoughtJSONModel: The main concept with a structured list of sub-thoughts.
+
+        Raises:
+            ValueError: If an invalid progression type is passed.
+
+        Example:
+            >>> generator = ThoughtGenerator()
+            >>> result = generator.generate_vertical_thoughts("embedded software development", \
+                "embedded systems", "simple_to_complex", 5)
+            >>> print(result.json(indent=4))
+
+            {
+                "concept": "embedded software development",
+                "sub_concepts": [
+                    {
+                        "name": "requirements analysis",
+                        "description": "Define system requirements to guide software development."
+                    },
+                    {
+                        "name": "architecture design",
+                        "description": "Plan the software structure and component interactions."
+                    },
+                    {
+                        "name": "implementation",
+                        "description": "Write and test the code for system functionality."
+                    }
+                ]
+            }
+        """
+        prompt = self.create_prompt(
+            prompt_template=VERTICAL_SUB_THOUGHT_GENERATION_PROMPT,
+            thought=thought,
+            num_sub_thoughts=num_sub_thoughts,
+            progression_type=progression_type,
+            idea=idea,
+        )
+        thought_response_model = self.call_llm(
+            prompt=prompt,
+            temperature=temperature or self.temperature,
+        )
+
+        if thought_response_model is None:
+            raise ValueError(
+                f"Failed to generate vertical thoughts for thought '{thought}'."
+            )
+        return thought_response_model
+
+    def generate_array_of_thoughts(
+        self,
+        input_data: Dict,
+        progression_type: str = "implementation_steps",
+        num_sub_thoughts: int = 5,
+        temperature: int = None,
+    ) -> IdeaJSONModel:
+        """
+        Generates sub-thoughts for each concept within a high-level idea.
+
+        This function takes a dictionary with a high-level idea and multiple concepts, 
+        each of which is expanded into detailed sub-thoughts. It uses vertical thought generation
+        for each concept under the overarching idea.
+
+        Args:
+            - input_data (dict): A dictionary containing an "idea" and a list of "concepts".
+                Example format:
+                {
+                    "idea": "embedded systems",
+                    "thoughts": [
+                        {
+                            "name": "embedded software development",
+                            "description": "Creating and managing software for embedded systems."
+                        },
+                        ...
+                    ]
+                }
+            - progression_type (str): Type of progression to generate sub-thoughts 
+            (e.g., "simple_to_complex").
+            - num_sub_thoughts (int): The number of sub-thoughts to generate for each concept.
+            temperature (float, optional): Optional temperature setting for the LLM call.
+
+        Returns:
+            List[ThoughtJSONModel]: A list of ThoughtJSONModel instances, each containing 
+            generated sub-thoughts.
+
+        Example:
+            >>> generator = ThoughtGenerator()
+            >>> input_data = {
+                    "idea": "embedded systems",
+                    "thoughts": [
+                        {"name": "System Software Development", "description": \
+                            "Development of low-level software..."},
+                        {"name": "Application Software Development", "description": \
+                            "Focuses on high-level applications for embedded systems"}
+                    ]
+                }
+            >>> result = generator.generate_array_of_thoughts(input_data, "simple_to_complex", 3)
+            >>> for thought in result:
+                    print(thought.json(indent=4))
+
+            [
+                {
+                    "concept": "System Software Development",
+                    "sub_concepts": [
+                        {
+                            "name": "kernel programming",
+                            "description": "Creating low-level code for managing hardware resources."
+                        },
+                        {
+                            "name": "device drivers",
+                            "description": "Interfaces between hardware components and the operating system."
+                        }
+                    ]
+                },
+                {
+                    "concept": "Application Software Development",
+                    "sub_concepts": [
+                        {
+                            "name": "UI/UX design",
+                            "description": "Designing user interfaces for embedded applications."
+                        },
+                        {
+                            "name": "middleware services",
+                            "description": "Provides a layer for application components to interact."
+                        }
+                    ]
+                }
+            ]
+        """
+        idea = input_data.get("idea")
+        thoughts = input_data.get("thoughts", [])
+        if not idea or not thoughts:
+            raise ValueError("Invalid input data.")
+
+        all_thoughts = []
+        for thought in thoughts:
+            thought_name = thought.get("thought")
+            thought_description = thought.get(
+                "description", None
+            )  # Get description, default to None if missing
+            if not thought_name:
+                logger.warning("Skipping sub-concept with missing 'name'.")
+                continue
+
+            try:
+                thought_model = self.generate_vertical_thoughts(
+                    thought=thought_name,
+                    idea=idea,
+                    progression_type=progression_type,
+                    num_sub_thoughts=num_sub_thoughts,
+                    temperature=temperature,
+                )
+
+                # Add description to the ThoughtJSONModel instance
+                thought_model.description = thought_description
+
+                # Append the model to all_thoughts[]
+                all_thoughts.append(thought_model)
+            except ValueError as e:
+                logger.error(f"Failed to generate sub-thoughts for {thought_name}: {e}")
+
+        # Validate the batch of generated thoughts (validate_thought_batch pyd model
+        # handles any a high level to multiple lower level "thoughts")
+        validated_thoughts = validate_thought_batch(
+            [thought.model_dump() for thought in all_thoughts]
+        )
+        logger.info(
+            f"Validated {len(validated_thoughts)} out of {len(all_thoughts)} generated thoughts."
+        )
+
+        # Load list of thought models into idea model
+        validated_idea = IdeaJSONModel(idea=idea, thoughts=all_thoughts)
+
+        return validated_idea
+
+    def convert_cluster_to_idea(
+        self, cluster_model: IdeaClusterJSONModel
+    ) -> IdeaJSONModel:
+        """
+        Converts an IdeaClusterJSONModel into an IdeaJSONModel,
+        using cluster names as thoughts and their descriptions.
+
+        Validation:
+        - Ensures the input model has valid clusters.
+        - Each cluster must have a non-empty name, description, and at least one thought.
+
+        Args:
+            cluster_model (IdeaClusterJSONModel): The input model containing clusters to convert.
+
+        Returns:
+            IdeaJSONModel: The converted model with cluster names mapped to thoughts and
+                        their descriptions preserved.
+
+        Raises:
+            ValueError: If the input model or any cluster has invalid or missing data.
+
+        Example Output:
+            After calling 'returned_model.model_dump()':
+            {
+                "idea": "embedded software development in automotive",
+                "thoughts": [
+                    {
+                        "thought": "Real-Time Performance Requirements",
+                        "description": "Focuses on real-time performance and functional safety."
+                    },
+                    {
+                        "thought": "AI Integration in Automotive",
+                        "description": "Explores the use of AI in autonomous driving and diagnostics."
+                    }
+                ]
+            }
+        """
+
+        # Ensure the input model has clusters
+        if not cluster_model.clusters or len(cluster_model.clusters) == 0:
+            raise ValueError("The input IdeaClusterJSONModel contains no clusters.")
+
+        thoughts = []
+        for cluster in cluster_model.clusters:
+            # Validate the cluster name and description
+            if not cluster.name or not cluster.description:
+                raise ValueError(
+                    f"Cluster validation failed. "
+                    f"Cluster must have a name and description. Found: {cluster}"
+                )
+
+            # Validate that the cluster contains thoughts
+            if not cluster.thoughts or len(cluster.thoughts) == 0:
+                raise ValueError(
+                    f"Cluster '{cluster.name}' must contain at least one thought."
+                )
+
+            # Convert the cluster into a ThoughtJSONModel
+            thoughts.append(
+                ThoughtJSONModel(
+                    thought=cluster.name,
+                    description=cluster.description,
+                    sub_thoughts=None,  # Sub-thoughts are not applicable here
+                )
+            )
+
+        # Return the converted IdeaJSONModel
+        return IdeaJSONModel(idea=cluster_model.idea, thoughts=thoughts)
+
+    def cluster_and_pick_top_clusters(
+        self,
+        thoughts_to_group: IdeaJSONModel,
+        num_clusters: int,
+        top_n: int,
+    ) -> IdeaClusterJSONModel:
+        """
+        Clusters thoughts and selects the top N clusters.
+
+        Args:
+            thoughts_to_group (IdeaJSONModel): The initial thoughts to group into clusters.
+            num_clusters (int): The number of clusters to form.
+            top_n (int): The number of top clusters to return.
+
+        Returns:
+            IdeaClusterJSONModel: A validated model containing the top clusters.
+
+        Raises:
+            ValueError: If clustering or selection fails.
+            ValidationError: If the clustering response does not conform to IdeaClusterJSONModel.
+
+        Example Output:
+            >>> clusters_model = generator.cluster_and_pick_top_clusters(
+                    thoughts_to_group=idea_model,
+                    num_clusters=6,
+                    top_n=4
+                )
+            >>> print(clusters_model.json(indent=4))
+            {
+                "idea": "Future of AI in Education",
+                "clusters": [
+                    {
+                        "name": "Personalized Learning",
+                        "description": "AI-driven approaches for student-centric education.",
+                        "thoughts": ["AI Tutoring", "Adaptive Learning Systems"]
+                    }
+                ]
+            }
+        """
+        # Prepare thought data for clustering
+        list_of_thoughts = [
+            {"thought": thought.thought, "description": thought.description}
+            for thought in thoughts_to_group.thoughts
+        ]
+
+        # Construct the prompt for clustering and selecting the most relevant thoughts
+        prompt = self.create_prompt(
+            prompt_template=RECLUSTER_AND_PICK_TOP_CLUSTER_PROMPT,
+            idea=thoughts_to_group.idea,
+            thoughts_list=list_of_thoughts,
+            num_clusters=num_clusters,
+            top_n=top_n,
+        )
+
+        logger.info(
+            f"Prompt for recluster and pick top_n clusters: \n{prompt}"
+        )  # TODO: debugging; remove later
+
+        # Generate top clusters
+        clusters_model = self.call_llm(
+            prompt=prompt, validation_model="cluster_json"
+        )  # expect to return a IdeaClusterJSONModel object
+
+        # Check for empty
+        if clusters_model is None:
+            raise ValueError(
+                f"Failed to regroup and pick top clusters for idea '{thoughts_to_group.idea}'."
+            )
+
+        try:
+            validated_model = IdeaClusterJSONModel.model_validate(clusters_model)
+        except ValidationError as e:
+            raise ValidationError(
+                f"clusters_model validation failed for idea '{thoughts_to_group.idea}': {e}"
+            )
+
+        logger.info("clusters created and validated.")
+
+        return clusters_model
+
+    def process_horizontal_thought_generation(
+        self,
+        thought: str,
+        num_sub_thoughts: int = 10,
+        num_clusters: int = 6,
+        top_n: int = 4,
+    ) -> IdeaJSONModel:
+        """
+        Orchestrates horizontal thought generation and clustering, breaking down a higher level
+        concept into lower level concepts.
+
+        This method:
+        - generates an initial set of lower level concepts using a language model (LLM)
+        * -> IdeaJSONModel (pydantic model)
+
+        - then re-clusters them into larger groups, and then selects the top N clusters
+        * -> IdeaClusterJSONModel (pyd model)
+
+        - finally returns thoughts in the designated format
+        * -> back to IdeaJSONModel (pyd model)
+
+        Args:
+            -idea (str): top level concept (thought) to generate lower level concepts (sub-thoughts).
+            -num_thoughts (int, optional): The number of lower level concept (sub_thoughts) to
+            generate initially. Default is 10.
+            -num_clusters (int, optional): The number of clusters to form during re-clustering.
+            Default is 6.
+            -top_n (int, optional): The number of top clusters to select after re-clustering.
+            Default is 4.
+
+        Returns:
+            IdeaJSONModel: A pydantic model instance with the final set of re-clustered and
+            selected sub-thoughts.
+
+        Example:
+            >>> generator = ThoughtGenerator(llm_provider="openai",
+                                            model_id="gpt-4-turbo",
+                                            temperature=0.7,
+                                            max_tokens=512,)
+
+            or use default LLM parameters:
+            >>> generator = ThoughtGenerator()
+            >>> result = generator.process_horizontal_thought_generation("embedded systems", 5, 3, 2)
+            >>> print(result.json(indent=4))
+
+            {
+                "idea": "embedded systems",
+                "concepts": [
+                    {
+                        "concept": "embedded software development",
+                        "description": "Focuses on creating and maintaining software for embedded systems."
+                    },
+                    {
+                        "concept": "hardware design in embedded systems",
+                        "description": "Covers the physical components and circuit design for embedded systems."
+                    }
+                ]
+            }
+        """
+
+        # Generate initial thoughts -> pydantic model: IdeaJSONModel
+        init_thoughts_model = self.generate_parallell_thoughts(
+            thought=thought,
+            prompt_template=THOUGHT_GENERATION_PROMPT,  # use idea->thought prompt template
+            num_sub_thoughts=num_sub_thoughts,
+        )
+
+        top_clusters_model = self.cluster_and_pick_top_clusters(
+            thoughts_to_group=init_thoughts_model,
+            num_clusters=num_clusters,
+            top_n=top_n,
+        )
+
+        final_thoughts_model = self.convert_cluster_to_idea(
+            cluster_model=top_clusters_model
+        )
+
+        return final_thoughts_model
+Key Features
+•	Horizontal and Vertical Thought Generation
+•	Validation with Pydantic Models
+•	Clustering and Ranking
+•	Extensibility
+Initialization
+The constructor sets up the ThoughtGenerator instance:
+def __init__(self, llm_provider="openai", model_id="gpt-4-turbo", temperature=0.7, max_tokens=1056):
+•	llm_provider: Specifies the language model provider (e.g., "openai", "claude").
+•	model_id: The specific model (e.g., "gpt-4-turbo").
+•	temperature: Controls creativity in generated responses.
+•	max_tokens: Limits the response length.
+It initializes the corresponding LLM API client based on the provider.
+
+Horizontal Thought Generation
+generate_parallell_thoughts
+Generates high-level thoughts for a given idea:
+def generate_parallell_thoughts(self, thought, prompt_template, num_sub_thoughts=10):
+Inputs:
+•	thought: The main idea to expand.
+•	prompt_template: Template for generating sub-topics.
+•	num_sub_thoughts: Number of high-level thoughts to generate.
+Output: Returns an IdeaJSONModel containing the central idea and its high-level thoughts.
+
+Vertical Thought Expansion
+generate_vertical_thoughts
+Expands a single high-level thought into sub-thoughts:
+def generate_vertical_thoughts(self, thought, idea, progression_type="implementation_steps", num_sub_thoughts=7):
+Inputs:
+•	thought: A high-level concept to expand.
+•	progression_type: The logical pattern for sub-thought generation (e.g., "simple_to_complex", "problem_solution").
+•	num_sub_thoughts: Number of sub-thoughts to generate.
+Output: Returns a ThoughtJSONModel with the expanded sub-thoughts.
+
+Clustering and Ranking
+cluster_and_pick_top_clusters
+Clusters high-level thoughts and selects the most relevant groups:
+def cluster_and_pick_top_clusters(self, thoughts_to_group, num_clusters, top_n):
+Inputs:
+•	thoughts_to_group: A list of thoughts to cluster.
+•	num_clusters: Total number of clusters.
+•	top_n: Number of top-ranked clusters to select.
+Output: Returns an IdeaClusterJSONModel containing the top clusters.
+
+Combining Horizontal and Vertical Pipelines
+generate_array_of_thoughts
+Processes all high-level thoughts and generates sub-thoughts for each:
+def generate_array_of_thoughts(self, input_data, progression_type="implementation_steps", num_sub_thoughts=5):
+•	Input: A dictionary containing the main idea and associated thoughts.
+•	Output: An IdeaJSONModel with validated thoughts and sub-thoughts.
+
+API Interaction
+call_llm
+Handles LLM API calls for generating thoughts:
+def call_llm(self, prompt, temperature=None, validation_model="thought_json"):
+Inputs:
+•	prompt: The query to send to the LLM.
+•	validation_model: Specifies the schema to validate the response (e.g., IdeaJSONModel).
+Output: Returns validated results in the required schema.
+
+create_prompt
+Formats the prompt dynamically using templates:
+def create_prompt(self, prompt_template, **kwargs):
+•	Uses string formatting to fill placeholders in the template.
+•	**kwargs ("keyword arguments unpacking") is a more advanced technique. It allows a function to accept an arbitrary number of keyword arguments (i.e., named arguments passed as key-value pairs) without explicitly defining them in the function signature. It makes the function more dynamic if you set it up correctly.
+
+Saving Results: Converts the Pydantic models into dictionaries and writes them to the file.
+________________________________________
+Example Usage
+# Initialize ThoughtGenerator
+generator = ThoughtGenerator(llm_provider="openai", model_id="gpt-4-turbo")
+
+# Generate horizontal thoughts
+idea_model = generator.generate_parallell_thoughts(
+    thought="Future of AI",
+    prompt_template="Generate {num_sub_thoughts} thoughts about {idea}.",
+    num_sub_thoughts=5
+)
+
+# Expand a single thought vertically
+vertical_thoughts = generator.generate_vertical_thoughts(
+    thought="AI in Healthcare",
+    idea="Future of AI",
+    progression_type="implementation_steps",
+    num_sub_thoughts=3
+)
+
+# Save results
+generator.save_results(idea_model, "horizontal_thoughts.json")
+generator.save_results(vertical_thoughts, "vertical_thoughts.json")
+________________________________________
+This class provides a modular and robust framework for structured idea generation and thought expansion.
+
+
+
+
+
+
+About the Article Section
+🎄 Happy Holidays! 🎄
+In this article, I unwrap how Pydantic models serve as the backbone of structure and consistency in a multi-agent system pipeline. This year, in the spirit of innovation, I teamed up with Walid Negm to explore an open-source Multimodal AI agent project. Part of the back-end pipeline is a novel thought generation pipeline, which organizes ideas into a structured hierarchy called the "array of thoughts."
+
+This article explores how this pipeline transforms high-level ideas into reusable, validated outputs, showcasing:
+🎯 Catching Errors Early: Discover how Pydantic guardrails mitigate LLM drift and maintain task alignment.
+📏 Ensuring Consistency: Learn how iterative validation keeps AI pipelines structured and logical.
+🤝 Seamless Integration: Explore how Pydantic simplifies workflows with FastAPI compatibility and scalability.
+
+A special holiday shoutout to Walid Negm—your Collaboration, Brillance, and Encouragement made you my INNOVATION SANTA for 2024! 🎅
+
+#AI #Pydantic #LLM #MachineLearning #FastAPI #DataValidation #MultiAgentSystems #ContentCreation #ProductDevelopment #EdgeComputing #TechInnovation #AIApplications
+
