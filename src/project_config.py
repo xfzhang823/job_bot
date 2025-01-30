@@ -9,10 +9,39 @@ from config import (
 """
 
 from pathlib import Path
-import os
 import logging
 
-# logging.info("Starting config.py")
+logger = logging.getLogger(__name__)
+
+
+def find_project_root(starting_path=None, marker=".git"):
+    """
+    Recursively find the root directory of the project by looking for a specific marker.
+
+    Args:
+        - starting_path (str or Path): The starting path to begin the search. Defaults to
+        the current script's directory.
+        - marker (str): The marker to look for (e.g., '.git', 'setup.py', 'README.md').
+
+    Returns:
+        Path: The Path object pointing to the root directory of the project,
+        or None if not found.
+    """
+    # Start from the directory of the current file if not specified
+    if starting_path is None:
+        starting_path = Path(__file__).resolve().parent
+
+    # Convert starting_path to a Path object if it's not already
+    starting_path = Path(starting_path)
+
+    # Traverse up the directory tree
+    for parent in starting_path.parents:
+        # Check if the marker exists in the current directory
+        if (parent / marker).exists():
+            return parent
+
+    return None  # Return None if the marker is not found
+
 
 # Subdirectories under base directory that are part of the package inclue:
 # - input_output
@@ -22,22 +51,28 @@ import logging
 
 # Base/Root Directory
 # logging.info("Setting up base directories")
-BASE_DIR = Path(r"C:\github\job_bot")  # base/root directory
-# logging.info(f"BASE_DIR set to {BASE_DIR}")
+BASE_DIR = find_project_root()  # base/root directory
+if not BASE_DIR or not BASE_DIR.exists():
+    raise ValueError("Invalid project root directory")
+
 
 # Input/Output directory, sub-directories, and file paths
 INPUT_OUTPUT_DIR = BASE_DIR / "input_output"  # input/output data folder
 INPUT_DIR = INPUT_OUTPUT_DIR / "input"
 
-# Resume file in JSON format
+# * Resume file in JSON format
+# resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
 resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
 job_posting_urls_file = INPUT_DIR / "job_posting_urls.json"
 resume_docx_file = INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.docx"
+# resume_json_file_temp = (
+#     INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.json"
+# )  # for testing for now
 resume_json_file_temp = (
-    INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.json"
+    INPUT_DIR / "Resume Xiao-Fei Zhang 2025_Mkt_Intel.json"
 )  # for testing for now
 
-# Preprocessing Input/Output
+# * Preprocessing Input/Output
 PREPROCESSING_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "preprocessing"
 job_descriptions_json_file = PREPROCESSING_INPUT_OUTPUT_DIR / "jobpostings.json"
 job_requirements_json_file = (
@@ -49,7 +84,7 @@ responsibilities_flat_json_file = (
 )
 requirements_flat_json_file = PREPROCESSING_INPUT_OUTPUT_DIR / "requirements_flat.json"
 
-# Evaluation and Optimization Input/Output
+# * Evaluation and Optimization Input/Output
 EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "evaluation_optimization"
 
 # Evaluation and Optimization I/O by OpenAI

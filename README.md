@@ -1,7 +1,6 @@
 # job_bot
 A bot helps me in job hunting, such as resume optimization, interview guide, so on...
 
-```markdown
 # Pipeline Management Overview
 
 In this project, pipelines are defined, managed, and executed in a modular fashion. The main components responsible for managing the pipelines include the following files:
@@ -14,7 +13,6 @@ In this project, pipelines are defined, managed, and executed in a modular fashi
 
 4. **main.py**: The entry point for running the entire pipeline. It imports the necessary components and starts the pipeline execution, passing configurations and managing the flow.
 
----
 
 ## Step-by-Step Instructions to Run Pipelines
 
