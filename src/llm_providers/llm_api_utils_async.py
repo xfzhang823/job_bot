@@ -29,7 +29,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Union, Optional, cast
 import json
 import logging
-import logging_config
 from pydantic import ValidationError
 
 # LLM imports
@@ -43,14 +42,16 @@ from models.llm_response_models import (
     JSONResponse,
     TabularResponse,
     TextResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 )
-from utils.llm_api_utils import (
-    validate_json_type,
-    validate_response_type,
+from llm_providers.llm_api_utils import (
     get_claude_api_key,
     get_openai_api_key,
+)
+from llm_providers.llm_response_validators import (
+    validate_json_type,
+    validate_response_type,
 )
 from project_config import (
     GPT_35_TURBO,
@@ -96,8 +97,8 @@ async def call_api_async(
     TabularResponse,
     CodeResponse,
     TextResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """
     Asynchronous function for handling API calls to OpenAI, Claude, and Llama.
@@ -257,8 +258,8 @@ async def call_openai_api_async(
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """Asynchronously calls OpenAI API and parses the response."""
     openai_client = client or AsyncOpenAI(api_key=get_openai_api_key())
@@ -276,7 +277,7 @@ async def call_openai_api_async(
 
 
 # Async wrapper for Claude
-async def call_claude_api_async(
+async def call_anthropic_api_async(
     prompt: str,
     model_id: str = CLAUDE_SONNET,
     expected_res_type: str = "str",
@@ -289,14 +290,14 @@ async def call_claude_api_async(
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """Asynchronously calls the Claude API to generate responses based on a given prompt."""
-    claude_client = client or AsyncAnthropic(api_key=get_claude_api_key())
+    anthropic_client = client or AsyncAnthropic(api_key=get_claude_api_key())
     logger.info("Claude client ready for async API call.")
     return await call_api_async(
-        claude_client,
+        anthropic_client,
         model_id,
         prompt,
         expected_res_type,
@@ -320,8 +321,8 @@ async def call_llama3_async(
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """Asynchronously calls the Llama 3 API and parses the response."""
     return await call_api_async(

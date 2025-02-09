@@ -17,7 +17,7 @@ from anthropic import AsyncAnthropic
 
 from evaluation_optimization.resume_editor_async import TextEditorAsync
 from utils.generic_utils import save_to_json_file
-from utils.llm_api_utils import get_openai_api_key, get_claude_api_key
+from llm_providers.llm_api_utils import get_openai_api_key, get_claude_api_key
 from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
@@ -78,22 +78,25 @@ async def modify_resp_based_on_reqs_async(
 
     !Note: Rationale for Temperature Settings in Text Alignment:
         *1. Semantic Alignment (Temperature = 0.3):
-        - Low temperature ensures **minimal and controlled changes** to preserve the core meaning of
-        the candidate text while aligning it with the job requirement. This avoids excessive rewording
-        and keeps the semantic alignment subtle.
+        - Low temperature ensures **minimal and controlled changes** to preserve
+        the core meaning of the candidate text while aligning it with the job requirement.
+        This avoids excessive rewording and keeps the semantic alignment subtle.
         *2. Entailment Alignment (Temperature = 0.4):
-        - Slightly higher temperature provides a bit more flexibility to introduce **moderate changes**
-        that ensure the premise (candidate text) is logically supported by the hypothesis (job requirement).
-        This balances between maintaining structure and strengthening entailment without drastically
-        altering the original text.
+        - Slightly higher temperature provides a bit more flexibility to introduce
+        moderate changes that ensure the premise (candidate text) is logically supported
+        by the hypothesis (job requirement).
+        This balances between maintaining structure and strengthening entailment without
+        drastically altering the original text.
         *3. Dependency Parsing Alignment (Temperature = 0.7):
-        - High temperature allows for **larger structural modifications** to align the modified text with
-        the original candidate text's structure and tone. This step provides more freedom to reshape
-        the sentence while retaining authenticity and consistency with the original style of the resume.
+        - High temperature allows for **larger structural modifications** to align
+        the modified text with the original candidate text's structure and tone.
+        This step provides more freedom to reshape the sentence while retaining
+        authenticity and consistency with the original style of the resume.
 
-        Overall, the temperature strategy balances precision in alignment (low temperature) and
-        structural freedom (high temperature) to ensure a result that is both semantically aligned with
-        the job posting and consistent with the original resume's tone and style.
+        Overall, the temperature strategy balances precision in alignment (low temperature)
+        and structural freedom (high temperature) to ensure a result that is both
+        semantically aligned with the job posting and consistent with the original
+        resume's one and style.
     """
 
     # Initialize the client based on llm_provider if needed

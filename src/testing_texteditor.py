@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from openai import OpenAI
 
 from evaluation_optimization.resume_editor import TextEditor
-from utils.llm_api_utils import get_claude_api_key, get_openai_api_key
+from llm_providers.llm_api_utils import get_claude_api_key, get_openai_api_key
 from project_config import CLAUDE_HAIKU
 
 from project_config import CLAUDE_HAIKU, GPT_4_TURBO

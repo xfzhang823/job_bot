@@ -1,13 +1,46 @@
-# main.py
+"""
+Filename: main.py
+
+This module serves as the entry point for executing various pipeline processes. 
+It dynamically selects and executes a specific pipeline based on the given pipeline ID. 
+
+Key Steps:
+1. **main.py**: The entry point of the execution. It calls the `execute_pipeline` function 
+   to start the process.
+
+2. **execute_pipeline**: This function dynamically selects the appropriate pipeline 
+   to run based on the `pipeline_id` passed to it.
+
+3. **run_pipeline**: This function retrieves the pipeline configuration from 
+'pipeline_config.py' and maps it to the corresponding function 
+(e.g., 'run_preprocessing_pipeline').
+
+4. **pipeline_config.py**: This file contains the configuration that maps pipeline IDs to 
+   specific functions and input/output files, defining how the data flows and is processed 
+   through various stages.
+
+5. **Run each individual function pipeline**: 
+   - For example, `run_preprocessing_pipeline`: This pipeline processes job posting URLs, 
+     checks for new URLs, and extracts job descriptions.
+
+6. **Move onto the next step**: Once the pipeline finishes, it proceeds to the next stage 
+as defined in the pipeline configuration.
+
+This structure allows for easy expansion of new pipelines with minimal code changes, 
+facilitating modular, reusable code for various stages of the process.
+"""
+
+# Dependencies
 import logging
 import asyncio  # Add this line to import asyncio
 
+# User defined
 from pipelines.run_pipelines import (
     run_pipeline,
     run_pipeline_async,
 )
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-from project_config import CLAUDE_SONNET
+from project_config import CLAUDE_SONNET, GPT_4_TURBO, CLAUDE_HAIKU
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -46,7 +79,7 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
     Args:
         - pipeline_id (str): The identifier of the pipeline to execute.
         This ID maps to specific configurations and functions in `PIPELINE_CONFIG`.
-        - llm_provider (str): The LLM provider to use, typically "openai" or "claude".
+        - llm_provider (str): The LLM provider to use, typically "openai" or "anthropic".
         Defaults to "openai".
         - model_id (str, optional): The specific model ID to use:
             If `None`, the function retrieves a default model ID based on `llm_provider`
@@ -92,28 +125,88 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
         run_pipeline(pipeline_id, llm_provider=llm_provider, model_id=model_id)
 
 
-def main_claude():
-    """Executing the pipeline"""
-    # execute_pipeline("1")  # Run pipeline 1 with default OpenAI
+def main_anthropic():
+    """Executing the pipeline using Anthropic models (e.g., Claude)"""
 
-    # execute_pipeline("2a", llm_provider="claude")  # Run pipeline 2a in Claude I/O
+    # Running pipeline 1 (Preprocessing job posting webpage(s)) with Claude
+    execute_pipeline(
+        "1_async", llm_provider="anthropic", model_id=CLAUDE_HAIKU
+    )  # Run pipeline 1 with Claude (default configuration)
 
-    # execute_pipeline("3a", llm_provider="claude")  # Run pipeline 3b in Claude I/O
+    # Running pipeline 2a (Create/upsert mapping file for iteration 0) with Claude
+    execute_pipeline(
+        "2a", llm_provider="anthropic", model_id=CLAUDE_SONNET
+    )  # Run pipeline 2a in Claude I/O
 
-    # execute_pipeline("3b", llm_provider="claude")  # Run pipeline 3b using Claude
+    # Running pipeline 3a (Create/upsert mapping file for iteration 1) with Claude
+    execute_pipeline(
+        "3a", llm_provider="anthropic", model_id=CLAUDE_SONNET
+    )  # Run pipeline 3a in Claude I/O
 
-    # execute_pipeline(
-    #     "3b_async", llm_provider="claude"
-    # )  # Run pipeline 3b_async using Claude
+    # Running pipeline 3b (Modify responsibilities based on requirements using LLM)
+    # with Claude
+    execute_pipeline(
+        "3b", llm_provider="anthropic", model_id=CLAUDE_SONNET
+    )  # Run pipeline 3b using Claude
 
-    # execute_pipeline("3c", llm_provider="claude")  # Run pipeline 3c in Claude I/O
+    # Running async pipeline 3b_async (Async modification of responsibilities based on
+    # requirements) with Claude
+    execute_pipeline(
+        "3b_async", llm_provider="anthropic", model_id=CLAUDE_SONNET
+    )  # Run pipeline 3b_async using Claude
 
-    # execute_pipeline(
-    #     "3d_async", llm_provider="claude"
-    # )  # Run async pipeline 3d in Claude I/O
+    # Running pipeline 3c (Copy requirements from iteration 0 to iteration 1) with Claude
+    execute_pipeline("3c", llm_provider="anthropic")  # Run pipeline 3c in Claude I/O
 
-    execute_pipeline("3e", llm_provider="claude")  # Run pipeline 3e using Claude
+    # Running async pipeline 3d_async (Async resume evaluation in iteration 1) with Claude
+    execute_pipeline(
+        "3d_async", llm_provider="anthropic", model_id=CLAUDE_SONNET
+    )  # Run async pipeline 3d in Claude I/O
+
+    # Running pipeline 3e (Adding multivariate indices to metrics files in iteration 1)
+    # with Claude
+    execute_pipeline(
+        "3e", llm_provider="anthropic", model_id=CLAUDE_SONNET
+    )  # Run pipeline 3e using Claude
+
+
+def main_openai():
+    """Executing the pipeline using OpenAI models (e.g., GPT)"""
+
+    # Running pipeline 1 (Preprocessing job posting webpage(s)) with OpenAI GPT
+    execute_pipeline(
+        "1_async", llm_provider="openai", model_id=GPT_4_TURBO
+    )  # Choose any GPT model (e.g., gpt-3.5-turbo, gpt-4-turbo)
+
+    # Running pipeline 2a (Create/upsert mapping file for iteration 0) with OpenAI GPT
+    execute_pipeline("2a", llm_provider="openai", model_id="gpt-4-turbo")
+
+    # Running pipeline 3b (Modify responsibilities based on requirements using LLM)
+    # with OpenAI GPT
+    execute_pipeline("3b", llm_provider="openai", model_id=GPT_4_TURBO)
+
+    # Running async pipeline 3b_async (Async modification of responsibilities
+    # based on requirements) with OpenAI GPT
+    execute_pipeline("3b_async", llm_provider="openai", model_id=GPT_4_TURBO)
+
+    # Running pipeline 3c (Copy requirements from iteration 0 to iteration 1)
+    # with OpenAI GPT
+    execute_pipeline("3c", llm_provider="openai", model_id=GPT_4_TURBO)
+
+    # Running async pipeline 3d_async (Async resume evaluation in iteration 1) with OpenAI GPT
+    execute_pipeline(
+        "3d_async",
+        llm_provider="openai",
+        model_id=GPT_4_TURBO,
+    )  # Run async pipeline 3d in OpenAI I/O
+
+    # Running pipeline 3e (Adding multivariate indices to metrics files in iteration 1)
+    # with OpenAI GPT
+    execute_pipeline(
+        "3e", llm_provider="openai", model_id=GPT_4_TURBO
+    )  # Run pipeline 3e using OpenAI (GPT)
 
 
 if __name__ == "__main__":
-    main_claude()
+    # main_openai()  # Execute the OpenAI pipeline by calling main_openai
+    main_anthropic()  # Execute the OpenAI pipeline by calling main_anthropic

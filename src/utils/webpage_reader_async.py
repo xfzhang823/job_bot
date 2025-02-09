@@ -14,20 +14,59 @@ This module facilitates a two-step process:
    such as job postings.
 """
 
+import re
 from pathlib import Path
 import logging
-import logging_config
 import json
 from typing import Any, Dict, List, Literal, Tuple, Union
 import asyncio
 from playwright.async_api import async_playwright
-from utils.llm_api_utils_async import call_openai_api_async
-from utils.webpage_reader import clean_webpage_text
+from llm_providers.llm_api_utils_async import (
+    call_openai_api_async,
+    call_anthropic_api_async,
+)
 from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
-from models.llm_response_models import JobSiteResponseModel
+from models.llm_response_models import JobSiteResponse
+from project_config import GPT_4_TURBO, GPT_35_TURBO, CLAUDE_HAIKU, CLAUDE_SONNET
+import logging_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+def clean_webpage_text(content):
+    """
+    Clean the extracted text by removing JavaScript, URLs, scripts, and excessive whitespace.
+
+    This function performs the following cleaning steps:
+    - Removes JavaScript function calls.
+    - Removes URLs (e.g., tracking or other unwanted URLs).
+    - Removes script tags and their content.
+    - Replaces multiple spaces or newline characters with a single space or newline.
+    - Strips leading and trailing whitespace.
+
+    Args:
+        content (str): The text content to be cleaned.
+
+    Returns:
+        str: The cleaned and processed text.
+    """
+    # Remove JavaScript function calls (e.g., requireLazy([...]))
+    content = re.sub(r"requireLazy\([^)]+\)", "", content)
+
+    # Remove URLs (e.g., http, https)
+    content = re.sub(r"https?:\/\/\S+", "", content)
+
+    # Remove <script> tags and their contents
+    content = re.sub(r"<script[^>]*>[\s\S]*?</script>", "", content)
+
+    # Remove excessive whitespace (more than one space)
+    content = re.sub(r"\s+", " ", content).strip()
+
+    # Replace double newlines with single newlines
+    content = content.replace("\n\n", "\n")
+
+    return content
 
 
 # Function to load webpage content using Playwright
@@ -127,8 +166,12 @@ async def read_webpages_async(urls: List[str]) -> Tuple[Dict[str, str], List[str
     return documents, failed_urls
 
 
+# Todo: refactor into convert_to_json_with_llm_async later on;
+# todo: now live w/t ...with_gpt and ...with_claude
 async def convert_to_json_with_gpt_async(
-    input_text: str, model_id: str = "gpt-4-turbo", temperature: float = 0.3
+    input_text: str,
+    model_id: str = GPT_35_TURBO,  # use cheapest - easy task
+    temperature: float = 0.3,
 ) -> Dict[str, Any]:
     """
     Parse and convert job posting content to JSON format using OpenAI API asynchronously.
@@ -168,7 +211,7 @@ async def convert_to_json_with_gpt_async(
     logger.info(f"Validated LLM Response Model: {response_model}")
 
     # Validate that the response is in the expected JobSiteResponseModel format
-    if not isinstance(response_model, JobSiteResponseModel):
+    if not isinstance(response_model, JobSiteResponse):
         logger.error(
             "Received response is not in expected JobSiteResponseModel format."
         )
@@ -180,44 +223,59 @@ async def convert_to_json_with_gpt_async(
     return response_model.model_dump()
 
 
-# TODO: Need to integrate call llama-3 into this function later on...
-# TODO: llama3 has a context window issue (requires chunking first...)
-async def process_webpages_to_json_async(urls: List[str]) -> Dict[str, Dict[str, Any]]:
+async def convert_to_json_with_claude_async(
+    input_text: str,
+    model_id: str = CLAUDE_HAIKU,
+    temperature: float = 0.3,
+) -> Dict[str, Any]:
     """
-    Read webpage content, convert to JSON asynchronously using GPT, and return the result.
+    Parse and convert job posting content to JSON format using Anthropic API asynchronously.
 
     Args:
-        urls (List[str]): List of URLs to process.
+        - input_text (str): The cleaned text to convert to JSON.
+        - model_id (str, optional): The model ID to use for OpenAI (default is "gpt-4-turbo").
+        - temperature (float, optional): temperature for the model (default is 0.3).
 
     Returns:
-        Dict[str, Dict[str, Any]]: A dictionary where keys are URLs (str) and values are:
-            - JSON representation of the processed content (Dict[str, Any]) if successful.
-            - Error messages (str) if the processing fails for a URL.
+        Dict[str, Any]: A dictionary representation of the extracted JSON content.
+
+    Raises:
+        ValueError: If the input text is empty or the response is not in the expected format.
 
     Logs:
-        Information about successfully processed URLs.
-        Errors for URLs that fail during processing.
-        Lists of URLs that failed to load.
+        Information about the prompt and raw response.
+        Errors if the response does not match the expected model format.
     """
-    if isinstance(urls, str):
-        urls = [urls]
+    if not input_text:
+        logger.error("Input text is empty or invalid.")
+        raise ValueError("Input text cannot be empty.")
 
-    webpages_content, failed_urls = await read_webpages_async(urls)
-    json_results = {}
+    # Set up the prompt
+    prompt = CONVERT_JOB_POSTING_TO_JSON_PROMPT.format(content=input_text)
+    logger.info(f"Prompt to convert job posting to JSON format:\n{prompt}")
 
-    for url, content in webpages_content.items():
-        try:
-            json_result = await convert_to_json_with_gpt_async(input_text=content)
-            logger.info(f"Successfully converted content from {url} to JSON.")
-            json_results[url] = json_result
-        except Exception as e:
-            logger.error(f"Error processing content for {url}: {e}")
-            json_results[url] = {"error": str(e)}
+    # Call the async OpenAI API
+    response_model = await call_anthropic_api_async(
+        prompt=prompt,
+        model_id=model_id,
+        expected_res_type="json",
+        json_type="job_site",
+        temperature=temperature,
+        max_tokens=2000,
+    )
+    logger.info(f"Validated LLM Response Model: {response_model}")
 
-    if failed_urls:
-        logger.info(f"URLs failed to process:\n{failed_urls}")
+    # Validate that the response is in the expected JobSiteResponseModel format
+    if not isinstance(response_model, JobSiteResponse):
+        logger.error(
+            "Received response is not in expected JobSiteResponseModel format."
+        )
+        raise ValueError(
+            "Received response is not in expected JobSiteResponseModel format."
+        )
 
-    return json_results
+    # Return the model-dumped dictionary (from Pydantic obj to dict)
+    return response_model.model_dump()
 
 
 def save_webpage_content(
@@ -256,3 +314,96 @@ def save_webpage_content(
     except Exception as e:
         logger.error(f"Error saving content: {e}")
         raise
+
+
+# TODO: Need to integrate call llama-3 into this function later on...
+# TODO: llama3 has a context window issue (requires chunking first...)
+# Function to orchestrate the entire process (to be called by pipeline functions)
+async def process_webpages_to_json_async(
+    urls: Union[List[str], str],
+    llm_provider: str = "openai",
+    model_id: str = GPT_4_TURBO,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Async operation that orchestrates the entire process of extracting, cleaning,
+    and converting webpage content to a structured JSON format asynchronously.
+
+    This method performs a two-step process:
+
+    1. **Extract and Clean Raw Content**:
+        - Retrieves content from the specified URLs using Playwright.
+        - Cleans the extracted content by removing JavaScript, URLs, scripts,
+        and excessive whitespace,
+        ensuring only relevant text remains.
+
+    2. **Convert to Structured JSON**:
+        - After cleaning, the method uses the specified LLM provider (OpenAI by default)
+        to convert the
+        raw, cleaned text into a structured JSON format, tailored to specific use cases
+        (e.g., job postings).
+        - The model specified by `model_id` is used for the conversion process.
+
+    Args:
+        - urls (List[str]): List of URLs to process and extract content from.
+        - llm_provider (str, optional): The LLM provider to use for content conversion
+        (default is "openai").
+        - model_id (str, optional): The model ID to use for OpenAI or another provider
+        (default is "gpt-4-turbo").
+
+    Returns:
+        Dict[str, Dict[str, Any]]: A dictionary where each key is a URL, and
+        the value is the structured JSON representation of the converted webpage content.
+
+    Logs:
+        - Information about successfully processed URLs.
+        - Errors for URLs that fail during processing.
+        - A list of URLs that failed to load.
+
+    Raises:
+        Exception: If any errors occur during webpage content extraction or
+        conversion to JSON format.
+    """
+
+    if isinstance(urls, str):
+        urls = [urls]
+
+    # Step 1. Read raw webpage content with playwright
+    webpages_content, failed_urls = await read_webpages_async(urls)  # returns 2 lists
+
+    # Step 2. Iterate through raw web content list -> structured JSON format
+    json_results = {}  # create a holder
+
+    # Iterate w/t OpenAI or Anthropic LLM API
+    if llm_provider.lower() == "openai":
+        for url, content in webpages_content.items():
+            try:
+                json_result = await convert_to_json_with_gpt_async(
+                    input_text=content, model_id=model_id
+                )
+                logger.info(f"Successfully converted content from {url} to JSON.")
+                json_results[url] = json_result
+            except Exception as e:
+                logger.error(f"Error processing content for {url}: {e}")
+                json_results[url] = {"error": str(e)}
+
+        if failed_urls:
+            logger.info(f"URLs failed to process:\n{failed_urls}")
+
+    if llm_provider.lower() == "anthropic" or "claude":
+        for url, content in webpages_content.items():
+            try:
+                json_result = await convert_to_json_with_claude_async(
+                    input_text=content, model_id=model_id
+                )
+                logger.info(f"Successfully converted content from {url} to JSON.")
+                json_results[url] = json_result
+            except Exception as e:
+                logger.error(f"Error processing content for {url}: {e}")
+                json_results[url] = {"error": str(e)}
+
+        if failed_urls:
+            logger.info(f"URLs failed to process:\n{failed_urls}")
+
+    else:
+        raise ValueError(f"{llm_provider} is not a support LLM API.")
+    return json_results

@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Optional, Union, cast
 from dotenv import load_dotenv
 import pandas as pd
 from pydantic import ValidationError
@@ -28,10 +28,14 @@ from models.llm_response_models import (
     JSONResponse,
     TabularResponse,
     TextResponse,
-    EditingResponseModel,
-    OptimizedTextData,
-    JobSiteData,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
+    RequirementsResponse,
+)
+from models.resume_job_description_io_models import Requirements
+from llm_providers.llm_response_validators import (
+    validate_json_type,
+    validate_response_type,
 )
 from project_config import (
     GPT_35_TURBO,
@@ -67,224 +71,6 @@ def get_claude_api_key() -> str:
     return api_key
 
 
-# Parsing & validation utils functions
-# Function to clean/extract JSON content
-def clean_and_extract_json(
-    response_content: str,
-) -> Optional[Union[Dict[str, Any], List[Any]]]:
-    """
-    Extracts, cleans, and parses JSON content from the API response.
-    Strips out any non-JSON content like extra text before the JSON block.
-    Also removes JavaScript-style comments and trailing commas.
-
-    Args:
-        response_content (str): Raw response content.
-
-    Returns:
-        Optional[Union[Dict[str, Any], List[Any]]]: Parsed JSON data as a dictionary or list,
-        or None if parsing fails.
-    """
-    try:
-        # Attempt direct parsing
-        return json.loads(response_content)
-    except json.JSONDecodeError:
-        logger.warning("Initial JSON parsing failed. Attempting fallback extraction.")
-
-    # Extract JSON-like structure (object or array)
-    match = re.search(r"({.*}|\\[.*\\])", response_content, re.DOTALL)
-    if not match:
-        logger.error("No JSON-like content found.")
-        return None
-
-    try:
-        # Remove trailing commas
-        clean_content = re.sub(r",\\s*([}\\]])", r"\\1", match.group(0))
-        return json.loads(clean_content)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON in fallback: {e}")
-        return None
-
-
-# Response type validation
-def validate_response_type(
-    response_content: Union[str, Any], expected_res_type: str
-) -> Union[
-    CodeResponse,
-    JSONResponse,
-    TabularResponse,
-    TextResponse,
-]:
-    """
-    Validates and structures the response content based on
-    the expected response type.
-
-    Args:
-        response_content (Any): The raw response content from the LLM API.
-        expected_res_type (str): The expected type of the response
-            (e.g., "json", "tabular", "str", "code").
-
-    Returns:
-        Union[CodeResponse, JSONResponse, TabularResponse, TextResponse]:
-            The validated and structured response as a Pydantic model instance.
-            - CodeResponse: Returned when expected_res_type is "code", wraps code content.
-            - JSONResponse, JobSiteResponseModel, or EditingResponseModel:
-              Returned when expected_res_type is "json", based on json_type.
-            - TabularResponse: Returned when expected_res_type is "tabular", wraps a DataFrame.
-            - TextResponse: Returned when expected_res_type is "str", wraps plain text content.
-    """
-
-    if expected_res_type == "json":
-        # Check if response_content is a string that needs parsing
-        if isinstance(response_content, str):
-            # Only parse if it's a string
-            cleaned_content = clean_and_extract_json(response_content)
-            if cleaned_content is None:
-                raise ValueError("Failed to extract valid JSON from the response.")
-        else:
-            # If it's already a dict or list, use it directly
-            cleaned_content = response_content
-
-        # Create a JSONResponse instance with the cleaned content
-        if isinstance(cleaned_content, (dict, list)):
-            return JSONResponse(data=cleaned_content)
-        else:
-            raise TypeError(
-                f"Expected dict or list for JSON response, got {type(cleaned_content)}"
-            )
-
-    elif expected_res_type == "tabular":
-        try:
-            # Parse as DataFrame and wrap in TabularResponse model
-            df = pd.read_csv(StringIO(response_content))
-            return TabularResponse(data=df)
-        except Exception as e:
-            logger.error(f"Error parsing tabular data: {e}")
-            raise ValueError("Response is not valid tabular data.")
-
-    elif expected_res_type == "str":
-        # Wrap text response in TextResponse model
-        return TextResponse(content=response_content)
-
-    elif expected_res_type == "code":
-        # Wrap code response in CodeResponse model
-        return CodeResponse(code=response_content)
-
-    else:
-        raise ValueError(f"Unsupported response type: {expected_res_type}")
-
-
-def validate_editing_response(response_model: JSONResponse) -> EditingResponseModel:
-    """
-    Processes and validates a JSON response for the "editing" type.
-
-    This function ensures that the "data" field in the response is an instance of OptimizedTextData.
-
-    Args:
-        response_model (JSONResponse): The generic JSON response model to validate.
-
-    Returns:
-        EditingResponseModel: The validated EditingResponseModel instance containing "optimized_text".
-
-    Raises:
-        ValueError: If the data is None or not an instance of OptimizedTextData.
-    """
-    response_data = response_model.data  # parse -> data (dictionary)
-
-    if response_data is None:
-        raise ValueError("Response data is None and cannot be processed.")
-
-    if not isinstance(response_data, dict):
-        raise ValueError(
-            f"Expected response_data_model to be a dictionary, got {type(response_data)}"
-        )
-
-    parsed_data = OptimizedTextData(**response_data)
-    validated_response_model = EditingResponseModel(
-        status="success",
-        message="Text editing processed successfully.",
-        data=parsed_data,
-    )
-
-    logger.info(f"Validated response model - editing: {validated_response_model}")
-
-    return validated_response_model
-
-
-def validate_job_site_response(response_model: JSONResponse) -> JobSiteResponseModel:
-    """
-    Processes and validates a JSON response for the "job_site" type.
-
-    This function ensures that the "data" field in the response is an instance of JobSiteData.
-
-    Args:
-        response_model (JSONResponse): The generic JSON response model to validate.
-
-    Returns:
-        JobSiteResponseModel: The validated JobSiteResponseModel instance containing job-specific data.
-
-    Raises:
-        ValueError: If the "data" field is None or not an instance of JobSiteData.
-    """
-    response_data = response_model.data  # parse -> data dictionary
-
-    if response_data is None:
-        raise ValueError("Response data is None and cannot be processed.")
-
-    if not isinstance(response_data, dict):
-        raise ValueError(
-            f"Expected response_data_model to be a dictionary, got {type(response_data)}"
-        )
-
-    try:
-        # Parse the data field into JobSiteData
-        parsed_data = JobSiteData(**response_data)
-
-    except ValidationError as e:
-        raise ValueError(f"Invalid data structure for job site response: {e}")
-
-    validated_response_model = JobSiteResponseModel(
-        status="success",
-        message="Job site data processed successfully.",
-        data=parsed_data,
-    )
-
-    logger.info(f"Validated response model - job site: {validated_response_model}")
-
-    return validated_response_model
-
-
-def validate_json_type(
-    response_model: JSONResponse, json_type: str
-) -> Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
-    """
-    Validates JSON data against a specific Pydantic model based on 'json_type'.
-
-    Args:
-        response_model (JSONResponse): The generic JSON response to validate.
-        json_type (str): The expected JSON type ('job_site', 'editing', or 'generic').
-
-    Returns:
-        Union[JobSiteResponseModel, EditingResponseModel, JSONResponse]:
-        Validated model instance.
-
-    Raises:
-        ValueError: If 'json_type' is unsupported or validation fails.
-    """
-    # Map json_type to the correct model class
-    json_model_mapping = {
-        "editing": validate_editing_response,
-        "job_site": validate_job_site_response,
-        "generic": lambda model: model,  # Return as is
-    }
-
-    # Pick the right function
-    validator = json_model_mapping.get(json_type)
-    if not validator:
-        raise ValueError(f"Unsupported json_type: {json_type}")
-
-    return validator(response_model)
-
-
 # API Calling Functions
 # Call LLM API
 def call_api(
@@ -301,8 +87,9 @@ def call_api(
     TabularResponse,
     CodeResponse,
     TextResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
+    Requirements,
 ]:
     """
     Unified function to handle API calls for OpenAI, Claude, and Llama. This method handles
@@ -396,7 +183,9 @@ def call_api(
             # *The content attribute of Message is a list of TextBlock objects,
             # *whereas others wrap everything into a single block.)
             response_content = (
-                response.content[0].text
+                response.content[
+                    0
+                ].text  # pylint: disable=attribute-defined-outside-init
                 if hasattr(response.content[0], "text")
                 else str(response.content[0])
             )
@@ -462,8 +251,8 @@ def call_openai_api(
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """
     Calls OpenAI API and parses response.
@@ -514,8 +303,8 @@ def call_claude_api(
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """
     Calls the Claude API to generate responses based on a given prompt and expected response type.
@@ -562,8 +351,8 @@ def call_llama3(
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 ]:
     """Calls the Llama 3 API and parses response."""
     return call_api(
