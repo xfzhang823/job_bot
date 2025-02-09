@@ -56,15 +56,15 @@ if not BASE_DIR or not BASE_DIR.exists():
     raise ValueError("Invalid project root directory")
 
 
-# Input/Output directory, sub-directories, and file paths
+# * Input/Output directory, sub-directories, and file paths
 INPUT_OUTPUT_DIR = BASE_DIR / "input_output"  # input/output data folder
 INPUT_DIR = INPUT_OUTPUT_DIR / "input"
 
 # * Resume file in JSON format
 # resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
-resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
-job_posting_urls_file = INPUT_DIR / "job_posting_urls.json"
-resume_docx_file = INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.docx"
+RESUME_JSON_FILE = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
+JOB_POSTING_URLS_FILE = INPUT_DIR / "job_posting_urls.json"
+RESUME_DOCX_FILE = INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.docx"
 # resume_json_file_temp = (
 #     INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.json"
 # )  # for testing for now
@@ -74,8 +74,8 @@ resume_json_file_temp = (
 
 # * Preprocessing Input/Output
 PREPROCESSING_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "preprocessing"
-job_descriptions_json_file = PREPROCESSING_INPUT_OUTPUT_DIR / "jobpostings.json"
-job_requirements_json_file = (
+JOB_DESCRIPTIONS_JSON_FILE = PREPROCESSING_INPUT_OUTPUT_DIR / "jobpostings.json"
+JOB_REQUIREMENTS_JSON_FILE = (
     PREPROCESSING_INPUT_OUTPUT_DIR / "extracted_job_requirements.json"
 )
 description_text_holder = PREPROCESSING_INPUT_OUTPUT_DIR / "jobposting_text_holder.txt"
@@ -146,27 +146,31 @@ SIMILARITY_METRICS_ITERATE_2_OPENAI_DIR = (
 )
 url_to_file_mapping_file_iterate_2_openai = ITERATE_2_OPENAI_DIR / mapping_file_name
 
-# *Eval and Optimization - by Claude
+# *Eval and Optimization - by Anthropic/Claude
 # Evaluation and Optimization Input/Output
-EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR = (
-    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "evaluation_optimization_by_claude"
+EVALUATION_OPTIMIZATION_BY_ANTHROPIC_DIR = (
+    EVALUATION_OPTIMIZATION_INPUT_OUTPUT_DIR / "evaluation_optimization_by_anthropic"
 )
 
-ITERATE_0_CLAUDE_DIR = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_0"
-ITERATE_1_CLAUDE_DIR = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_1"
-ITERATE_2_CLAUDE_DIR = EVALUATION_OPTIMIZATION_BY_CLAUDE_DIR / "iteration_2"
+ITERATE_0_ANTHROPIC_DIR = EVALUATION_OPTIMIZATION_BY_ANTHROPIC_DIR / "iteration_0"
+ITERATE_1_ANTHROPIC_DIR = EVALUATION_OPTIMIZATION_BY_ANTHROPIC_DIR / "iteration_1"
+ITERATE_2_ANTHROPIC_DIR = EVALUATION_OPTIMIZATION_BY_ANTHROPIC_DIR / "iteration_2"
 
 # Iteration 0
 # logging.info("Setting up iteration 0 directories")
-REQS_FILES_ITERATE_0_CLAUDE_DIR = ITERATE_0_CLAUDE_DIR / requirements_dir_name
-RESPS_FILES_ITERATE_0_CLAUDE_CLAUDE = ITERATE_0_CLAUDE_DIR / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_0_DIR_CLAUDE = (
-    ITERATE_0_CLAUDE_DIR / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_0_ANTHROPIC_DIR = ITERATE_0_ANTHROPIC_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_0_ANTHROPIC_DIR = (
+    ITERATE_0_ANTHROPIC_DIR / responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_0_CLAUDE_DIR = (
-    ITERATE_0_CLAUDE_DIR / similarity_metrics_dir_name
+PRUNED_RESPS_FILES_ITERATE_0_ANTHROPIC_DIR = (
+    ITERATE_0_ANTHROPIC_DIR / pruned_responsibilities_dir_name
 )
-url_to_file_mapping_file_iterate_0_claude = ITERATE_0_CLAUDE_DIR / mapping_file_name
+SIMILARITY_METRICS_ITERATE_0_ANTHROPIC_DIR = (
+    ITERATE_0_ANTHROPIC_DIR / similarity_metrics_dir_name
+)
+url_to_file_mapping_file_iterate_0_anthropic = (
+    ITERATE_0_ANTHROPIC_DIR / mapping_file_name
+)
 
 # logging.info(
 #     f"Iteration 0 directories set to: {', '.join(str(dir) for dir in list_of_dirs)}"
@@ -174,29 +178,86 @@ url_to_file_mapping_file_iterate_0_claude = ITERATE_0_CLAUDE_DIR / mapping_file_
 
 # Iteration 1
 # logging.info("Setting up iteration 1 directories")
-REQS_FILES_ITERATE_1_CLAUDE_DIR = ITERATE_1_CLAUDE_DIR / requirements_dir_name
-RESPS_FILES_ITERATE_1_CLAUDE_DIR = ITERATE_1_OPENAI_DIR / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_1_CLAUDE_DIR = (
-    ITERATE_1_CLAUDE_DIR / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_1_ANTHROPIC_DIR = ITERATE_1_ANTHROPIC_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_1_ANTHROPIC_DIR = (
+    ITERATE_1_ANTHROPIC_DIR / responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_1_CLAUDE_DIR = (
-    ITERATE_1_CLAUDE_DIR / similarity_metrics_dir_name
+PRUNED_RESPS_FILES_ITERATE_1_ANTHROPIC_DIR = (
+    ITERATE_1_ANTHROPIC_DIR / pruned_responsibilities_dir_name
 )
-url_to_file_mapping_file_iterate_1_claude = ITERATE_1_CLAUDE_DIR / mapping_file_name
+SIMILARITY_METRICS_ITERATE_1_ANTHROPIC_DIR = (
+    ITERATE_1_ANTHROPIC_DIR / similarity_metrics_dir_name
+)
+url_to_file_mapping_file_iterate_1_anthropic = (
+    ITERATE_1_ANTHROPIC_DIR / mapping_file_name
+)
 
 # Iteration 2
-REQS_FILES_ITERATE_2_CLAUDE_DIR = ITERATE_2_CLAUDE_DIR / requirements_dir_name
-RESPS_FILES_ITERATE_2_CLAUDE_DIR = ITERATE_2_CLAUDE_DIR / responsibilities_dir_name
-PRUNED_RESPS_FILES_ITERATE_2_CLAUDE_DIR = (
-    ITERATE_2_CLAUDE_DIR / pruned_responsibilities_dir_name
+REQS_FILES_ITERATE_2_ANTHROPIC_DIR = ITERATE_2_ANTHROPIC_DIR / requirements_dir_name
+RESPS_FILES_ITERATE_2_ANTHROPIC_DIR = (
+    ITERATE_2_ANTHROPIC_DIR / responsibilities_dir_name
 )
-SIMILARITY_METRICS_ITERATE_2_CLAUDE_DIR = (
-    ITERATE_2_CLAUDE_DIR / similarity_metrics_dir_name
+PRUNED_RESPS_FILES_ITERATE_2_ANTHROPIC_DIR = (
+    ITERATE_2_ANTHROPIC_DIR / pruned_responsibilities_dir_name
 )
-url_to_file_mapping_file_iterate_2_claude = ITERATE_2_CLAUDE_DIR / mapping_file_name
+SIMILARITY_METRICS_ITERATE_2_ANTHROPIC_DIR = (
+    ITERATE_2_ANTHROPIC_DIR / similarity_metrics_dir_name
+)
+url_to_file_mapping_file_iterate_2_anthropic = (
+    ITERATE_2_ANTHROPIC_DIR / mapping_file_name
+)
+
+DATA_FILES_CONFIG = {
+    "job_posting_urls_file": {
+        "path": JOB_POSTING_URLS_FILE,
+        "description": "This file contains URLs for job postings along with \
+company names and positions.",
+        "format": "JSON",
+        "fields": ["url", "company", "position"],
+        "example": {
+            "url": "https://example.com/job-posting",
+            "company": "Tech Corp",
+            "position": "Software Engineer",
+        },
+    },
+    "job_descriptions_json_file": {
+        "path": JOB_DESCRIPTIONS_JSON_FILE,
+        "description": "Contains raw content of job postings scraped from URLs. \
+Each entry contains the job title, company, and a full description.",
+        "format": "JSON",
+        "fields": ["job_title", "company", "location", "description"],
+        "example": {
+            "job_title": "Software Engineer",
+            "company": "Tech Corp",
+            "location": "San Francisco, CA",
+            "description": "We are looking for a Software Engineer...",
+        },
+    },
+    "job_requirements_json_file": {
+        "path": JOB_REQUIREMENTS_JSON_FILE,
+        "description": "Contains the extracted job requirements from the job descriptions. \
+This file lists the key qualifications and responsibilities.",
+        "format": "JSON",
+        "fields": ["job_title", "company", "requirements"],
+        "example": {
+            "job_title": "Software Engineer",
+            "company": "Tech Corp",
+            "requirements": [
+                "10+ years of experience in software development",
+                "Proficiency in Python, JavaScript",
+            ],
+        },
+    },
+}
 
 
 # *LLM Models
+
+# llm_providers
+OPENAI = "openai"
+ANTHROPIC = "anthropic"
+
+# Model IDs
 # Anthropic (Claude) models
 CLAUDE_OPUS = "claude-3-opus-20240229"
 CLAUDE_SONNET = "claude-3-5-sonnet-20241022"
@@ -223,12 +284,12 @@ LLM_CONFIG = {
             # Add more as needed
         },
     },
-    "claude": {
+    "anthropic": {
         "model_id": "claude-3-5-sonnet-20241022",
         "iteration_dirs": {
-            "0": ITERATE_0_CLAUDE_DIR,
-            "1": ITERATE_1_CLAUDE_DIR,
-            "2": ITERATE_2_CLAUDE_DIR,
+            "0": ITERATE_0_ANTHROPIC_DIR,
+            "1": ITERATE_1_ANTHROPIC_DIR,
+            "2": ITERATE_2_ANTHROPIC_DIR,
             # Add more as needed
         },
     },

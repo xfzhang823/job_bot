@@ -7,10 +7,9 @@ pydantic models for validate LLM responses
 
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ValidationError, constr, Field
-
 import pandas as pd
 import logging
-import logging_config
+from models.resume_job_description_io_models import Requirements
 
 
 # Set up logger
@@ -134,7 +133,7 @@ class OptimizedTextData(BaseModel):
     optimized_text: str = Field(..., description="The optimized text after editing.")
 
 
-class EditingResponseModel(BaseResponseModel):
+class EditingResponse(BaseResponseModel):
     """
     Model for responses involving text editing operations.
 
@@ -159,13 +158,14 @@ class JobSiteData(BaseModel):
     Inner model containing detailed job site information.
 
     Attributes:
-        url (str): The URL of the job posting (required).
-        job_title (str): Title of the job position (required).
-        company (str): Name of the company posting the job (required).
-        location (Optional[str]): Job location.
-        salary_info (Optional[str]): Salary information, if available.
-        posted_date (Optional[str]): Date when the job was posted.
-        content (Optional[Dict[str, Any]]): Contains the job description, responsibilities, and qualifications as a dictionary.
+        - url (str): The URL of the job posting (required).
+        - job_title (str): Title of the job position (required).
+        - company (str): Name of the company posting the job (required).
+        - location (Optional[str]): Job location.
+        - salary_info (Optional[str]): Salary information, if available.
+        - posted_date (Optional[str]): Date when the job was posted.
+        - content (Optional[Dict[str, Any]]): Contains the job description, responsibilities,
+        and qualifications as a dictionary.
     """
 
     url: str = Field(..., description="Job posting URL")
@@ -180,7 +180,7 @@ class JobSiteData(BaseModel):
     )
 
 
-class JobSiteResponseModel(BaseResponseModel):
+class JobSiteResponse(BaseResponseModel):
     """
     Model for handling job site response data, standardizing job-related information.
 
@@ -215,6 +215,32 @@ class JobSiteResponseModel(BaseResponseModel):
                             "BS in Computer Science",
                             "2+ years experience",
                         ],
+                    },
+                },
+            }
+        }
+
+
+class RequirementsResponse(BaseResponseModel):
+    """
+    Response model for job requirements.
+    It wraps the Requirements model for JSON response validation.
+
+    Attributes:
+        data (Requirements): Holds the job requirements data as a nested Requirements instance.
+    """
+
+    data: Requirements  # This holds the actual job requirements data, validated by Requirements
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Job requirements data processed successfully.",
+                "data": {
+                    "requirements": {
+                        "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS...",
+                        "0.pie_in_the_sky.1": "Ph.D. in Data Science...",
                     },
                 },
             }

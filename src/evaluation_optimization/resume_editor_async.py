@@ -24,16 +24,16 @@ from prompts.prompt_templates import (
     SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
-from utils.llm_api_utils import get_openai_api_key
-from utils.llm_api_utils_async import (
+from llm_providers.llm_api_utils import get_openai_api_key
+from llm_providers.llm_api_utils_async import (
     call_openai_api_async,
     call_llama3_async,
-    call_claude_api_async,
+    call_anthropic_api_async,
 )
 from utils.validation_utils import validate_json_response
 from models.llm_response_models import (
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
     TextResponse,
     JSONResponse,
     TabularResponse,
@@ -137,8 +137,8 @@ class TextEditorAsync:
         TabularResponse,
         TextResponse,
         CodeResponse,
-        EditingResponseModel,
-        JobSiteResponseModel,
+        EditingResponse,
+        JobSiteResponse,
     ]:
         """
         *Async version of the method.
@@ -169,7 +169,7 @@ class TextEditorAsync:
                 client=self.client if isinstance(self.client, AsyncOpenAI) else None,
             )
         elif llm_provider == "claude":
-            response_pyd_obj = await call_claude_api_async(
+            response_pyd_obj = await call_anthropic_api_async(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
@@ -197,7 +197,7 @@ class TextEditorAsync:
         source_text: str,
         llm_provider: str = "",
         temperature: Optional[float] = None,
-    ) -> EditingResponseModel:
+    ) -> EditingResponse:
         """
         *Async version of the method.
 
@@ -225,7 +225,7 @@ class TextEditorAsync:
         )
 
         # Ensure the response is an instance of EditingResponseModel
-        if not isinstance(response_model, EditingResponseModel):
+        if not isinstance(response_model, EditingResponse):
             raise ValueError("The response is not an instance of EditingResponseModel.")
 
         # Log and return the response model
@@ -240,7 +240,7 @@ class TextEditorAsync:
         hypothesis_text: str,
         llm_provider: str = "",
         temperature: Optional[float] = None,
-    ) -> EditingResponseModel:
+    ) -> EditingResponse:
         """
         *Async version of the method.
 
@@ -272,7 +272,7 @@ class TextEditorAsync:
         )
 
         # Ensure the response is an instance of EditingResponseModel
-        if not isinstance(response_model, EditingResponseModel):
+        if not isinstance(response_model, EditingResponse):
             raise ValueError("The response is not an instance of EditingResponseModel.")
 
         # Log and return the response model
@@ -287,7 +287,7 @@ class TextEditorAsync:
         reference_text: str,
         llm_provider: str = "",
         temperature: Optional[float] = None,
-    ) -> EditingResponseModel:
+    ) -> EditingResponse:
         """
         *Async version of the method.
 
@@ -320,7 +320,7 @@ class TextEditorAsync:
         )
 
         # Ensure the response is an instance of EditingResponseModel
-        if not isinstance(response_model, EditingResponseModel):
+        if not isinstance(response_model, EditingResponse):
             raise ValueError("The response is not an instance of EditingResponseModel.")
 
         # Log and return the response model

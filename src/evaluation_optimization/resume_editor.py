@@ -23,7 +23,7 @@ from prompts.prompt_templates import (
     SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
-from utils.llm_api_utils import (
+from llm_providers.llm_api_utils import (
     get_openai_api_key,
     get_claude_api_key,
     call_claude_api,
@@ -32,13 +32,13 @@ from utils.llm_api_utils import (
 )
 from utils.validation_utils import validate_json_response
 from models.llm_response_models import (
-    EditingResponseModel,
+    EditingResponse,
     JSONResponse,
     TabularResponse,
     TextResponse,
     CodeResponse,
-    EditingResponseModel,
-    JobSiteResponseModel,
+    EditingResponse,
+    JobSiteResponse,
 )
 
 # logging
@@ -147,8 +147,8 @@ class TextEditor:
         TabularResponse,
         TextResponse,
         CodeResponse,
-        EditingResponseModel,
-        JobSiteResponseModel,
+        EditingResponse,
+        JobSiteResponse,
     ]:
         """
         Call the specified LLM API (OpenAI, Claude, LLaMA3) with the provided prompt
@@ -242,7 +242,7 @@ class TextEditor:
         target_text: str,
         source_text: str,
         temperature: Optional[float] = None,
-    ) -> EditingResponseModel:
+    ) -> EditingResponse:
         """
         Re-edit the target text to better align w/t source text's dependency parsing (DP),
         leveraging the OpenAI API.
@@ -279,7 +279,7 @@ class TextEditor:
         )
 
         # Ensure the response is an instance of EditingResponseModel
-        if not isinstance(response_model, EditingResponseModel):
+        if not isinstance(response_model, EditingResponse):
             raise ValueError("The response is not an instance of EditingResponseModel.")
 
         # Log and return the response model
@@ -293,7 +293,7 @@ class TextEditor:
         premise_text: str,
         hypothesis_text: str,
         temperature: Optional[float] = None,
-    ) -> EditingResponseModel:
+    ) -> EditingResponse:
         """
         Re-edit the target text to strengthen its entailment with the source text.
         Entailment is directional and its order is often the reverse of other comparisons:
@@ -332,7 +332,7 @@ class TextEditor:
         )
 
         # Ensure the response is an instance of EditingResponseModel
-        if not isinstance(response_model, EditingResponseModel):
+        if not isinstance(response_model, EditingResponse):
             raise ValueError("The response is not an instance of EditingResponseModel.")
 
         # Log and return the response model
@@ -346,7 +346,7 @@ class TextEditor:
         candidate_text: str,
         reference_text: str,
         temperature: Optional[float] = None,
-    ) -> EditingResponseModel:
+    ) -> EditingResponse:
         """
         Re-edit the target text to better align w/t source text's semantics, leveraging LLMs.
 
@@ -388,7 +388,7 @@ class TextEditor:
         )
 
         # Ensure the response is an instance of EditingResponseModel
-        if not isinstance(response_model, EditingResponseModel):
+        if not isinstance(response_model, EditingResponse):
             raise ValueError("The response is not an instance of EditingResponseModel.")
 
         # Log and return the response model

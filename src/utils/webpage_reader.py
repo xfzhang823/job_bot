@@ -28,8 +28,8 @@ from prompts.prompt_templates import (
     CLEAN_JOB_PAGE_PROMPT,
     CONVERT_JOB_POSTING_TO_JSON_PROMPT,
 )
-from utils.llm_api_utils import call_openai_api
-from models.llm_response_models import JobSiteResponseModel
+from llm_providers.llm_api_utils import call_openai_api
+from models.llm_response_models import JobSiteResponse
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -492,7 +492,7 @@ def convert_to_json_wt_gpt(
     )
     logger.info(f"Raw LLM Response: {response_pyd_obj}")
 
-    if not isinstance(response_pyd_obj, JobSiteResponseModel):
+    if not isinstance(response_pyd_obj, JobSiteResponse):
         logger.error(
             "Received response is not in expected JobSiteResponseModel format."
         )

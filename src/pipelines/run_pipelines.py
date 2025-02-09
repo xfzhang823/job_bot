@@ -7,16 +7,13 @@ from tqdm import tqdm
 import asyncio
 
 
-from utils.generic_utils import fetch_new_urls
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
 
 # Pipeline functions
 from pipelines.preprocessing_pipeline_async import (
-    run_pipeline_async as run_preprocessing_pipeline_async,
+    run_preprocessing_pipeline_async as run_preprocessing_pipeline_async,
 )
-from pipelines.preprocessing_pipeline import (
-    run_pipeline as run_preprocessing_pipeline,
-)
+from pipelines.preprocessing_pipeline import run_preprocessing_pipeline
 from pipelines.upserting_mapping_mini_pipeline_iter0 import (
     run_pipeline as run_upserting_mapping_file_pipeline_iter0,
 )
@@ -62,7 +59,7 @@ from pipelines.resume_eval_pipeline_async import (
 from pipelines.resume_editing_pipeline_async import (
     run_pipeline_async as run_resume_editting_pipeline_async,
 )
-
+from project_config import CLAUDE_HAIKU, GPT_4_TURBO
 
 # Set logger
 logger = logging.getLogger(__name__)
@@ -72,7 +69,7 @@ def run_pipeline(
     pipeline_id: str, llm_provider: str = "openai", model_id: Optional[str] = None
 ):
     """
-    *Thi is the sync version
+    *This is the sync version
 
     Executes a dynamically specified pipeline based on its configuration in `PIPELINE_CONFIG`.
 
@@ -125,7 +122,7 @@ def run_pipeline(
 
         Then, to run this pipeline with OpenAI as the provider and a specific model:
 
-        *    run_pipeline("3b", llm_provider="openai", model_id="gpt-4-turbo")
+        * run_pipeline("3b", llm_provider="openai", model_id="gpt-4-turbo")
 
         This will execute `run_resume_editing_pipeline` with the following arguments:
         - `mapping_file_prev` (from `io_config`)
@@ -171,6 +168,9 @@ def run_pipeline(
         kwargs["llm_provider"] = llm_provider
     if "model_id" in func_signature.parameters:
         kwargs["model_id"] = model_id
+
+    # Pass the iteration file paths directly (don't handle iteration centrally here)
+    # Example: kwargs["iteration_dir"] = ITERATE_0_OPENAI_DIR (pass the iteration dir directly)
 
     # Log for debugging purposes
     logger.info(f"Calling function '{func_name}' with kwargs: {kwargs}")
@@ -231,21 +231,22 @@ def run_pipeline_1(llm_provider: str = "openai"):
     config = PIPELINE_CONFIG["1"]
     io_config = config["io"][llm_provider]
 
-    new_urls = fetch_new_urls(
-        existing_url_list_file=io_config["existing_url_list_file"],
-        url_list_file=io_config["url_list_file"],
-    )
-    if not new_urls:
-        logger.info("No new URLs found. Skipping...")
-        return
+    # Allow overriding model_id dynamically
+    model_id = config.get(
+        "model_id", GPT_4_TURBO
+    )  # Default to "gpt-4-turbo" if not set
 
-    for url in tqdm(new_urls, desc="Processing job postings", unit="job"):
-        logger.info(f"Processing for URL: {url}")
-        run_preprocessing_pipeline(
-            job_description_url=url,
-            job_descriptions_json_file=io_config["existing_url_list_file"],
-            requirements_json_file=io_config["url_list_file"],
-        )
+    # Log the io_config for debugging purposes
+    logger.info(f"Pipeline configuration for {llm_provider}: {io_config}")
+
+    # Run orchestrated preprocessing pipeline with the extracted config
+    run_preprocessing_pipeline(
+        llm_provider=llm_provider,
+        model_id=model_id,
+        job_posting_urls_file=io_config[""],
+        job_descriptions_json_file=io_config["job_descriptions_json_file"],
+        job_requirements_json_file=io_config["url_list_file"],
+    )
 
 
 def run_pipeline_2a(llm_provider: str = "openai"):
@@ -358,7 +359,7 @@ def run_pipeline_3b(llm_provider: str = "openai"):
             f"One or more required I/O configurations are missing for provider '{llm_provider}'."
         )
 
-    run_resume_editting_pipeline(
+    run_resume_editing_pipeline(
         mapping_file_prev=mapping_file_prev,
         mapping_file_curr=mapping_file_curr,
         llm_provider=llm_provider,
@@ -402,25 +403,31 @@ def run_pipeline_3e(llm_provider: str = "openai"):
 
 async def run_pipeline_1_async(llm_provider: str = "openai"):
     """
-    Async pipeline for preprocessing job posting webpage(s).
+    Asynchronous pipeline for preprocessing job posting webpages.
+
+    This pipeline identifies and processes new URLs. For each new URL,
+    it invokes the `run_preprocessing_pipeline_async` function to extract relevant
+    data and save it. If no new URLs are found, the function logs and exits.
     """
     config = PIPELINE_CONFIG["1_async"]
     io_config = config["io"][llm_provider]
 
-    new_urls = fetch_new_urls(
-        existing_url_list_file=io_config["existing_url_list_file"],
-        url_list_file=io_config["url_list_file"],
-    )
-    if not new_urls:
-        logger.info("No new URLs found. Skipping...")
-        return
+    # Allow overriding model_id dynamically
+    model_id = config.get(
+        "model_id", GPT_4_TURBO
+    )  # Default to "gpt-4-turbo" if not set
 
-    for url in tqdm(new_urls, desc="Processing job postings", unit="job"):
-        await run_preprocessing_pipeline_async(
-            job_description_url=url,
-            job_descriptions_json_file=io_config["existing_url_list_file"],
-            requirements_json_file=io_config["url_list_file"],
-        )
+    # Log the io_config for debugging purposes
+    logger.info(f"Pipeline configuration for {llm_provider}: {io_config}")
+
+    # Run the orchestrated preprocessing pipeline asynchronously
+    await run_preprocessing_pipeline_async(
+        llm_provider=llm_provider,
+        model_id=model_id,
+        job_posting_urls_file=io_config["url_list_file"],
+        job_descriptions_json_file=io_config["job_descriptions_json_file"],
+        job_requirements_json_file=io_config["job_requirements_json_file"],
+    )
 
 
 async def run_pipeline_2c_async(llm_provider: str = "openai"):

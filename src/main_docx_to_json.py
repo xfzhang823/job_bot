@@ -6,11 +6,11 @@ from utils.generic_utils import (
     save_to_json_file,
     read_from_json_file,
 )
-from project_config import resume_docx_file, resume_json_file_temp
+from project_config import RESUME_DOCX_FILE, resume_json_file_temp
 
 
 def run_pipe_line():
-    doc_path = Path(resume_docx_file)
+    doc_path = Path(RESUME_DOCX_FILE)
     processor = DocxJsonProcessor(doc_path)
 
     # Convert DOCX to JSON
