@@ -86,7 +86,10 @@ from response_validators import validate_json_type
 validated_response = validate_json_type(response_model, json_type="requirements")
 """
 
+from io import StringIO
+import re
 import json
+import pandas as pd
 from typing import Any, Union, Optional, List, Dict
 from pydantic import ValidationError
 
@@ -100,9 +103,11 @@ from models.llm_response_models import (
     JSONResponse,
     JobSiteResponse,
     EditingResponse,
+    NestedRequirements,
     RequirementsResponse,
 )
-from models.resume_job_description_io_models import Requirements
+
+# from models.resume_job_description_io_models import Requirements
 
 
 logger = logging.getLogger(__name__)
@@ -324,7 +329,7 @@ def validate_requirements_response(
 
     # Validate the data using the Requirements model
     try:
-        parsed_data = Requirements(**response_data)
+        parsed_data = NestedRequirements(**response_data)
     except ValidationError as e:
         raise ValueError(f"Invalid structure for requirements: {e}")
 

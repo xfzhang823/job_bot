@@ -1,0 +1,4 @@
+from project_config import JOB_DESCRIPTIONS_JSON_FILE
+from utils.generic_utils import clean_and_fix_json
+
+clean_and_fix_json(JOB_DESCRIPTIONS_JSON_FILE)

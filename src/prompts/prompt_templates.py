@@ -103,14 +103,30 @@ Ensure to:
 Output Structure:
 {{
   "pie_in_the_sky": [
-    ["<Priority 1>", "<Requirement>"],
-    ["<Priority 2>", "<Requirement>"],
+    "<Aspirational requirement 1>",
+    "<Aspirational requirement 2>",
     ...
   ],
-  "down_to_earth": [...],
-  "bare_minimum": [...],
-  "cultural_fit": [...],
-  "other": [...]
+  "down_to_earth": [
+    "<Practical requirement 1>",
+    "<Practical requirement 2>",
+    ...
+  ],
+  "bare_minimum": [
+    "<Essential requirement 1>",
+    "<Essential requirement 2>",
+    ...
+  ],
+  "cultural_fit": [
+    "<Cultural or values-based requirement 1>",
+    "<Cultural or values-based requirement 2>",
+    ...
+  ],
+  "other": [
+    "<Other unique requirement 1>",
+    "<Other unique requirement 2>",
+    ...
+  ]
 }}
 
 Ensure valid JSON format and return JSON block only, without any explanations, preambles, markdown syntax. Remove non-ASCII and special characters. Trim spaces and newlines.

@@ -44,6 +44,7 @@ from models.llm_response_models import (
     TextResponse,
     EditingResponse,
     JobSiteResponse,
+    RequirementsResponse,
 )
 from llm_providers.llm_api_utils import (
     get_claude_api_key,
@@ -99,6 +100,7 @@ async def call_api_async(
     TextResponse,
     EditingResponse,
     JobSiteResponse,
+    RequirementsResponse,
 ]:
     """
     Asynchronous function for handling API calls to OpenAI, Claude, and Llama.
@@ -260,19 +262,20 @@ async def call_openai_api_async(
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    RequirementsResponse,
 ]:
     """Asynchronously calls OpenAI API and parses the response."""
     openai_client = client or AsyncOpenAI(api_key=get_openai_api_key())
     logger.info("OpenAI client ready for async API call.")
     return await call_api_async(
-        openai_client,
-        model_id,
-        prompt,
-        expected_res_type,
-        json_type,
-        temperature,
-        max_tokens,
-        "openai",
+        client=openai_client,
+        model_id=model_id,
+        prompt=prompt,
+        expected_res_type=expected_res_type,
+        json_type=json_type,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        llm_provider="openai",
     )
 
 
@@ -292,19 +295,20 @@ async def call_anthropic_api_async(
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    RequirementsResponse,
 ]:
     """Asynchronously calls the Claude API to generate responses based on a given prompt."""
     anthropic_client = client or AsyncAnthropic(api_key=get_claude_api_key())
     logger.info("Claude client ready for async API call.")
     return await call_api_async(
-        anthropic_client,
-        model_id,
-        prompt,
-        expected_res_type,
-        json_type,
-        temperature,
-        max_tokens,
-        "claude",
+        client=anthropic_client,
+        model_id=model_id,
+        prompt=prompt,
+        expected_res_type=expected_res_type,
+        json_type=json_type,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        llm_provider="claude",
     )
 
 

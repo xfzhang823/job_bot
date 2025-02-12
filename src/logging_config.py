@@ -2,6 +2,8 @@ import logging
 import logging.handlers
 import os
 from pathlib import Path
+import getpass  # To get the username
+from datetime import datetime  # To add date and time to the log file name
 
 
 def find_project_root(starting_path=None, marker=".git"):
@@ -33,6 +35,24 @@ def find_project_root(starting_path=None, marker=".git"):
     return None  # Return None if the marker is not found
 
 
+def get_log_file_path(logs_dir):
+    """
+    Constructs the log file path with username, date, and time.
+
+    Args:
+        logs_dir (str): Directory path for logs.
+
+    Returns:
+        str: Log file path with username, date, and time.
+    """
+    username = getpass.getuser()  # Get the current username
+    current_time = datetime.now().strftime(
+        "%Y-%m-%d_%H-%M-%S"
+    )  # Format: YYYY-MM-DD_HH-MM-SS
+    log_file_path = os.path.join(logs_dir, f"{username}_{current_time}_app.log")
+    return log_file_path
+
+
 # Ensure logs directory exists
 root_dir = find_project_root()
 
@@ -48,8 +68,8 @@ if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
     logging.info(f"Created logs directory: {logs_dir}")
 
-# Set up log file rotation: max 100MB per file, up to 5 backup files
-log_file_path = os.path.join(logs_dir, "app.log")
+# Set up log file path with username, date, and time
+log_file_path = get_log_file_path(logs_dir)
 
 # Initialize the rotating file handler
 file_handler = logging.handlers.RotatingFileHandler(

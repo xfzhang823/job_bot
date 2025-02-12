@@ -209,4 +209,4 @@ def main_openai():
 
 if __name__ == "__main__":
     # main_openai()  # Execute the OpenAI pipeline by calling main_openai
-    main_anthropic()  # Execute the OpenAI pipeline by calling main_anthropic
+    main_anthropic()

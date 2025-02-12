@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from typing import Optional, Union, Dict, Any, cast
 from pydantic import ValidationError, HttpUrl
 from models.resume_job_description_io_models import JobFileMappings
-from utils.generic_utils import save_to_json_file, read_from_json_file
+from utils.generic_utils import (
+    save_to_json_file,
+    read_from_json_file,
+    get_company_and_job_title,
+)
 from evaluation_optimization.evaluation_optimization_utils import create_file_name
 from models.resume_job_description_io_models import JobFileMappings, JobFilePaths
 
@@ -50,7 +54,7 @@ class MappingConfig:
 
 
 def create_mapping_entry(
-    config: MappingConfig, company: str, job_title: str
+    config: MappingConfig, company: str, job_title: str, job_url: str
 ) -> JobFilePaths:
     """
     Create a mapping entry for a job description with Pydantic validation.
@@ -59,6 +63,7 @@ def create_mapping_entry(
         config (MappingConfig): Configuration for mapping file.
         company (str): Company name.
         job_title (str): Job title.
+        job_url (str): Job URL (for logging)
 
     Returns:
         JobFilePaths: Validated mapping entry (Pydantic object).
@@ -80,7 +85,17 @@ def create_mapping_entry(
             directory, exist_ok=True
         )  # This will create the directory if it doesn't exist
 
-    # Handle None for file names from create_file_name()
+    # Handle None for file names -> to create_file_name() (add new files)
+
+    # Check and log: if company and job_title are not None before calling create_file_name
+    if company is None or job_title is None:
+        logger.error(
+            f"Missing required values: company={company}, job_title={job_title}, job_url={job_url}"
+        )
+        raise ValueError(
+            f"Missing required values for job: URL={job_url}, company={company}, job_title={job_title}"
+        )
+
     reqs_file = create_file_name(company, job_title, config.reqs_suffix)
     resps_file = create_file_name(company, job_title, config.resps_suffix)
     metrics_file = create_file_name(
@@ -92,14 +107,6 @@ def create_mapping_entry(
     if not reqs_file or not resps_file or not metrics_file or not pruned_resps_file:
         logger.error("File name generation failed, received None.")
         raise ValueError("File name generation failed, received None.")
-
-    # # Construct file paths using Pathlib and convert them to strings
-    # entry = {
-    #     "reqs": str(reqs_dir / reqs_file),
-    #     "resps": str(resps_dir / resps_file),
-    #     "sim_metrics": str(metrics_dir / metrics_file),
-    #     "pruned_resps": str(pruned_resps_dir / pruned_resps_file),
-    # }
 
     try:
         # Create a validated JobFilePaths Pydantic model
@@ -240,100 +247,107 @@ def load_existing_or_create_new_mapping(
         }
     """
 
-    mapping_file = config.mapping_file
-    job_urls_set = set(job_descriptions.keys())  # *-> to set to be compared
+    mapping_file = Path(config.mapping_file)
+    job_urls_set = set(job_descriptions.keys())
 
-    # *Update existing mapping file
-    if os.path.exists(mapping_file):
+    if mapping_file.exists():
         # Load existing mapping
-        file_mappings_model = load_mappings_model_from_json(
-            mapping_file
-        )  # Returns a Pydantic obj.
+        file_mappings_model = load_mappings_model_from_json(mapping_file)
         if not file_mappings_model:
-            raise ValueError("Failed to load and validate the existing mapping file.")
-        logger.info(
-            f"Existing mapping file '{mapping_file}' loaded and validated successfully."
-        )
+            raise ValueError(
+                "❌ Failed to load and validate the existing mapping file."
+            )
+        logger.info(f"✅ Existing mapping file '{mapping_file}' loaded successfully.")
 
-        # Access the __root__ attribute and convert URLs to str, then a list of strings
+        # Convert mapped URLs to set
         mapped_urls: list[str] = [str(url) for url in file_mappings_model.root.keys()]
-        mapped_urls_set = set(mapped_urls)  # *-> to set to be compared
+        mapped_urls_set = set(mapped_urls)
 
-        # Check if the two datatypes are the same
-        logger.info(
-            f"mapped_urls' datatype: {type(mapped_urls)} \njob_urls: {type(job_urls_set)}"
-        )
+        logger.info(f"🔍 Comparing mapped URLs with job descriptions...")
 
-        print(f"mapped_urls: {mapped_urls}")  # Debugging
-        print(f"job_urls: {job_urls_set}")  # Debugging
-
-        # *No new URLs need to be added (nothing to update) - skip the process
         if mapped_urls_set == job_urls_set:
-
-            logger.info("The mapping file is up-to-date. No new URLs to add.")
+            logger.info("✅ The mapping file is up-to-date. No new URLs to add.")
             return file_mappings_model
 
         elif mapped_urls_set > job_urls_set:
             logger.error(
-                "The mapping file contains more URLs than the job descriptions."
+                "❌ The mapping file contains extra URLs not in job descriptions."
             )
             raise ValueError(
-                "The mapping file contains URLs that do not exist in the job descriptions."
+                "Mapping file has URLs that do not exist in job descriptions."
             )
 
         else:
-            logger.info("The mapping file has fewer URLs. Adding new entries...")
             missing_urls = job_urls_set - mapped_urls_set
+            logger.info(
+                f"🔹 Adding {len(missing_urls)} new entries to the mapping file..."
+            )
 
-            # Extract existing mapping dictionary from the root
+            # Extract existing mapping dictionary
             existing_mapping = file_mappings_model.root
 
-            # Add missing URLs to the mapping
             for url in missing_urls:
-                company = job_descriptions[url].get("company")
-                job_title = job_descriptions[url].get("job_title")
-                new_entry = create_mapping_entry(config, company, job_title)
+                job_info = get_company_and_job_title(url, job_descriptions)
+
+                company = job_info["company"]
+                job_title = job_info["job_title"]
+
+                if not company or not job_title:
+                    logger.warning(f"⚠️ Skipping {url} - Missing company or job title.")
+                    continue  # Skip this entry
+
+                # Create mapping entry
+                new_entry = create_mapping_entry(
+                    config=config, company=company, job_title=job_title, job_url=url
+                )
                 existing_mapping[url] = new_entry
 
-            logger.info(f"Added {len(missing_urls)} new entries to the mapping file.")
+            logger.info(f"✅ Added {len(missing_urls)} new entries.")
 
-            # Re-validate the updated mapping using Pydantic
+            # Revalidate and save
             try:
                 file_mappings_model = JobFileMappings.model_validate(existing_mapping)
-                logger.info("Pydantic validation successful for the updated mapping.")
+                logger.info(
+                    "✅ Pydantic validation successful for the updated mapping."
+                )
             except ValidationError as ve:
-                logger.error(f"Pydantic validation error in updated mapping: {ve}")
-                raise ValueError(f"Pydantic validation error: {ve}")
+                logger.error(f"❌ Pydantic validation error: {ve}")
+                raise ValueError(f"Validation error: {ve}")
 
-            # Save the updated and validated mapping to JSON
             save_to_json_file(
                 data=file_mappings_model.model_dump(), file_path=mapping_file
             )
-            logger.info(f"Updated mapping file saved to '{mapping_file}'.")
+            logger.info(f"✅ Updated mapping file saved to '{mapping_file}'.")
 
             return file_mappings_model
+
     else:
         logger.info(
-            f"No existing mapping file found at '{mapping_file}'. Creating a new one."
+            f"⚠️ No existing mapping file found at '{mapping_file}'. Creating a new one..."
         )
         new_mapping = {}
 
-        # Create new mapping entries for all job descriptions
-        for url, info in job_descriptions.items():
-            company = info.get("company")
-            job_title = info.get("job_title")
-            new_mapping[url] = create_mapping_entry(config, company, job_title)
+        for url in job_descriptions.keys():
+            job_info = get_company_and_job_title(url, job_descriptions)
 
-        # Validate the new mapping using Pydantic
+            company = job_info["company"]
+            job_title = job_info["job_title"]
+
+            if not company or not job_title:
+                logger.warning(f"⚠️ Skipping {url} - Missing company or job title.")
+                continue
+
+            new_mapping[url] = create_mapping_entry(config, company, job_title, url)
+
+        # Validate new mapping
         try:
             file_mappings_model = JobFileMappings.model_validate(new_mapping)
-            logger.info("Validation successful for the new mapping.")
+            logger.info("✅ Validation successful for the new mapping.")
         except ValidationError as ve:
-            logger.error(f"Validation error in new mapping: {ve}")
-            raise ValueError(f"Validation error in new mapping: {ve}")
+            logger.error(f"❌ Validation error in new mapping: {ve}")
+            raise ValueError(f"Validation error: {ve}")
 
-        # Save the newly created mapping file
         save_to_json_file(data=file_mappings_model.model_dump(), file_path=mapping_file)
-        logger.info(f"New mapping file saved to '{mapping_file}'.")
+        logger.info(f"✅ New mapping file saved to '{mapping_file}'.")
 
         return file_mappings_model

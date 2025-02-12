@@ -1,18 +1,22 @@
 """Tool functions"""
 
+import re
 import os
 import json
 import shutil
 import logging
-import logging_config
 from pathlib import Path
 from typing import Union, Dict, List, Any, overload, Optional, Tuple
 from pydantic import BaseModel
 import pandas as pd
+import demjson3
 from utils.get_file_names import get_file_names
+import logging_config
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
+import json5
 
 
 def add_to_json_file(
@@ -99,6 +103,57 @@ def add_to_json_file(
         raise
 
 
+def clean_and_fix_json(json_file: Path):
+    """
+    Detects and fixes incorrectly nested JSON structures, formatting issues,
+    and ensures the JSON is properly structured using demjson3 for auto-repair.
+
+    Args:
+        json_file (Path): Path to the JSON file to be fixed.
+
+    Returns:
+        None: Fixes the JSON in place and overwrites the file.
+
+    Example Usage:
+        clean_and_fix_json(Path("your file path here..."))
+    """
+    try:
+        # Load the JSON file content as a string
+        with open(json_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # 🔹 Step 1: Use demjson3 to repair the JSON
+        repaired_data = demjson3.decode(content)  # Auto-repairs broken JSON
+
+        # Error handling
+        if not isinstance(repaired_data, dict):
+            raise ValueError(
+                f"JSON repair failed! Expected dict but got {type(repaired_data)}"
+            )
+        # 🔹 Step 2: Detect and fix nested duplicate keys
+        fixed_entries = 0
+        for key, value in repaired_data.items():
+            if isinstance(value, dict) and key in value:
+                print(f"Incorrect nesting detected for key: {key}")
+                repaired_data[key] = value[key]  # Flatten the structure
+                fixed_entries += 1
+
+        # 🔹 Step 3: Save the fully cleaned JSON back to the file
+        with open(json_file, "w", encoding="utf-8") as f:
+            json.dump(repaired_data, f, indent=4)  # Ensures proper formatting
+
+        print(
+            f"Fixed {fixed_entries} nested entries and cleaned JSON formatting in {json_file.name}!"
+        )
+
+    except Exception as e:
+        print(f"Error fixing JSON in {json_file.name}: {e}")
+
+
+# Example Usage:
+# clean_and_fix_json(Path("C:/github/job_bot/input_output/preprocessing/jobpostings.json"))
+
+
 def copy_files_btw_directories(src_folder: str, dest_folder: str, src_file: str = ""):
     """
     Copies a single file or all files from the source folder to the destination folder.
@@ -180,8 +235,9 @@ def compare_keys_in_json_files(
         file2 (Union[Path, str]): Path to the second JSON file.
 
     Returns:
-        Tuple[List[str], List[str]]: A tuple where the first list contains keys missing in file2 but present in file1,
-                                     and the second list contains keys missing in file1 but present in file2.
+        Tuple[List[str], List[str]]:
+        - A tuple where the first list contains keys missing in file2 but present in file1,
+        - and the second list contains keys missing in file1 but present in file2.
     """
     # Convert str to Path if necessary
     file1 = Path(file1) if isinstance(file1, str) else file1
@@ -316,36 +372,56 @@ def find_project_root(starting_path=None, marker=".git"):
     return None  # Return None if the marker is not found
 
 
-def get_company_and_job_title_from_json(job_posting_url, json_data):
+def find_value_recursive(d: Dict[str, Any], key: str) -> Optional[Any]:
+    """
+    Recursively searches for a key in a nested dictionary, case-insensitive.
+
+    Args:
+        d (Dict[str, Any]): Dictionary to search.
+        key (str): The key to find (case-insensitive).
+
+    Returns:
+        Optional[Any]: The value if found, else None.
+    """
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if k.lower() == key.lower():  # Case-insensitive match
+                return v
+            if isinstance(v, dict):  # Recursively search in nested dictionaries
+                result = find_value_recursive(v, key)
+                if result is not None:
+                    return result
+    return None
+
+
+def get_company_and_job_title(
+    job_posting_url: str, json_data: Dict[str, Any]
+) -> Dict[str, Optional[str]]:
     """
     Looks up the company and job title for a given job posting URL from the JSON data.
+    This function searches recursively through all nested levels (case-insensitive).
 
     Args:
         job_posting_url (str): The URL of the job posting to look up.
-        json_data (dict): The JSON-like dictionary containing the job postings data.
+        json_data (Dict[str, Any]): The JSON-like dictionary containing the job postings data.
 
     Returns:
-        dict: A dictionary containing the 'company' and 'job_title' if found, otherwise None for both.
-
-    Example:
-        json_data = json.load(open('job_postings.json'))
-        result = get_company_and_job_title('url...', json_data)
-        print(result)
-        # Output: {'company': 'Google', 'job_title': 'AI Market Intelligence Principal'}
+        Dict[str, Optional[str]]: A dictionary containing 'company' and 'job_title',
+        with values set to None if not found.
     """
-    # Get the job posting data by URL
-    job_data = json_data.get(job_posting_url)
+    job_data: Optional[Dict[str, Any]] = json_data.get(job_posting_url)
 
     if job_data:
-        company = job_data.get("company", None)
-        job_title = job_data.get("job_title", None)
+        company: Optional[str] = find_value_recursive(job_data, "company")
+        job_title: Optional[str] = find_value_recursive(job_data, "job_title")
+
         return {"company": company, "job_title": job_title}
-    else:
-        print(f"Job posting not found for URL: {job_posting_url}")
-        return {"company": None, "job_title": None}
+
+    print(f"Job posting not found for URL: {job_posting_url}")
+    return {"company": None, "job_title": None}
 
 
-def is_existing(dir, file_name):
+def is_existing(direcotry_path: Path, file_name: Path):
     """
     Checks if a file exists in the specified directory.
 
@@ -357,7 +433,7 @@ def is_existing(dir, file_name):
         bool: True if file exists, False otherwise
     """
     existing_files = get_file_names(
-        dir_path=dir, full_path=False, file_type_inclusive=True
+        directory_path=direcotry_path, full_path=False, file_type_inclusive=True
     )
     if file_name in existing_files:
         logger.info(f"File ({file_name}) already exists. Skipping this step.")

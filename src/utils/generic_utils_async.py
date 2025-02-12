@@ -1,97 +1,233 @@
 """Async tool functions"""
 
 import os
+from pathlib import Path
 import json
 import io
-import logging
-import logging_config
-import aiofiles
-from pathlib import Path
 import pandas as pd
+import aiofiles
+import logging
+from typing import Dict, List, Optional, Any, Union
+import aiofiles
+from pydantic import BaseModel
+
+# User defined
 from utils.get_file_names import get_file_names
 from utils.generic_utils import convert_keys_and_paths_to_str
+import logging_config
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 
-def add_to_json_file(new_data, filename, key=None):
+async def add_to_and_update_json_file_async(
+    new_data: Union[dict, list], json_file: Union[Path, str], key: Optional[str] = ""
+) -> None:
     """
-    Adds or updates data in a master JSON file.
+    Asynchronously adds or updates data in a master JSON file under a specific key.
+    If there is only one key, it adds or updates that key. If there are multiple keys,
+    it updates the existing ones and adds the new keys.
 
     Args:
-        new_data (dict or list): The data to be added or updated in the JSON file.
-        filename (str): The path to the master JSON file.
-        key (str, optional): If provided, adds or updates the data under this specific key.
-                             If not provided, the new data is merged directly with the existing JSON data.
+        - new_data (dict or list): The data to be added or updated in the JSON file.
+        - json_file (str): The path to the master JSON file.
+        - key (str, optional):
+            If provided, adds or updates the data under this specific key.
+            If not provided, the new data is merged directly with the existing JSON data.
 
     Returns:
         None
     """
     try:
-        # Load existing data from the file
-        with open(filename, "r", encoding="utf-8") as f:
-            master_data = json.load(f)
+        # Open the file asynchronously
+        async with aiofiles.open(json_file, "r", encoding="utf-8") as f:
+            # Read the file content
+            file_content = await f.read()
+            # Parse the JSON data
+            master_data = json.loads(file_content)
 
-        # Log the types of the existing and new data for better debugging
         logging.debug(
             f"Loaded data type: {type(master_data).__name__}, New data type: {type(new_data).__name__}"
         )
 
-        # If a key is provided, ensure master_data is a dict and handle the update under the key
+        # If key is provided, only add or update that specific key
         if key:
             if not isinstance(master_data, dict):
                 raise ValueError(
                     "Master JSON data must be a dictionary when using a key."
                 )
 
-            # Ensure the key exists and update accordingly
+            # Update or add new data under the provided key
             if key in master_data:
-                # If both are lists, extend the list
                 if isinstance(master_data[key], list) and isinstance(new_data, list):
-                    master_data[key].extend(new_data)
-                # If both are dicts, update the dictionary
+                    master_data[key].extend(new_data)  # Extend the existing list
                 elif isinstance(master_data[key], dict) and isinstance(new_data, dict):
-                    master_data[key].update(new_data)
+                    master_data[key].update(new_data)  # Update the existing dictionary
                 else:
-                    # If the data types for the existing key and new data don't match, raise an error
                     raise ValueError(
                         f"Incompatible data types for merging under key '{key}': "
-                        f"{type(master_data[key]).__name__} vs {type(new_data).__name__}"
+                        f"{type(master_data[key]).__name__} vs {type(new_data).__name__}."
                     )
             else:
-                # If the key does not exist, add it with the new data
+                # If the key doesn't exist, add the new data
                 master_data[key] = new_data
+
         else:
-            # If no key is provided, attempt to merge the data directly
-            if isinstance(master_data, list) and isinstance(new_data, list):
-                master_data.extend(new_data)
-            elif isinstance(master_data, dict) and isinstance(new_data, dict):
-                master_data.update(new_data)
+            # If key is not provided, handle the case where there are multiple keys
+            if isinstance(new_data, dict):
+                if not isinstance(master_data, dict):
+                    raise ValueError(
+                        "Cannot merge a dictionary with non-dictionary master data."
+                    )
+
+                # Iterate over each item in new_data
+                for key, value in new_data.items():
+                    # If the key exists, update it
+                    if key in master_data:
+                        if isinstance(master_data[key], list) and isinstance(
+                            value, list
+                        ):
+                            master_data[key].extend(value)  # Extend the list
+                        elif isinstance(master_data[key], dict) and isinstance(
+                            value, dict
+                        ):
+                            master_data[key].update(value)  # Update the dictionary
+                        else:
+                            raise ValueError(
+                                f"Incompatible data types for merging under key '{key}': "
+                                f"{type(master_data[key]).__name__} vs {type(value).__name__}."
+                            )
+                    else:
+                        # If the key doesn't exist, add it
+                        master_data[key] = value
+
+            elif isinstance(new_data, list):
+                if isinstance(master_data, list):
+                    master_data.extend(new_data)  # Extend the existing list
+                else:
+                    raise ValueError("Cannot add a list to non-list master data.")
+
             else:
                 raise ValueError(
-                    f"Mismatched data types: cannot merge {type(master_data).__name__} "
-                    f"with {type(new_data).__name__}."
+                    f"Cannot merge {type(master_data).__name__} with {type(new_data).__name__}."
                 )
 
-        # Save the updated master data back to the file
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(master_data, f, indent=4, ensure_ascii=False)
+        # Save the updated master data back to the file asynchronously
+        async with aiofiles.open(json_file, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(master_data, indent=4, ensure_ascii=False))
 
-        logging.info(f"Data successfully added to {filename}.")
+        logging.info(f"Data successfully added or updated in {json_file}.")
 
     except FileNotFoundError:
         # If the file doesn't exist, create a new one with the new data
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(new_data, f, indent=4, ensure_ascii=False)
-        logging.info(f"File {filename} created and data added.")
+        logging.warning(
+            f"File {json_file} not found. Creating new file and adding data."
+        )
+        async with aiofiles.open(json_file, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(new_data, indent=4, ensure_ascii=False))
+        logging.info(f"File {json_file} created and data added.")
 
     except (KeyError, ValueError) as e:
-        logging.error(f"Error adding data to {filename}: {e}")
+        logging.error(f"Error adding or updating data in {json_file}: {e}")
         raise
 
     except Exception as e:
-        logging.error(f"Unexpected error adding data to {filename}: {e}")
+        logging.error(f"Unexpected error adding or updating data in {json_file}: {e}")
+        raise
+
+
+async def add_new_data_to_json_file_async(
+    new_data: Union[dict, list], filename: Union[Path, str], key: Optional[str] = ""
+) -> None:
+    """
+    Asynchronously adds new data to a master JSON file, ensuring no duplicate keys are added.
+    Handles both dictionaries and lists for new_data.
+
+    Args:
+        - new_data (dict or list): The data to be added to the JSON file.
+        - filename (str): The path to the master JSON file.
+        - key (str): The specific key under which the new data will be added (optional).
+
+    Returns:
+        None
+    """
+    if not isinstance(new_data, (dict, list)):
+        raise ValueError("new_data must be a dictionary or list.")
+
+    try:
+        # Load existing data from the file
+        async with aiofiles.open(filename, "r", encoding="utf-8") as f:
+            master_data = json.loads(
+                await f.read()
+            )  # json.loads works b/c running async (load is only for sync)
+
+        logging.debug(
+            f"Loaded data type: {type(master_data).__name__}, New data type: {type(new_data).__name__}"
+        )
+
+        if key:
+            if not isinstance(master_data, dict):
+                raise ValueError(
+                    "Master JSON data must be a dictionary when using a key. "
+                    f"Found {type(master_data).__name__} instead."
+                )
+            if key in master_data:
+                logging.warning(
+                    f"Key '{key}' already exists in the file. Skipping update."
+                )
+            else:
+                master_data[key] = new_data
+        else:
+            if isinstance(new_data, dict):
+                if not isinstance(master_data, dict):
+                    raise ValueError(
+                        "Cannot merge a dictionary with non-dictionary master data."
+                    )
+                for k, v in new_data.items():
+                    if k not in master_data:
+                        master_data[k] = v
+                    else:
+                        logging.warning(
+                            f"Key '{k}' already exists in the file. Skipping update."
+                        )
+            elif isinstance(new_data, list):
+                if isinstance(master_data, list):
+                    master_data.extend(new_data)
+                else:
+                    raise ValueError(
+                        "Cannot add a list to non-list master data without a key."
+                    )
+            else:
+                raise ValueError(
+                    f"Cannot merge {type(master_data).__name__} with {type(new_data).__name__}."
+                )
+
+        # Save the updated master data back to the file
+        async with aiofiles.open(filename, "w", encoding="utf-8") as f:
+            await f.write(
+                json.dumps(master_data, indent=4, ensure_ascii=False)
+            )  # use dumps instead dump b/c running async
+
+        logging.info(f"New data successfully added to {filename}.")
+
+    except FileNotFoundError:
+        # Initialize the file based on the type of new_data
+        if key:
+            master_data = {key: new_data}
+        else:
+            master_data = new_data if isinstance(new_data, (dict, list)) else [new_data]
+        async with aiofiles.open(filename, "w", encoding="utf-8") as f:
+            await f.write(
+                json.dumps(master_data, indent=4, ensure_ascii=False)
+            )  # use dumps
+        logging.info(f"File {filename} created and new data added.")
+
+    except (KeyError, ValueError) as e:
+        logging.error(f"Error adding new keys to {filename}: {e}")
+        raise
+
+    except Exception as e:
+        logging.error(f"Unexpected error adding new keys to {filename}: {e}")
         raise
 
 
@@ -395,17 +531,6 @@ async def save_to_csv_async(df, filepath):
     """Asynchronously write CSV file."""
     async with aiofiles.open(filepath, mode="w") as f:
         await f.write(df.to_csv(index=False))
-
-
-import aiofiles
-import json
-from pathlib import Path
-from typing import Any, Union
-from pydantic import BaseModel
-import logging
-
-# Logging setup
-logger = logging.getLogger(__name__)
 
 
 async def save_to_json_file_async(data: Any, file_path: Union[str, Path]) -> None:

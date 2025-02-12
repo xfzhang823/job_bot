@@ -30,9 +30,11 @@ from models.llm_response_models import (
     TextResponse,
     EditingResponse,
     JobSiteResponse,
+    NestedRequirements,
     RequirementsResponse,
 )
-from models.resume_job_description_io_models import Requirements
+
+# from models.resume_job_description_io_models import Requirements
 from llm_providers.llm_response_validators import (
     validate_json_type,
     validate_response_type,
@@ -89,7 +91,7 @@ def call_api(
     TextResponse,
     EditingResponse,
     JobSiteResponse,
-    Requirements,
+    NestedRequirements,
 ]:
     """
     Unified function to handle API calls for OpenAI, Claude, and Llama. This method handles
