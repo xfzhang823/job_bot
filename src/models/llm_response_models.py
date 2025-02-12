@@ -221,16 +221,61 @@ class JobSiteResponse(BaseResponseModel):
         }
 
 
+class NestedRequirements(BaseModel):
+    """
+    Model to handle nested job requirements structure as provided by the Claude API.
+
+    The response structure is nested, where each section contains multiple items,
+    each represented by a key-value pair (the key being a numeric identifier and
+    the value being the actual requirement text).
+    """
+
+    pie_in_the_sky: List[str] = Field(
+        ..., description="High-level pie-in-the-sky requirements."
+    )
+    down_to_earth: List[str] = Field(
+        ..., description="Realistic requirements that are directly applicable."
+    )
+    bare_minimum: List[str] = Field(
+        ..., description="Essential or bare minimum qualifications."
+    )
+    cultural_fit: List[str] = Field(
+        ..., description="Requirements related to cultural fit."
+    )
+    other: List[str] = Field([], description="Any other requirements.")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "pie_in_the_sky": [
+                    "10+ years in emerging tech",
+                    "PhD from top-tier university",
+                ],
+                "down_to_earth": [
+                    "3+ years in related field",
+                    "2",
+                    "Proficiency in Excel",
+                ],
+                "bare_minimum": [
+                    "Bachelor's degree",
+                    "Customer service experience",
+                ],
+                "cultural_fit": ["Team player", "Committed to diversity"],
+                "other": [],
+            }
+        }
+
+
 class RequirementsResponse(BaseResponseModel):
     """
     Response model for job requirements.
-    It wraps the Requirements model for JSON response validation.
+    It wraps a flat structure where each section contains a list of requirement texts.
 
     Attributes:
-        data (Requirements): Holds the job requirements data as a nested Requirements instance.
+        data (Dict[str, List[str]]): NestedRequirements
     """
 
-    data: Requirements  # This holds the actual job requirements data, validated by Requirements
+    data: NestedRequirements
 
     class Config:
         json_schema_extra = {
@@ -238,10 +283,39 @@ class RequirementsResponse(BaseResponseModel):
                 "status": "success",
                 "message": "Job requirements data processed successfully.",
                 "data": {
-                    "requirements": {
-                        "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS...",
-                        "0.pie_in_the_sky.1": "Ph.D. in Data Science...",
-                    },
+                    "pie_in_the_sky": [
+                        "Top-tier strategy consulting experience",
+                        "Motivated by high impact, high visibility work",
+                    ],
+                    "down_to_earth": [
+                        "Bachelor's degree and MBA degree required, as well as demonstrated record of success",
+                        "3-5 years of work experience preferred",
+                        "Strong critical thinking skills with ability to elevate thinking and apply judgment to how components fit into the broader picture",
+                        "Ability to leverage experience and analysis to gain support and influence others",
+                        "Strong quantitative, analytical, and written and oral communication skills",
+                        "Strong leadership skills and ability to work independently and as a member of a team, and coach junior team members",
+                        "Ability to manage multiple priorities, including project work and department responsibilities",
+                        "Advanced proficiency with Microsoft PowerPoint and Excel",
+                        "Insurance or financial services industry experience a plus (not required)",
+                        "Ability to independently navigate and decipher an ambiguous environment",
+                        "Excited about contributing to a dynamic and high-performing team culture",
+                    ],
+                    "bare_minimum": [
+                        "Bachelor's degree and MBA degree required, as well as demonstrated record of success",
+                        "3-5 years of work experience preferred",
+                        "Strong critical thinking skills with ability to elevate thinking and apply judgment to how components fit into the broader picture",
+                        "Ability to leverage experience and analysis to gain support and influence others",
+                        "Strong quantitative, analytical, and written and oral communication skills",
+                        "Strong leadership skills and ability to work independently and as a member of a team, and coach junior team members",
+                        "Ability to manage multiple priorities, including project work and department responsibilities",
+                        "Advanced proficiency with Microsoft PowerPoint and Excel",
+                    ],
+                    "cultural_fit": [
+                        "Excited about contributing to a dynamic and high-performing team culture"
+                    ],
+                    "other": [
+                        "Insurance or financial services industry experience a plus (not required)"
+                    ],
                 },
             }
         }
