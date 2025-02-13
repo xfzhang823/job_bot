@@ -46,7 +46,7 @@ async def extract_job_requirements_with_openai_async(
         model_id=model_id,
         expected_res_type="json",
         json_type="requirements",
-        temperature=0.3,
+        temperature=0.5,  # * Need to set temperature higher for extracting requirements
         max_tokens=2000,
     )
     logger.info(f"Validated LLM Response Model: {response_model}")
@@ -92,7 +92,7 @@ async def extract_job_requirements_with_anthropic_async(
         model_id=model_id,
         expected_res_type="json",
         json_type="requirements",
-        temperature=0.3,
+        temperature=0.5,  # * Need to set temperature higher for extracting requirements
         max_tokens=2000,
     )
     logger.info(f"Validated LLM Response Model: {response_model}")

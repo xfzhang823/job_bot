@@ -80,14 +80,16 @@ the following job description.
 Ensure to:
 - Include technical and soft skills, educational and experience requirements, and cultural fit aspects.
 - Exclude any content related to benefits, perks, or compensation (e.g., health insurance, remote work options, \
-401(k) matching, paid time off, bonuses, stock options).
+401(k) matching, paid time off, bonuses, stock options.)
 
 **Job Description:**
 {content}
 
 <Instructions:>
 1. Extract all relevant information on employer expectations from sections like 'Qualifications,' 'Requirements,' 'Responsibilities,' 'Skills,' 'Education,' 'Experience,' 'About Us,' 'Company Overview,' 'Our Mission,' 'Core Values,' and similar.
+
 2. Create an 'ask list' from the employer's perspective.
+
 3. Categorize items into five levels, prioritizing within each category (1 being highest priority):
    - **pie_in_the_sky**: Aspirational, ideal qualifications (e.g., '10+ years in emerging tech,' 'Ph.D. from top-tier university')
    - **down_to_earth**: Practical, common requirements (e.g., '3+ years in related field,' 'Proficiency in Excel')
@@ -98,6 +100,14 @@ Ensure to:
 4. For quantitative requirements (e.g., years of experience, number of projects):
    - Include the specific quantity in the requirement description
    - If a range is given, use the lower bound for 'bare_minimum' and upper bound for 'down_to_earth' or 'pie_in_the_sky' as appropriate
+
+5. **Extract all implicit requirements**: If the job description implies a skill or qualification \
+(e.g., "collaborating with cross-functional teams" implies teamwork or communication skills), include it in \
+the appropriate category.
+
+6. Prioritize **completeness** over brevity. Ensure all relevant details are captured, even if they are not explicitly \
+stated in labeled sections.   
+
 </Instructions>
 
 Output Structure:
