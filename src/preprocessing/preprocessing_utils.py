@@ -21,7 +21,7 @@ def check_and_read_from_json_file(file_path: Path) -> dict:
     return data
 
 
-def find_new_and_semi_new_urls(
+def find_new_urls(
     job_posting_urls_file: Path,
     job_descriptions_file: Path,
     job_requirements_file: Path,
@@ -47,11 +47,9 @@ def find_new_and_semi_new_urls(
     job_requirement_data = check_and_read_from_json_file(job_requirements_file)
 
     # Extract URLs
-    job_posting_urls = [
-        job["url"] for job in job_posting_data.get("jobs", []) if "url" in job
-    ]
-    job_description_urls = list(job_description_data.keys())
-    job_requirement_urls = list(job_requirement_data.keys())
+    job_posting_urls = set(job_posting_data.keys())
+    job_description_urls = set(job_description_data.keys())
+    job_requirement_urls = set(job_requirement_data.keys())
 
     # todo: debugging: delete later
     logger.info(f"No. of job posting urls: {len(job_posting_urls)}")
@@ -59,18 +57,16 @@ def find_new_and_semi_new_urls(
     logger.info(f"No. of job requirements urls: {len(job_requirement_urls)}")
 
     # Compute new and semi-new URLs
-    new_urls = [
-        url
-        for url in job_posting_urls
-        if url not in job_description_urls and url not in job_requirement_urls
-    ]
-    semi_new_urls = [
-        url for url in job_description_urls if url not in job_requirement_urls
-    ]
+
+    # New URLs → URLs in postings but missing from descriptions
+    new_urls = list(job_posting_urls - job_description_urls)
+
+    # Semi-new URLs → URLs in descriptions but missing from requirements
+    missing_requirements_urls = list(job_description_urls - job_requirement_urls)
 
     logger.info(
-        f"Identified {len(new_urls)} new URLs and {len(semi_new_urls)} semi-new URLs."
+        f"Identified {len(new_urls)} new URLs and {len(missing_requirements_urls)} semi-new URLs."
     )
-
     logger.info("Finished checking for new and semi-new urls.")
-    return new_urls, semi_new_urls
+
+    return new_urls, missing_requirements_urls

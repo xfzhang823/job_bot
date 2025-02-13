@@ -35,7 +35,7 @@ from preprocessing.extract_requirements_with_llms_async import (
     extract_job_requirements_with_anthropic_async,
     extract_job_requirements_with_openai_async,
 )
-from preprocessing.preprocessing_utils import find_new_and_semi_new_urls
+from preprocessing.preprocessing_utils import find_new_urls
 from models.llm_response_models import JobSiteResponse, RequirementsResponse
 from project_config import GPT_4_TURBO, GPT_35_TURBO, CLAUDE_HAIKU, CLAUDE_SONNET
 
@@ -217,19 +217,19 @@ async def run_preprocessing_pipeline_async(
         )
 
     # * Step 1:Load job descriptions & requirements and find new URLs
-    new_urls, semi_new_urls = find_new_and_semi_new_urls(
+    new_urls, missing_requirements_urls = find_new_urls(
         job_posting_urls_file=job_posting_urls_file,
         job_descriptions_file=job_descriptions_json_file,
         job_requirements_file=job_requirements_json_file,
     )
 
     # If no new URLs, exit early
-    if not new_urls and not semi_new_urls:
+    if not new_urls and not missing_requirements_urls:
         logger.info("No new or semi-new URLs found. Skipping processing...")
         return
 
     logger.info(
-        f"Processing {len(new_urls)} new URLs and {len(semi_new_urls)} semi-new URLs."
+        f"Processing {len(new_urls)} new URLs and {len(missing_requirements_urls)} semi-new URLs."
     )
 
     # * Step 2: Process URLs asynchronously
@@ -254,7 +254,7 @@ async def run_preprocessing_pipeline_async(
     )
 
     semi_new_url_tasks = await process_urls_async(
-        semi_new_urls,
+        missing_requirements_urls,
         job_descriptions_json_file,
         job_requirements_json_file,
         llm_provider,
