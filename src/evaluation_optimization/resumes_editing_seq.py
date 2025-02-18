@@ -17,7 +17,7 @@ from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
-    Responsibilites,
+    Responsibilities,
     Requirements,
 )
 
@@ -166,7 +166,7 @@ def modify_resp_based_on_reqs(
 
 
 def modify_multi_resps_based_on_reqs(
-    responsibilities: Union[dict[str, str], Responsibilites],
+    responsibilities: Union[dict[str, str], Responsibilities],
     requirements: Union[dict[str, str], Requirements],
     llm_provider: str = "openai",
     model_id: str = "gpt-3.5-turbo",
@@ -220,7 +220,7 @@ def modify_multi_resps_based_on_reqs(
     # Validate the input responsibilities using Pydantic models
     # Ensure responsibilities and requirements are Pydantic models
     if isinstance(responsibilities, dict) and isinstance(requirements, dict):
-        validated_responsibilities = Responsibilites(responsibilities=responsibilities)
+        validated_responsibilities = Responsibilities(responsibilities=responsibilities)
         validated_requirements = Requirements(requirements=requirements)
     else:
         validated_responsibilities = responsibilities

@@ -18,7 +18,7 @@ from utils.generic_utils import read_from_json_file, save_to_json_file
 logger = logging.getLogger(__name__)
 
 
-def run_pipe_line(mapping_file):
+def run_copying_resps_to_pruned_resps_dir_mini_pipeline(mapping_file: Union[Path, str]):
     """
     Copy json files from responsibilities folder to pruned_responsibilities folder.
 
@@ -28,6 +28,8 @@ def run_pipe_line(mapping_file):
     Returns:
         None
     """
+    mapping_file = Path(mapping_file)  # Change to Path obj if str.
+
     mappings = read_from_json_file(
         mapping_file
     )  # No need for error handling b/c the function has built in error handling already

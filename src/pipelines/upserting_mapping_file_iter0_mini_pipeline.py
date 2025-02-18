@@ -64,7 +64,7 @@ def customize_mapping_config(
     return mapping_config
 
 
-def run_pipeline(
+def run_upserting_mapping_file_iter0_mini_pipeline(
     job_descriptions_file: Union[str, Path],
     iteration: int,
     iteration_dir: Union[str, Path],

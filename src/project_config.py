@@ -168,7 +168,7 @@ PRUNED_RESPS_FILES_ITERATE_0_ANTHROPIC_DIR = (
 SIMILARITY_METRICS_ITERATE_0_ANTHROPIC_DIR = (
     ITERATE_0_ANTHROPIC_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_0_anthropic = (
+URL_TO_FILE_MAPPING_FILE_ITERATE_0_ANTHROPIC = (
     ITERATE_0_ANTHROPIC_DIR / mapping_file_name
 )
 
@@ -188,7 +188,7 @@ PRUNED_RESPS_FILES_ITERATE_1_ANTHROPIC_DIR = (
 SIMILARITY_METRICS_ITERATE_1_ANTHROPIC_DIR = (
     ITERATE_1_ANTHROPIC_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_1_anthropic = (
+URL_TO_FILE_MAPPING_FILE_ITERATE_1_ANTHROPIC = (
     ITERATE_1_ANTHROPIC_DIR / mapping_file_name
 )
 
@@ -203,7 +203,7 @@ PRUNED_RESPS_FILES_ITERATE_2_ANTHROPIC_DIR = (
 SIMILARITY_METRICS_ITERATE_2_ANTHROPIC_DIR = (
     ITERATE_2_ANTHROPIC_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_2_anthropic = (
+URL_TO_FILE_MAPPING_FILE_ITERATE_2_ANTHROPIC = (
     ITERATE_2_ANTHROPIC_DIR / mapping_file_name
 )
 

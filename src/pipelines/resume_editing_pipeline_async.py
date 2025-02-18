@@ -11,7 +11,7 @@ from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
-    Responsibilites,
+    Responsibilities,
     Requirements,
 )
 from evaluation_optimization.resume_editor import TextEditor
@@ -30,7 +30,7 @@ from utils.generic_utils import (
     verify_dir,
     verify_file,
 )
-from utils.generic_utils_async import save_to_json_file_async
+from utils.generic_utils_async import save_data_to_json_file_async
 
 
 # Set up logging
@@ -275,7 +275,7 @@ async def run_pipeline_async(
                 raise ValueError(f"Files are empty for {url}")
 
             # Use Pydantic for validation
-            validated_responsibilities = Responsibilites(
+            validated_responsibilities = Responsibilities(
                 responsibilities=responsibilities
             )
             validated_requirements = Requirements(requirements=requirements)
@@ -299,7 +299,7 @@ async def run_pipeline_async(
 
         # Step 4: Save the modified responsibilities
         output_file = paths["responsibilities_output"]
-        await save_to_json_file_async(modified_resps, output_file)
+        await save_data_to_json_file_async(modified_resps, output_file)
         logger.info(f"Modified responsibilities for {url} saved to {output_file}")
 
     logger.info("Pipeline execution completed.")

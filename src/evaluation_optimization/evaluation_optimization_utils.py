@@ -4,21 +4,21 @@ Utility functions to support evaluation and optimization pipelines.
 """
 
 from pathlib import Path
-import os
 import re
 import logging
-import logging_config
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 import pandas as pd
-import json
+from pydantic import ValidationError
+
+# User defined
+from models.resume_job_description_io_models import Requirements, Responsibilities
 from utils.generic_utils import read_from_json_file
 from utils.get_file_names import get_file_names
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-import os
-import logging
 from utils.generic_utils import save_to_json_file
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
+import logging_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ def check_file_existence(file_path):
 
 
 def get_files_wo_multivariate_indices(
-    data_sources: Union[str, Path, List[Union[str, Path]]],
+    data_sources: Sequence[Union[str, Path]],
     indices: Optional[List[str]] = None,
 ) -> List:
     """
@@ -134,7 +134,6 @@ def get_files_wo_multivariate_indices(
         data_sources (Union[str, Path, List[Union[str, Path]]]):
             A path to a directory containing `.csv` files, or a list of `.csv` file paths
             to check for the specified indices.
-
             - If a directory path is provided, all `.csv` files within the directory 
             (and its subdirectories) will be checked.
             - If a list of file paths is provided, only those specific files will be checked.
@@ -397,60 +396,105 @@ def get_new_urls_and_flat_json_file_paths(job_descriptions, output_dir):
 
 # Function to create and save job requirements JSON files
 def process_and_save_requirements_by_url(
-    requirements_json_file: str, url: str, requirements_flat_json_file: str
-):
+    requirements_json_file: Union[Path, str],
+    requirements_flat_json_file: Union[Path, str],
+    url: str,
+) -> None:
     """
     This function:
-    - reads and extract more important job requirements from a single jobposting record,
-    within a large JSON file, filtered by filtered by a specific URL (each posting has
-    a unique url)
-    - flattens the nested structure
-    - saves them in another JSON file.
+    - Reads and extracts job requirements of a single job posting record within
+      a large JSON file, identified by a specific URL (each posting has a unique URL).
+    - Flattens the nested structure.
+    - Validates the structure using Pydantic model Requirements
+    - Saves them in another JSON file.
 
     Args:
-        requirements_json_file (str): The file path to the job requirements JSON file.
-        url (str): The URL to filter the job requirements.
-        requirements_flat_json_file (str): The file path to save the flattened requirements JSON.
+        - requirements_json_file (str or Path): The source JSON file containing
+        job requirements.
+        - url (str): The URL to filter the job requirements.
+        - requirements_flat_json_file (Path or str): The file path to save
+        the flattened
+          requirements JSON.
 
     Returns:
         None
+
+    Raises:
+        - `ValidationError`: If the data does not match the expected
+        `Requirements` model.
     """
+    # Convert file paths to Path obj (if str)
+    requirements_json_file, requirements_flat_json_file = Path(
+        requirements_json_file
+    ), Path(requirements_flat_json_file)
 
     # Check if the flattened JSON file already exists
-    if os.path.exists(requirements_flat_json_file):
+    if requirements_flat_json_file.exists():
         logger.info(
-            f"Flattened requirements JSON file already exists: {requirements_flat_json_file}"
+            f"Flattened requirements JSON file for {url} already exists: {requirements_flat_json_file}"
         )
         return
 
-    # Parse and flatten job requirements based on URL
+    # Parse and flatten job requirements based on a URL
     job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
     reqs_flat = job_reqs_parser.extract_flatten_reqs()
 
-    # Save the flattened requirements to a JSON file
-    save_to_json_file(reqs_flat, requirements_flat_json_file)
-    logger.info(f"requirements flattened and saved to {requirements_flat_json_file}")
+    # Wrap under `requirements` and include the URL
+    wrapped_reqs_flat = {
+        "url": url,  # Unique identifier for tracking
+        "requirements": reqs_flat,
+    }
+
+    # Validate the structure using Pydantic without converting back & forth
+    try:
+        Requirements.model_validate(wrapped_reqs_flat)  # Direct validation
+    except ValidationError as ve:
+        logger.error(f"Requirements validation failed for {url}: {ve}")
+        return  # Exit early if validation fails
+
+    # Save the validated flattened requirements to a JSON file
+    save_to_json_file(data=wrapped_reqs_flat, file_path=requirements_flat_json_file)
+    logger.info(
+        f"Requirements for {url} flattened, validated, and saved to {requirements_flat_json_file}"
+    )
 
 
 def process_and_save_responsibilities_from_resume(
-    resume_json_file: str, responsibilities_flat_json_file: str
-):
+    resume_json_file: Union[Path, str],
+    responsibilities_flat_json_file: Union[Path, str],
+    url: Optional[str] = None,
+) -> None:
     """
-    Extract, flatten, and save responsibilities from the resume JSON file.
+    Extract, flatten, validate, and save responsibilities from the resume JSON file.
 
-    This function reads the resume JSON file (containing a single record), flattens
-    the nested structure of responsibilities, and saves the flattened responsibilities to a JSON file.
+    This function reads a resume JSON file (containing a single record), extracts
+    and flattens the nested responsibilities, validates them using Pydantic, and
+    saves the processed data to a JSON file.
+
+    If no `url` is provided, a default value ("Not Available") will be used.
 
     Args:
-        resume_json_file (str): The file path to the resume JSON file.
-        responsibilities_flat_json_file (str): The file path to save the flattened responsibilities JSON.
+        - url (Optional[str]): The URL of the job posting this resume's responsibilities
+          are matching to (for traceability).
+          * If not provided, it defaults to `"Not Available"`.
+        - resume_json_file (Union[str, Path]): The file path to the resume JSON file.
+        - responsibilities_flat_json_file (Union[str, Path]): The file path to save
+          the flattened responsibilities JSON.
 
     Returns:
         None
+
+    Raises:
+        - `ValidationError`: If the flattened data does not match the expected format.
     """
 
+    # Convert file paths to Path obj if str
+    resume_json_file, responsibilities_flat_json_file = Path(resume_json_file), Path(
+        responsibilities_flat_json_file
+    )
+
     # Check if the flattened JSON file already exists
-    if os.path.exists(responsibilities_flat_json_file):
+    if responsibilities_flat_json_file.exists():
         logger.info(
             f"Flattened responsibilities JSON file already exists: {responsibilities_flat_json_file}"
         )
@@ -460,17 +504,30 @@ def process_and_save_responsibilities_from_resume(
     resume_parser = ResumeParser(resume_json_file)
     resps_flat = resume_parser.extract_and_flatten_responsibilities()
 
-    # Save the flattened responsibilities to a JSON file
-    save_to_json_file(resps_flat, responsibilities_flat_json_file)
+    # Wrap under `responsibilities` and include the URL
+    wrapped_resps_flat = {
+        "url": url or "Not Available",  # Unique identifier for tracking
+        "responsibilities": resps_flat,
+    }
+
+    # Validate the structure using the correct Pydantic model
+    try:
+        Responsibilities.model_validate(wrapped_resps_flat)
+    except ValidationError as ve:
+        logger.error(f"Responsibilities validation failed for {url}: {ve}")
+        return  # Exit early if validation fails
+
+    # Save the validated flattened responsibilities to a JSON file
+    save_to_json_file(wrapped_resps_flat, responsibilities_flat_json_file)
     logger.info(
-        f"Responsibilities flattened and saved to {responsibilities_flat_json_file}"
+        f"Responsibilities flattened, validated, and saved to {responsibilities_flat_json_file}"
     )
 
 
 class DataMerger:
     """
-    Class responsible for merging multiple responsibility vs requirement metrics DataFrames on \
-        the specified keys.
+    Class responsible for merging multiple responsibility vs requirement metrics
+    DataFrames on the specified keys.
     """
 
     def __init__(self, dfs: List[pd.DataFrame], resp_key: str, req_key: str):

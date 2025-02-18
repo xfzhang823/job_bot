@@ -147,6 +147,7 @@ def load_mappings_model_from_json(
         - Errors encountered during validation or file processing.
     """
     try:
+        mapping_file = Path(mapping_file)  # Change to Path obj. if str
         # Read the JSON file without specifying a key to get the entire data
         file_mapping = read_from_json_file(mapping_file, key=None)
 

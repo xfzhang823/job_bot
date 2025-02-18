@@ -24,7 +24,11 @@ from evaluation_optimization.metrics_calculator import (
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
 from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
-from utils.generic_utils import read_from_json_file, validate_json_file
+from utils.generic_utils import (
+    read_from_json_file,
+    validate_json_file,
+    save_to_json_file,
+)
 from evaluation_optimization.evaluation_optimization_utils import (
     get_new_urls_and_file_names,
     get_new_urls_and_metrics_file_paths,
@@ -32,7 +36,7 @@ from evaluation_optimization.evaluation_optimization_utils import (
 )
 from models.resume_job_description_io_models import (
     ResponsibilityMatches,
-    Responsibilites,
+    Responsibilities,
     Requirements,
     SimilarityMetrics,
     PipelineInput,
@@ -111,7 +115,7 @@ def generate_metrics_from_flat_json(
     # Step 1: Load flattened responsibilities from file
     try:
         resps_flat_data = read_from_json_file(resps_flat_file)
-        validated_resps = Responsibilites(**resps_flat_data)
+        validated_resps = Responsibilities(**resps_flat_data)
         resps_flat = validated_resps.responsibilities
         logger.info(f"Validated responsibilities from {resps_flat_file}")
     except ValidationError as ve:
@@ -349,71 +353,77 @@ def generate_matching_metrics_from_nested_json(
     print(final_df.head(5))
 
 
-# def unpack_and_combine_json(nested_json, requirements_json):
-#     """
-#     Unpacks the nested responsibilities JSON and combines it with matching requirement texts
-#     from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
+# Running pipeline with pydantic model validation
+def run_metrics_processing_pipeline(
+    mapping_file: Union[str, Path],
+    generate_metrics: Callable[
+        [Path, Path, Path], None
+    ] = generate_metrics_from_flat_json,
+) -> None:
+    """
+    Process and create missing sim_metrics files by reading from the mapping file.
 
-#     Args:
-#         nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
-#         requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
+    Args:
+        mapping_file (str or Path): Path to the JSON mapping file.
+        generate_metrics_func (callable): Function to generate the metrics CSV file.
 
-#     Returns:
-#         list: A list of dictionaries containing responsibility_keys, requirement_keys,
-#               responsibility texts, and matched requirement texts.
+    Returns:
+        None
+    """
+    logger.info("Start running responsibility/requirement alignment scoring pipeline.")
 
-#     Error Handling:
-#         - If a requirement_key is not found in the requirements JSON, it will skip that entry.
-#         - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
-#         - Logs warnings for missing fields and unmatched keys for better traceability.
-#     """
-#     results = []
+    # Ensure that mapping_file is turned into Path obj (if not)
+    mapping_file = Path(mapping_file)
 
-#     for resp_key, values in nested_json.items():  # Unpack the 1st level
-#         if not isinstance(values, dict):
-#             logger.info(
-#                 f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
-#             )
-#             continue
+    # Step 1: Read and validate the mapping file
+    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+        mapping_file
+    )
 
-#         for req_key, sub_value in values.items():  # Unpack the 2nd level
-#             if not isinstance(sub_value, dict):
-#                 logger.info(
-#                     f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
-#                 )
-#                 continue
+    if file_mappings_model is None:
+        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
+        return
 
-#             # Extract the optimized_text
-#             if "optimized_text" in sub_value:
-#                 optimized_text = sub_value["optimized_text"]
-#             else:
-#                 logger.info(
-#                     f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
-#                 )
-#                 continue
+    file_mappings_dict = file_mappings_model.root
 
-#             # Perform the lookup in the requirements JSON
-#             requirement_text = requirements_json.get(req_key)
-#             if requirement_text is None:
-#                 logger.info(
-#                     f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
-#                 )
-#                 continue
+    # Step 2: Check if all sim_metrics files exist
+    missing_metrics = {
+        url: mapping.sim_metrics
+        for url, mapping in file_mappings_dict.items()
+        if not Path(mapping.sim_metrics).exists()
+    }
 
-#             # Append results to a list for further processing
-#             results.append(
-#                 {
-#                     "responsibility_key": resp_key,
-#                     "requirement_key": req_key,
-#                     "responsibility_text": optimized_text,
-#                     "requirement_text": requirement_text,
-#                 }
-#             )
+    # *Check if metrics are already processed (no missing files)
+    if not missing_metrics:
+        logger.info("All sim_metrics files already exist. Exiting pipeline.")
+        return  # Early exit if all files exist
 
-#     return results
+    # Step 3: Process missing sim_metrics files
+    for url, sim_metrics_file in missing_metrics.items():
+        logger.info(f"Processing missing metrics for {url}")
+
+        # Load the requirements and responsibilities files from the mapping
+        reqs_file = Path(file_mappings_dict[url].reqs)
+        resps_file = Path(file_mappings_dict[url].resps)
+
+        # Convert sim_metrics_file to Path object if it's not already
+        sim_metrics_file = Path(sim_metrics_file)
+
+        # Step 3.1: Check if reqs and resps files exist
+        if not reqs_file.exists() or not resps_file.exists():
+            logger.error(
+                f"Missing requirements or responsibilities files for {url}. Skipping."
+            )
+            continue
+
+        # Step 3.2: Generate the metrics file
+        generate_metrics(reqs_file, resps_file, sim_metrics_file)
+        logger.info(f"Generated metrics for {url} and saved to {sim_metrics_file}")
+
+    logger.info("Finished processing all missing sim_metrics files.")
 
 
-def multivariate_indices_processing_mini_pipeline(
+def run_multivariate_indices_processing_mini_pipeline(
     mapping_file: Union[str, Path],
     add_indices_func: Callable[[pd.DataFrame], pd.DataFrame] = add_multivariate_indices,
 ) -> None:
@@ -432,39 +442,40 @@ def multivariate_indices_processing_mini_pipeline(
     Raises:
         ValueError: If the specified mapping file does not exist.
     """
-    # Step 0: Ensure inputs are Path objects.
-    mapping_file = Path(mapping_file)
+    logger.info("Start running multivariate indices processing mini-pipeline...")
 
-    # Step 1: Validate the mapping file and load it into a Pydantic model
+    # Step 0: Ensure inputs are Path objects.
+    mapping_file = Path(mapping_file)  # Ensure it's a Path object
     if not mapping_file.exists():
         raise ValueError(f"The file '{mapping_file}' does not exist.")
 
-    file_mapping_model = load_mappings_model_from_json(mapping_file)
+    # Step 1: Validate the mapping file and load it into a Pydantic model
+    file_mapping_model = load_mappings_model_from_json(mapping_file=mapping_file)
 
-    if file_mapping_model is None:
+    if not file_mapping_model:
         logger.error(f"Failed to load the mapping file: {mapping_file}")
-        return None
+        return  # early return
 
-    # Extract file paths of 'sim_metrics' for each URL in the mapping file
+    # Gather file paths of 'sim_metrics' for each URL in the mapping file
     sim_metrics_files = {
         str(url): Path(paths.sim_metrics)
         for url, paths in file_mapping_model.root.items()
     }
 
-    # Step 1.5: Check for non-existent sim_metrics files
+    # Check for non-existent sim_metrics files
     missing_files = [file for file in sim_metrics_files.values() if not file.exists()]
     missing_file_count = len(missing_files)
 
     if missing_file_count > 0:
         logger.warning(f"Missing sim_metrics files: {missing_files}")
-        print(f"Number of missing files: {missing_file_count}")
+        logger.warning(f"Number of missing files: {missing_file_count}")
 
-    # Filter the list to include only existing files for further processing
+    # Filter out any that don't exist on disk so we don't try to read them
     sim_metrics_file_list = [
         file for file in sim_metrics_files.values() if file.exists()
     ]
 
-    # Step 2: Find CSV files missing multivariate indices
+    # Step 2: Find which CSV files actually need multivariate indices
     files_need_to_process = get_files_wo_multivariate_indices(
         data_sources=sim_metrics_file_list,
     )
@@ -472,6 +483,7 @@ def multivariate_indices_processing_mini_pipeline(
         logger.info("No files require processing. Exiting pipeline.")
         return
 
+    # Step 3: For each file that needs indices, read & update it asynchronously
     for file in files_need_to_process:
         try:
             df = pd.read_csv(file)
@@ -492,9 +504,9 @@ def multivariate_indices_processing_mini_pipeline(
                 logger.error(
                     f"File '{file}' is missing required columns: {missing_columns}"
                 )
-                continue  # Skip files missing required columns
+                continue  # Skip this file
 
-            # Step 3: Validate Each Row Using the Model
+            # Row-level validation using SimilarityMetrics pydantic model
             validated_rows = []
             for index, row in df.iterrows():
                 try:
@@ -502,15 +514,15 @@ def multivariate_indices_processing_mini_pipeline(
                     validated_rows.append(validated_row.model_dump())
                 except ValidationError as ve:
                     logger.warning(f"Validation error in row {index} of '{file}': {ve}")
-                    continue
+                    continue  # Skip this file
 
-            # Convert validated rows to a DataFrame
+            # Verify validated rows to a DataFrame
             validated_df = pd.DataFrame(validated_rows)
             if validated_df.empty:
                 logger.warning(f"No valid data in file '{file}'. Skipping.")
                 continue
 
-            # Step 4: Apply Multivariate Indices Function
+            # Apply Multivariate Indices Function
             updated_df = add_indices_func(validated_df)
             if updated_df is None:
                 logger.error(
@@ -518,8 +530,8 @@ def multivariate_indices_processing_mini_pipeline(
                 )
                 continue
 
-            # Step 5: Save Updated DataFrame
-            updated_df.to_csv(file, index=False)
+            # Save the updated DataFrame asynchronously
+            save_to_json_file(data=updated_df, file_path=file)
             logger.info(f"Successfully processed and saved '{file}'.")
 
         except FileNotFoundError:
@@ -544,6 +556,77 @@ def multivariate_indices_processing_mini_pipeline(
         )
 
 
+# Pipeline to process eval again for modified responsibilities
+def run_metrics_re_processing_pipeline(
+    mapping_file,
+    generate_metrics: Callable[
+        [Path, Path, Path], None
+    ] = generate_matching_metrics_from_nested_json,
+) -> None:
+    """
+    Re-run the pipeline to process and create missing sim_metrics files by reading
+    from the mapping file.
+
+    Args:
+        mapping_file (str | Path): Path to the JSON mapping file.
+        generate_metrics (Callable[[Path, Path, Path], None], optional):
+            Function to generate the metrics CSV file. Defaults to
+            generate_matching_metrics_from_nested_json.
+
+    Returns:
+        None
+    """
+    # Step 1: Read / Validate file mapping
+    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+        mapping_file
+    )
+
+    if file_mappings_model is None:
+        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
+        return
+
+    file_mappings_dict = file_mappings_model.root
+
+    # Step 2: Check if all sim_metrics files exist
+    missing_metrics = {
+        url: mapping.sim_metrics
+        for url, mapping in file_mappings_dict.items()
+        if not Path(mapping.sim_metrics).exists()
+    }
+
+    if not missing_metrics:
+        logger.info("All sim_metrics files already exist. Exiting pipeline.")
+        return
+
+    # Step 3: Process missing sim_metrics files
+    for url, sim_metrics_file in missing_metrics.items():
+        logger.info(f"Processing missing metrics for {url}")
+
+        # Convert sim_metrics_file to Path object if it's not already
+        sim_metrics_file = Path(sim_metrics_file)
+
+        # Load the requirements and responsibilities files from the mapping
+        reqs_file = Path(file_mappings_dict[url].reqs)
+        resps_file = Path(file_mappings_dict[url].resps)
+
+        # Step 3.1: Check if reqs and resps files exist and are valid JSON files
+        if not reqs_file.exists() or not resps_file.exists():
+            if not reqs_file.exists():
+                logger.error(f"Skipping {url}: Missing requirements file {reqs_file}")
+            if not resps_file.exists():
+                logger.error(
+                    f"Skipping {url}: Missing responsibilities file {resps_file}"
+                )
+            continue
+
+        # Step 3.2: Generate the metrics file
+        generate_metrics(reqs_file, resps_file, sim_metrics_file)
+        logger.info(f"Generated metrics for {url} and saved to {sim_metrics_file}")
+
+    logger.info("Finished processing all missing sim_metrics files.")
+
+
+# todo: old code; delete later
 # def multivariate_indices_processing_mini_pipeline(
 #     metrics_csv_file: Union[str, Path],
 #     add_indices_func: Callable[[pd.DataFrame], pd.DataFrame] = add_multivariate_indices,
@@ -812,141 +895,65 @@ def multivariate_indices_processing_mini_pipeline(
 #     #     f"Successfully added multivariate indices to {len(files_need_to_process)} files."
 #     # )
 
+# def unpack_and_combine_json(nested_json, requirements_json):
+#     """
+#     Unpacks the nested responsibilities JSON and combines it with matching requirement texts
+#     from the requirements JSON. Outputs a list of dictionaries with responsibility and requirement texts.
 
-# Running pipeline with pydantic model validation
-def metrics_processing_pipeline(
-    mapping_file: Union[str, Path],
-    generate_metrics: Callable[
-        [Path, Path, Path], None
-    ] = generate_metrics_from_flat_json,
-) -> None:
-    """
-    Process and create missing sim_metrics files by reading from the mapping file.
+#     Args:
+#         nested_json (dict): JSON-like dictionary containing responsibility text structured in a nested format.
+#         requirements_json (dict): JSON-like dictionary containing requirement texts keyed by requirement IDs.
 
-    Args:
-        mapping_file (str or Path): Path to the JSON mapping file.
-        generate_metrics_func (callable): Function to generate the metrics CSV file.
+#     Returns:
+#         list: A list of dictionaries containing responsibility_keys, requirement_keys,
+#               responsibility texts, and matched requirement texts.
 
-    Returns:
-        None
-    """
-    logger.info("Start running responsibility/requirement alignment scoring pipeline.")
+#     Error Handling:
+#         - If a requirement_key is not found in the requirements JSON, it will skip that entry.
+#         - If a required field (e.g., 'optimized_text') is missing, it will skip that entry.
+#         - Logs warnings for missing fields and unmatched keys for better traceability.
+#     """
+#     results = []
 
-    # Ensure that mapping_file is turned into Path obj (if not)
-    mapping_file = Path(mapping_file)
+#     for resp_key, values in nested_json.items():  # Unpack the 1st level
+#         if not isinstance(values, dict):
+#             logger.info(
+#                 f"Warning: Unexpected data structure under '{resp_key}'. Skipping entry."
+#             )
+#             continue
 
-    # Step 1: Read and validate the mapping file
-    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
-        mapping_file
-    )
+#         for req_key, sub_value in values.items():  # Unpack the 2nd level
+#             if not isinstance(sub_value, dict):
+#                 logger.info(
+#                     f"Warning: Unexpected data structure under '{req_key}'. Skipping entry."
+#                 )
+#                 continue
 
-    if file_mappings_model is None:
-        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
-        return
+#             # Extract the optimized_text
+#             if "optimized_text" in sub_value:
+#                 optimized_text = sub_value["optimized_text"]
+#             else:
+#                 logger.info(
+#                     f"Warning: Missing 'optimized_text' for '{req_key}'. Skipping entry."
+#                 )
+#                 continue
 
-    file_mappings_dict = file_mappings_model.root
+#             # Perform the lookup in the requirements JSON
+#             requirement_text = requirements_json.get(req_key)
+#             if requirement_text is None:
+#                 logger.info(
+#                     f"Warning: requirement_key '{req_key}' not found in requirements JSON. Skipping entry."
+#                 )
+#                 continue
 
-    # Step 2: Check if all sim_metrics files exist
-    missing_metrics = {
-        url: mapping.sim_metrics
-        for url, mapping in file_mappings_dict.items()
-        if not Path(mapping.sim_metrics).exists()
-    }
+#             # Append results to a list for further processing
+#             results.append(
+#                 {
+#                     "responsibility_key": resp_key,
+#                     "requirement_key": req_key,
+#                     "responsibility_text": optimized_text,
+#                     "requirement_text": requirement_text,
+#                 }
+#             )
 
-    # *Check if metrics are already processed (no missing files)
-    if not missing_metrics:
-        logger.info("All sim_metrics files already exist. Exiting pipeline.")
-        return  # Early exit if all files exist
-
-    # Step 3: Process missing sim_metrics files
-    for url, sim_metrics_file in missing_metrics.items():
-        logger.info(f"Processing missing metrics for {url}")
-
-        # Load the requirements and responsibilities files from the mapping
-        reqs_file = Path(file_mappings_dict[url].reqs)
-        resps_file = Path(file_mappings_dict[url].resps)
-
-        # Convert sim_metrics_file to Path object if it's not already
-        sim_metrics_file = Path(sim_metrics_file)
-
-        # Step 3.1: Check if reqs and resps files exist
-        if not reqs_file.exists() or not resps_file.exists():
-            logger.error(
-                f"Missing requirements or responsibilities files for {url}. Skipping."
-            )
-            continue
-
-        # Step 3.2: Generate the metrics file
-        generate_metrics(reqs_file, resps_file, sim_metrics_file)
-        logger.info(f"Generated metrics for {url} and saved to {sim_metrics_file}")
-
-    logger.info("Finished processing all missing sim_metrics files.")
-
-
-# Pipeline to process eval again for modified responsibilities
-def metrics_re_processing_pipeline(
-    mapping_file,
-    generate_metrics: Callable[
-        [Path, Path, Path], None
-    ] = generate_matching_metrics_from_nested_json,
-) -> None:
-    """
-    Re-run the pipeline to process and create missing sim_metrics files by reading from the mapping file.
-
-    Args:
-        mapping_file (str | Path): Path to the JSON mapping file.
-        generate_metrics (Callable[[Path, Path, Path], None], optional):
-            Function to generate the metrics CSV file. Defaults to
-            generate_matching_metrics_from_nested_json.
-
-    Returns:
-        None
-    """
-    # Step 1: Read / Validate file mapping
-    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
-        mapping_file
-    )
-
-    if file_mappings_model is None:
-        logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
-        return
-
-    file_mappings_dict = file_mappings_model.root
-
-    # Step 2: Check if all sim_metrics files exist
-    missing_metrics = {
-        url: mapping.sim_metrics
-        for url, mapping in file_mappings_dict.items()
-        if not Path(mapping.sim_metrics).exists()
-    }
-
-    if not missing_metrics:
-        logger.info("All sim_metrics files already exist. Exiting pipeline.")
-        return
-
-    # Step 3: Process missing sim_metrics files
-    for url, sim_metrics_file in missing_metrics.items():
-        logger.info(f"Processing missing metrics for {url}")
-
-        # Convert sim_metrics_file to Path object if it's not already
-        sim_metrics_file = Path(sim_metrics_file)
-
-        # Load the requirements and responsibilities files from the mapping
-        reqs_file = Path(file_mappings_dict[url].reqs)
-        resps_file = Path(file_mappings_dict[url].resps)
-
-        # Step 3.1: Check if reqs and resps files exist and are valid JSON files
-        if not reqs_file.exists() or not resps_file.exists():
-            if not reqs_file.exists():
-                logger.error(f"Skipping {url}: Missing requirements file {reqs_file}")
-            if not resps_file.exists():
-                logger.error(
-                    f"Skipping {url}: Missing responsibilities file {resps_file}"
-                )
-            continue
-
-        # Step 3.2: Generate the metrics file
-        generate_metrics(reqs_file, resps_file, sim_metrics_file)
-        logger.info(f"Generated metrics for {url} and saved to {sim_metrics_file}")
-
-    logger.info("Finished processing all missing sim_metrics files.")
+#     return results

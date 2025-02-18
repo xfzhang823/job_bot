@@ -22,7 +22,7 @@ from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
-    Responsibilites,
+    Responsibilities,
     Requirements,
 )
 

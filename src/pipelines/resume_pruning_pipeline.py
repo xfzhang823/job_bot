@@ -1,3 +1,7 @@
+"""
+#Todo: WIP; to be used later
+"""
+
 import pandas as pd
 import logging
 import json
@@ -74,7 +78,9 @@ def prune_responsibilities_for_jobposting(
     return pruned_responsibilities
 
 
-def run_pipeline(mapping_file: str, pruning_method: str, **method_params) -> None:
+def run_resume_pruning_pipeline(
+    mapping_file: str, pruning_method: str, **method_params
+) -> None:
     """
     Run the full pruning pipeline for multiple job postings based on the paths defined in
     the mapping file.
@@ -85,9 +91,9 @@ def run_pipeline(mapping_file: str, pruning_method: str, **method_params) -> Non
         -pruning_method (str): The pruning method to use ('elbow', 'manual', 'threshold').
         **method_params: Additional parameters specific to the pruning method.
 
-    Returns:
-        None: The function does not return anything. It saves the pruned results to
-                specified file paths.
+    Returns: None
+        The function does not return anything. It saves the pruned results to
+        specified file paths.
     """
     # Load the job posting mappings from the mapping file
     mapping = load_mapping_file(mapping_file)

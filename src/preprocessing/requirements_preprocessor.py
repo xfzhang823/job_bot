@@ -1,35 +1,54 @@
 """ TBA """
 
 import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+
+# User defined
 from utils.generic_utils import read_from_json_file
 from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
 
+# Setup logger
+logger = logging.getLogger(__name__)
 
+
+# Class to parse & extract job requirements (a single job posting)
 class JobRequirementsParser:
-    def __init__(self, json_path, url):
+    """
+    Parses job requirements from a JSON file for a given job posting URL.
+
+    Attributes:
+        - json_path (Path | str): Path to the job requirements JSON file.
+        - url (str): Job posting URL to extract requirements from.
+        - job_reqs_dict (Optional[Dict[str, List[str]]]): The parsed job requirements.
+    """
+
+    def __init__(self, json_path: Union[Path, str], url: str):
         """
         Initialize the JobRequirementsParser with a JSON path and a specific job posting URL.
 
         Args:
-            json_path (str): Path to the JSON file containing job requirements.
-            url (str): The specific URL for the job posting to be parsed.
+            - json_path (str): Path to the JSON file containing job requirements.
+            - url (str): The specific URL for the job posting to be parsed.
 
         Example:
             >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
             >>> print(parser.url)
             'https://example.com/job1'
         """
-        self.json_path = json_path
+        self.json_path = Path(json_path)  # Convert to Path obj if str
         self.url = url
         self.job_reqs_dict = self.load_single_job_posting()
 
-    def load_single_job_posting(self):
+    def load_single_job_posting(self) -> Optional[Dict[str, List[str]]]:
         """
-        Load the specific job posting data from the JSON file based on the provided URL.
+        Load the specific job posting data from the JSON file based on
+        the provided URL.
 
         Returns:
-            dict or None: The job posting data loaded from the JSON file,
-                          or None if the data is invalid or the URL is not found.
+            Optional[Dict[str, List[str]]]: A dictionary containing job requirement categories
+            (e.g., "down_to_earth", "bare_minimum") and their corresponding lists of requirements.
+            Returns None if the URL is not found or the data is invalid.
 
         Example:
             >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
@@ -48,14 +67,13 @@ class JobRequirementsParser:
         # Fetch the job posting for the specific URL
         job_posting = all_reqs_dict.get(self.url, None)
         if job_posting is None:
-            print(f"No job posting found for the URL: {self.url}")
             logging.error(f"No job posting found for the URL: {self.url}")
             return None
 
         logging.info(f"Job requirements for {self.url} loaded from the file.")
         return job_posting
 
-    def extract_down_to_earth(self):
+    def extract_down_to_earth(self) -> Optional[List[str]]:
         """
         Extract 'down to earth' requirements from the job posting.
 
@@ -76,7 +94,7 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
-    def extract_bare_minimum(self):
+    def extract_bare_minimum(self) -> Optional[List[str]]:
         """
         Extract 'bare minimum' requirements from the job posting.
 
@@ -97,12 +115,13 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
-    def extract_pie_in_the_sky(self):
+    def extract_pie_in_the_sky(self) -> Optional[List[str]]:
         """
-        Extract 'pie in the sky' requirements from the job posting.
+        Extracts 'pie in the sky' job requirements.
 
         Returns:
-            list or None: A list of 'pie in the sky' requirements, or None if not found.
+            Optional[List[str]]: A list of 'pie in the sky' job requirements,
+            or None if not found.
 
         Example:
             >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
@@ -118,7 +137,7 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
-    def extract_other(self):
+    def extract_other(self) -> Optional[List[str]]:
         """
         Extract 'other' categories of job requirements from the job posting.
 
@@ -139,7 +158,7 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
-    def extract_flatten_reqs(self):
+    def extract_flatten_reqs(self) -> Dict[str, str]:
         """
         Extract and flatten more relevant job requirements into a dictionary.
         Each requirement is keyed by a unique identifier.
@@ -154,25 +173,20 @@ class JobRequirementsParser:
             {'req_1': "5+ years of experience in software development", 'req_2': "Strong knowledge of Python"}
         """
         try:
-            pie_in_sky_reqs = self.extract_pie_in_the_sky()
-            down_to_earth_reqs = self.extract_down_to_earth()
-            other_reqs = self.extract_other()
+            pie_in_sky_reqs = self.extract_pie_in_the_sky() or []
+            down_to_earth_reqs = self.extract_down_to_earth() or []
+            other_reqs = self.extract_other() or []
+
+            combined_reqs = pie_in_sky_reqs + down_to_earth_reqs + other_reqs
+            flattened_reqs_dict = flatten_dict_and_list(combined_reqs)
+
+            logging.info("Extracted and flattened job requirements.")
+            return flattened_reqs_dict
         except Exception as e:
             logging.error(f"Error extracting requirements: {e}")
-            return []
+            return {}
 
-        pie_in_sky_reqs = pie_in_sky_reqs or []
-        down_to_earth_reqs = down_to_earth_reqs or []
-        other_reqs = other_reqs or []
-
-        combined_reqs = pie_in_sky_reqs + down_to_earth_reqs + other_reqs
-
-        flattened_reqs_dict = flatten_dict_and_list(combined_reqs)
-
-        logging.info("Extracted and flattened job requirements.")
-        return flattened_reqs_dict
-
-    def extract_flatten_concat_reqs(self):
+    def extract_flatten_concat_reqs(self) -> str:
         """
         Extract, flatten, and concatenate all relevant job requirements into a single string.
 
@@ -183,7 +197,8 @@ class JobRequirementsParser:
             >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
             >>> concatenated_reqs = parser.extract_flatten_concat_reqs()
             >>> print(concatenated_reqs)
-            "5+ years of experience in software development\nStrong knowledge of Python\nEnglish proficiency required"
+            "5+ years of experience in software development\nStrong knowledge of \
+Python\nEnglish proficiency required"
         """
         merged_flat_dict = self.extract_flatten_reqs()
 
@@ -195,12 +210,12 @@ class JobRequirementsParser:
         logging.info("Extracted, flattened, and concatenated job requirements.")
         return job_reqs_str
 
-    def extract_all(self):
+    def extract_all(self) -> Optional[Dict[str, List[str]]]:
         """
-        Extract all job requirements from the job posting, excluding the first-level key.
+        Extracts all job requirements from the job posting.
 
         Returns:
-            dict: A dictionary containing all job requirements.
+            Optional[Dict[str, List[str]]]: A dictionary containing all job requirements.
 
         Example:
             >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')

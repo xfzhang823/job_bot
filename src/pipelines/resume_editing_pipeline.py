@@ -9,7 +9,7 @@ from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
-    Responsibilites,
+    Responsibilities,
     Requirements,
 )
 from evaluation_optimization.resume_editor import TextEditor
@@ -235,7 +235,7 @@ def run_pipeline(
                 raise ValueError(f"Files are empty for {url}")
 
             # Use Pydantic for validation
-            validated_responsibilities = Responsibilites(
+            validated_responsibilities = Responsibilities(
                 responsibilities=responsibilities
             )
             validated_requirements = Requirements(requirements=requirements)
