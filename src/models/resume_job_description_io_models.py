@@ -22,6 +22,57 @@ import logging_config
 logger = logging.getLogger(__name__)
 
 
+# Model to validate responsibility input
+class Responsibilities(BaseModel):
+    """
+    Pydantic model for validating responsibilities.
+    Ensures all responsibility JSON files contain both a `url` (unique identifier)
+    and `responsibilities` (flattened responsibilities).
+
+    Attributes:
+        - url (Optional[str]): The job posting URL (optional).
+        Defaults to "Not Available" if missing.
+        - responsibilities (Dict[str, str]): A dictionary containing flattened
+        responsibilities.
+
+    Example Usage:
+        ```python
+        responsibilities_input = {
+            "url": "https://example.com/job/software-engineer",
+            "responsibilities": {
+                "0.responsibilities.0": "Developed AI-driven marketing strategies.",
+                "0.responsibilities.1": "Led a team of 10 data scientists."
+            }
+        }
+
+        validated_responsibilities = Responsibilities(**responsibilities_input)
+
+        print(validated_responsibilities.url)  # Output: "https://example.com/job/software-engineer"
+        print(validated_responsibilities.responsibilities["0.responsibilities.0"])
+        # Output: "Developed AI-driven marketing strategies."
+        ```
+
+    Example JSON Output:
+        ```json
+        {
+            "url": "https://example.com/job/software-engineer",
+            "responsibilities": {
+                "0.responsibilities.0": "Developed AI-driven marketing strategies.",
+                "0.responsibilities.1": "Led a team of 10 data scientists."
+            }
+        }
+        ```
+
+    Raises:
+        - `ValidationError`: If `responsibilities` is missing or not a dictionary.
+    """
+
+    url: Optional[str] = Field(None, description="URL of the job posting (optional).")
+    responsibilities: Dict[str, str] = Field(
+        ..., description="Flattened job responsibilities."
+    )
+
+
 # Model to validate the initial output: optimized text for a single responsibility
 # to requirement match
 class OptimizedText(BaseModel):
@@ -150,46 +201,57 @@ class ResponsibilityMatches(BaseModel):
     )
 
 
-# Model to validate responsibility input
-class Responsibilites(BaseModel):
-    """
-    Usage example:
-    responsibilities_input = {
-        "0.responsibilities.0": "Provided strategic insights to a major global IT vendor...",
-        "0.responsibilities.1": "Assisted a U.S.-based international services provider...",
-        # more responsibilities...
-    }
-
-    # Load the input data into Pydantic models for validation
-    validated_responsibilities = ResponsibilityInput(
-        responsibilities=responsibilities_input
-    )
-
-    # Accessing validated data
-    print(validated_responsibilities.responsibilities["0.responsibilities.0"])
-    """
-
-    responsibilities: Dict[str, str]
-
-
 # Model to validate requirement input
 class Requirements(BaseModel):
     """
-    Usage example:
-    requirements_input = {
-    "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS...",
-    "0.pie_in_the_sky.1": "Ph.D. in Data Science...",
-    # more requirements...
-    }
+    Pydantic model for validating job requirements.
+    Ensures all job requirement files contain both a `url` (unique identifier)
+    and `requirements` (flattened job qualifications).
 
-    # Load the input data into Pydantic models for validation
-    validated_requirements = RequirementsInput(requirements=requirements_input)
+    Attributes:
+        url (str): The job posting URL (required).
+        requirements (Dict[str, str]): A dictionary containing flattened job requirements.
 
-    # Accessing validated data
-    print(validated_requirements.requirements["0.pie_in_the_sky.0"])
+    Example Usage:
+        ```python
+        # Example input JSON structure
+        requirements_input = {
+            "url": "https://example.com/job/software-engineer",
+            "requirements": {
+                "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS leadership.",
+                "1.down_to_earth.0": "3+ years experience in software development.",
+                "2.bare_minimum.0": "Bachelor's degree in Computer Science or related field."
+            }
+        }
+
+        # Load the input data into the Pydantic model for validation
+        validated_requirements = Requirements(**requirements_input)
+
+        # Accessing validated data
+        print(validated_requirements.url)  # Output: "https://example.com/job/software-engineer"
+        print(validated_requirements.requirements["0.pie_in_the_sky.0"])
+        # Output: "10+ years of experience in B2B SaaS leadership."
+        ```
+
+    Example JSON Output:
+        ```json
+        {
+            "url": "https://example.com/job/software-engineer",
+            "requirements": {
+                "0.pie_in_the_sky.0": "10+ years of experience in B2B SaaS leadership.",
+                "1.down_to_earth.0": "3+ years experience in software development.",
+                "2.bare_minimum.0": "Bachelor's degree in Computer Science or related field."
+            }
+        }
+        ```
+
+    Raises:
+        - `ValidationError`: If `url` is missing or not a string.
+        - `ValidationError`: If `requirements` is missing or not a dictionary.
     """
 
-    requirements: Dict[str, str]
+    url: str = Field(..., description="URL of the job posting (required).")
+    requirements: Dict[str, str] = Field(..., description="Flattened job requirements.")
 
 
 # *Model validate Similarity Metrics
@@ -297,7 +359,7 @@ class SimilarityMetrics(BaseModel):
     pca_score: Optional[float] = Field(None, description="PCA score")
 
     @field_validator("*", mode="before", check_fields=False)
-    def clean_strings(cls, v):
+    def clean_strings(cls, v):  # ignore the error
         """
         Clean string fields by removing newline characters and stripping whitespace.
         """

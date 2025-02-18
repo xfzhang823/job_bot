@@ -7,7 +7,7 @@ import io
 import pandas as pd
 import aiofiles
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Any, Dict, List, Optional, Union
 import aiofiles
 from pydantic import BaseModel
 
@@ -527,24 +527,48 @@ def replace_spaces_in_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-async def save_to_csv_async(df, filepath):
-    """Asynchronously write CSV file."""
-    async with aiofiles.open(filepath, mode="w") as f:
-        await f.write(df.to_csv(index=False))
+async def save_df_to_csv_file_async(
+    df: pd.DataFrame, filepath: Union[Path, str]
+) -> None:
+    """
+    Asynchronously write CSV file.
+
+    Args:
+        - df (pd.DataFrame): The DataFrame to be saved.
+        - filepath (Path or str): The full path to the file where the data
+        will be saved.
+    """
+    filepath = Path(filepath)
+    if not filepath.parent.exists():
+        logging.error(f"Directory '{filepath.parent}' does not exist.")
+        raise FileNotFoundError(f"Directory '{filepath.parent}' does not exist.")
+
+    try:
+        async with aiofiles.open(filepath, mode="w") as f:
+            await f.write(df.to_csv(index=False))
+        logger.info(f"Successfully saved DataFrame to {filepath}")
+    except OSError as e:
+        logging.error(f"OS error writing to file {filepath}: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error saving DataFrame to {filepath}: {e}")
+        raise
 
 
-async def save_to_json_file_async(data: Any, file_path: Union[str, Path]) -> None:
+async def save_data_to_json_file_async(
+    data: Union[Dict, List, BaseModel], file_path: Union[str, Path]
+) -> None:
     """
     Asynchronously saves a Python dictionary, list, or Pydantic model to a JSON file.
 
     Args:
-        data (Any): The data to be saved in JSON format. Can be a dict, list, or Pydantic model.
-        file_path (str or Path): The full path to the file where the data will be saved.
+        - data (Union[Dict, List, BaseModel]): The data to be saved in JSON format.
+        Can be a dict, list, or Pydantic model (serializable data generally).
+        - file_path (str or Path): The full path to the file where the data will be saved.
 
     Raises:
-        ValueError: If the data is not a dictionary, list, or Pydantic model.
-        FileNotFoundError: If the provided file path's directory does not exist.
-        Exception: For any general errors during file saving.
+        - ValueError: If the data is not a dictionary, list, or Pydantic model.
+        - FileNotFoundError: If the provided file path's directory does not exist.
+        - IOError: For any I/O-related errors during file saving.
 
     Returns:
         None

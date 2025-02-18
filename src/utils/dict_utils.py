@@ -2,11 +2,14 @@
 
 import os
 import sys
+from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 import logging
 
 # root_dir = Path(__file__).resolve().parent.parent / "src"
 # sys.path.append(str(root_dir))
+
+logger = logging.getLogger(__name__)
 
 
 # Function to flatten a dict
@@ -35,7 +38,7 @@ def flatten_dict(d, parent_key="", sep="."):
 
 
 # Funct to flatten a list
-def flatten_list(lst, parent_key="", sep="."):
+def flatten_list(lst, parent_key: Optional[str] = "", sep: str = "."):
     """
     Flattens a nested list.
 
@@ -59,34 +62,75 @@ def flatten_list(lst, parent_key="", sep="."):
     return dict(items)
 
 
-def flatten_dict_and_list(obj, parent_key="", sep="."):
+def flatten_dict_and_list(
+    obj: Union[Dict, List, Any], parent_key: str = "", sep: str = "."
+):
     """
     Flattens a nested structure that could be a dictionary or a list.
 
     Args:
-        obj (dict or list): The object to flatten.
-        parent_key (str): The prefix for keys in the flattened dictionary.
-        sep (str): Separator used between keys.
+        - obj (dict | list | any): The object to flatten. Can be a dictionary,
+        list, or single value.
+        - parent_key (str): The prefix for keys in the flattened dictionary
+        (used for recursion).
+        - sep (str): Separator used between nested keys (default is ".").
 
     Returns:
-        dict: A flattened dictionary.
+        dict: A flattened dictionary where:
+            - Nested dictionary keys are concatenated with `sep`.
+            - List elements are indexed numerically.
 
     Note:
-        In a flattened representation of a nested structure, each key
-        represents the full path from the root to a specific value.
-        For dictionaries, keys are concatenated with a separator (e.g., .),
-        and for lists, each element's index is used as part of the key.
+        - For dictionaries, keys are concatenated with a separator (e.g., `.`).
+        - For lists, indices are used as keys.
+        - If `obj` is a primitive value, it will be wrapped in a dictionary.
 
-        This allows precise identification and modification of any element
-        within the original structure while preserving the hierarchy and order.
+    >>> Example:
+        Given a nested structure like:
+        ```json
+        {
+            "pie_in_the_sky": [
+                "Masters’ degree or equivalent in business",
+                "PhD in Computer Science"
+            ],
+            "down_to_earth": [
+                "5+ years of experience in software development",
+                "Strong knowledge of Python"
+            ]
+        }
+        ```
+        Calling `flatten_dict_and_list(obj)` will return:
+        ```json
+        {
+            "0.pie_in_the_sky.0": "Masters’ degree or equivalent in business",
+            "0.pie_in_the_sky.1": "PhD in Computer Science",
+            "1.down_to_earth.0": "5+ years of experience in software development",
+            "1.down_to_earth.1": "Strong knowledge of Python"
+        }
+
+    How Key Generation Works:
+    - Dictionary keys are preserved but concatenated with `sep` if nested.
+    - List elements are indexed numerically, ensuring uniqueness.
+    - "0.pie_in_the_sky.0" represents:
+        - "pie_in_the_sky" as the original key.
+        - The first (`0`) element in its list.
+    - "1.down_to_earth.0" represents:
+        - `"down_to_earth" as the original key.
+        - The first (`0`) element in its list.
+
+    Notes:
+        - Ensures every value is uniquely identified.
+        - Helps structure complex, nested data for easy access and modification.
     """
     if isinstance(obj, dict):
         return flatten_dict(obj, parent_key, sep)
     elif isinstance(obj, list):
         return flatten_list(obj, parent_key, sep)
     else:
-        # For non-dict, non-list items, return as-is in a dictionary form
-        return {parent_key: obj} if parent_key else obj
+        # Ensure a dictionary return type
+        return {
+            parent_key if parent_key else "root": obj
+        }  # "root" key ensures dict output
 
 
 def recursive_search(d, search_key=None, search_value=None, results=None):
@@ -127,7 +171,7 @@ def recursive_search(d, search_key=None, search_value=None, results=None):
                         recursive_search(item, search_key, search_value, results)
 
 
-def fetch_subtrees(d, search_key=None, search_value=None):
+def fetch_subtrees(d: Dict, search_key: str = "", search_value: str = ""):
     """
     Fetches only the immediate items containing a specified key or value in a nested dictionary.
 

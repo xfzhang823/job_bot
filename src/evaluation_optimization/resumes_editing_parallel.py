@@ -19,7 +19,7 @@ from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
-    Responsibilites,
+    Responsibilities,
     Requirements,
 )
 
@@ -228,7 +228,7 @@ def modify_multi_resps_based_on_reqs(
     logger.info(f"Number of requirements: {len(requirements)}")
 
     # Validate the input resonsibilities using pydantic models
-    validated_responsibilities = Responsibilites(responsibilities=responsibilities)
+    validated_responsibilities = Responsibilities(responsibilities=responsibilities)
     validated_requirements = Requirements(requirements=requirements)
 
     # # Initialize the OpenAI client here to pass it into the parallel calls

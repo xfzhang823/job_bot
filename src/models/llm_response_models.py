@@ -245,7 +245,7 @@ class NestedRequirements(BaseModel):
     other: List[str] = Field([], description="Any other requirements.")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "pie_in_the_sky": [
                     "10+ years in emerging tech",

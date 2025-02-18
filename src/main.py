@@ -40,7 +40,7 @@ from pipelines.run_pipelines import (
     run_pipeline_async,
 )
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-from project_config import CLAUDE_SONNET, GPT_4_TURBO, CLAUDE_HAIKU
+from project_config import OPENAI, ANTHROPIC, CLAUDE_SONNET, GPT_4_TURBO, CLAUDE_HAIKU
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -128,83 +128,77 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
 def main_anthropic():
     """Executing the pipeline using Anthropic models (e.g., Claude)"""
 
-    # Running pipeline 1 (Preprocessing job posting webpage(s)) with Claude
-    execute_pipeline(
-        "1_async", llm_provider="anthropic", model_id=CLAUDE_HAIKU
-    )  # Run pipeline 1 with Claude (default configuration)
+    # Define default Anthropic model
+    model_id = CLAUDE_HAIKU
 
-    # Running pipeline 2a (Create/upsert mapping file for iteration 0) with Claude
-    execute_pipeline(
-        "2a", llm_provider="anthropic", model_id=CLAUDE_SONNET
-    )  # Run pipeline 2a in Claude I/O
+    # ✅ Step 1: Preprocessing job posting webpages
+    execute_pipeline("1_async", llm_provider=ANTHROPIC, model_id=model_id)
 
-    # Running pipeline 3a (Create/upsert mapping file for iteration 1) with Claude
-    execute_pipeline(
-        "3a", llm_provider="anthropic", model_id=CLAUDE_SONNET
-    )  # Run pipeline 3a in Claude I/O
+    # ✅ Step 2: Creating/updating mapping file for iteration 0
+    execute_pipeline("2a", llm_provider=ANTHROPIC)
 
-    # Running pipeline 3b (Modify responsibilities based on requirements using LLM)
-    # with Claude
-    execute_pipeline(
-        "3b", llm_provider="anthropic", model_id=CLAUDE_SONNET
-    )  # Run pipeline 3b using Claude
+    # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
+    execute_pipeline("2b", llm_provider=ANTHROPIC)
 
-    # Running async pipeline 3b_async (Async modification of responsibilities based on
-    # requirements) with Claude
-    execute_pipeline(
-        "3b_async", llm_provider="anthropic", model_id=CLAUDE_SONNET
-    )  # Run pipeline 3b_async using Claude
+    # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
+    execute_pipeline("2c_async", llm_provider=ANTHROPIC)
 
-    # Running pipeline 3c (Copy requirements from iteration 0 to iteration 1) with Claude
-    execute_pipeline("3c", llm_provider="anthropic")  # Run pipeline 3c in Claude I/O
+    # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
+    execute_pipeline("2d_async", llm_provider=ANTHROPIC)
 
-    # Running async pipeline 3d_async (Async resume evaluation in iteration 1) with Claude
-    execute_pipeline(
-        "3d_async", llm_provider="anthropic", model_id=CLAUDE_SONNET
-    )  # Run async pipeline 3d in Claude I/O
+    # ✅ Step 6: Copy & Prune Responsibilities
+    execute_pipeline("2e", llm_provider=ANTHROPIC)
 
-    # Running pipeline 3e (Adding multivariate indices to metrics files in iteration 1)
-    # with Claude
-    execute_pipeline(
-        "3e", llm_provider="anthropic", model_id=CLAUDE_SONNET
-    )  # Run pipeline 3e using Claude
+    # ✅ Step 7: Iteration 1 - Modify Responsibilities Based on Requirements
+    execute_pipeline("3a", llm_provider=ANTHROPIC)
+    execute_pipeline("3b_async", llm_provider=ANTHROPIC, model_id=model_id)
+
+    # ✅ Step 8: Copy Requirements from Iteration 0 to Iteration 1
+    execute_pipeline("3c", llm_provider=ANTHROPIC)
+
+    # ✅ Step 9: Async Resume Evaluation in Iteration 1
+    execute_pipeline("3d_async", llm_provider=ANTHROPIC, model_id=model_id)
+
+    # ✅ Step 10: Add Multivariate Indices to Metrics Files in Iteration 1
+    execute_pipeline("3e", llm_provider=ANTHROPIC, model_id=model_id)
 
 
 def main_openai():
     """Executing the pipeline using OpenAI models (e.g., GPT)"""
 
-    # Running pipeline 1 (Preprocessing job posting webpage(s)) with OpenAI GPT
-    execute_pipeline(
-        "1_async", llm_provider="openai", model_id=GPT_4_TURBO
-    )  # Choose any GPT model (e.g., gpt-3.5-turbo, gpt-4-turbo)
+    # Define default OpenAI model
+    model_id = GPT_4_TURBO
 
-    # Running pipeline 2a (Create/upsert mapping file for iteration 0) with OpenAI GPT
-    execute_pipeline("2a", llm_provider="openai", model_id="gpt-4-turbo")
+    # ☑️ Step 1: Preprocessing job posting webpages
+    execute_pipeline("1_async", llm_provider=OPENAI, model_id=model_id)
 
-    # Running pipeline 3b (Modify responsibilities based on requirements using LLM)
-    # with OpenAI GPT
-    execute_pipeline("3b", llm_provider="openai", model_id=GPT_4_TURBO)
+    # ☑️ Step 2: Creating/updating mapping file for iteration 0
+    execute_pipeline("2a", llm_provider=OPENAI)
 
-    # Running async pipeline 3b_async (Async modification of responsibilities
-    # based on requirements) with OpenAI GPT
-    execute_pipeline("3b_async", llm_provider="openai", model_id=GPT_4_TURBO)
+    # ☑️ Step 3: Extracting & Flattening Job Requirements and Responsibilities
+    execute_pipeline("2b", llm_provider=OPENAI)
 
-    # Running pipeline 3c (Copy requirements from iteration 0 to iteration 1)
-    # with OpenAI GPT
-    execute_pipeline("3c", llm_provider="openai", model_id=GPT_4_TURBO)
+    # ☑️ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
+    execute_pipeline("2c_async", llm_provider=OPENAI)
 
-    # Running async pipeline 3d_async (Async resume evaluation in iteration 1) with OpenAI GPT
-    execute_pipeline(
-        "3d_async",
-        llm_provider="openai",
-        model_id=GPT_4_TURBO,
-    )  # Run async pipeline 3d in OpenAI I/O
+    # ☑️ Step 5: Add Composite Scores & PCA Scores to Metrics
+    execute_pipeline("2d_async", llm_provider=OPENAI)
 
-    # Running pipeline 3e (Adding multivariate indices to metrics files in iteration 1)
-    # with OpenAI GPT
-    execute_pipeline(
-        "3e", llm_provider="openai", model_id=GPT_4_TURBO
-    )  # Run pipeline 3e using OpenAI (GPT)
+    # ☑️ Step 6: Copy & Prune Responsibilities
+    execute_pipeline("2e", llm_provider=OPENAI)
+
+    # ☑️ Step 7: Iteration 1 - Modifying Responsibilities Based on Requirements
+    execute_pipeline("3a_async", llm_provider=OPENAI, model_id=model_id)
+    execute_pipeline("3b_async", llm_provider=OPENAI, model_id=model_id)
+
+    # ☑️ Step 8: Copy Requirements from Iteration 0 to Iteration 1
+    execute_pipeline("3c", llm_provider=OPENAI)
+
+    # ☑️ Step 9: Async Resume Evaluation in Iteration 1
+    execute_pipeline("3d_async", llm_provider=OPENAI)
+
+    # ☑️ Step 10: Add Multivariate Indices to Metrics Files in Iteration 1
+    execute_pipeline("3e", llm_provider=OPENAI)
 
 
 if __name__ == "__main__":

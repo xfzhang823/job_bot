@@ -20,6 +20,53 @@ steps are followed for each pipeline.
 """
 
 from enum import Enum
+import logging
+
+# * User defined: import pipeline functions
+
+# Proprocessing
+from pipelines.preprocessing_pipeline import run_preprocessing_pipeline
+from pipelines.preprocessing_pipeline_async import run_preprocessing_pipeline_async
+
+# Create/upsert mapping file for iteration 0
+from pipelines.upserting_mapping_file_iter0_mini_pipeline import (
+    run_upserting_mapping_file_iter0_mini_pipeline,
+)
+
+# Create flatttened files
+from pipelines.flattened_resps_reqs_processing_mini_pipeline import (
+    run_flatten_resps_reqs_processing_mini_pipeline,
+)
+
+# Compute & save similarity/entailment metrics & indices
+from pipelines.resume_eval_pipeline import (
+    run_metrics_processing_pipeline,
+    generate_metrics_from_flat_json,
+    run_multivariate_indices_processing_mini_pipeline,
+)
+from pipelines.resume_eval_pipeline_async import (
+    run_metrics_processing_pipeline_async,
+    generate_metrics_from_flat_json_async,
+    run_multivariate_indices_processing_mini_pipeline_async,
+)
+
+# Copy responsibilities over to pruned resps dir (for consistency)
+from pipelines.copying_resps_to_pruned_resps_dir_mini_pipeline import (
+    run_copying_resps_to_pruned_resps_dir_mini_pipeline,
+)
+
+# Exclude some resume items
+from pipelines.excluding_resps_mini_pipeline import run_excluding_resps_mini_pipeline
+
+
+from pipelines.resume_eval_pipeline_async import (
+    run_metrics_re_processing_pipeline_async as re_run_resume_comparison_pipeline_async,
+)
+from pipelines.resume_eval_pipeline_async import (
+    run_multivariate_indices_processing_mini_pipeline_async as run_adding_multivariate_indices_mini_pipeline_async,
+)
+
+# File & dir paths
 from project_config import (
     RESUME_JSON_FILE,
     JOB_POSTING_URLS_FILE,
@@ -50,7 +97,10 @@ from project_config import (
     PRUNED_RESPS_FILES_ITERATE_1_ANTHROPIC_DIR,
 )
 
+# LLM providers & model ids
 from project_config import (
+    ANTHROPIC,
+    OPENAI,
     GPT_35_TURBO,
     GPT_35_TURBO_16K,
     GPT_4,
@@ -61,6 +111,9 @@ from project_config import (
     CLAUDE_SONNET,
     CLAUDE_OPUS,
 )
+
+
+logger = logging.getLogger()
 
 
 # Enum for defining pipeline stages
@@ -83,9 +136,7 @@ PIPELINE_CONFIG = {
         "stage": PipelineStage.PREPROCESSING,  # Pipeline stage: Preprocessing
         "description": "Preprocessing job posting webpage(s)",
         # Scrape job-posting pages -> extract content -> a structured JSON file w/t jobpostings
-        "function": "run_preprocessing_pipeline",  # Function to call for this pipeline
-        "llm_provider": "openai",  # Specify LLM provider (OpenAI or Anthropic)
-        "model_id": GPT_4_TURBO,  # Specify LLM model id (gpt-3.5-turbo, claude-3-haiku, etc.)
+        "function": run_preprocessing_pipeline,  # Function to call for this pipeline
         "io": {  # Input/Output files for OpenAI and Anthropic providers
             "openai": {
                 "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
@@ -104,9 +155,7 @@ PIPELINE_CONFIG = {
         "description": "Async preprocessing job posting webpage(s)",
         # Async version: Scrape job-posting pages -> extract content -> a structured JSON file
         # w/t jobpostings
-        "function": "run_preprocessing_pipeline_async",  # Async function to call
-        "llm_provider": "openai",  # LLM provider for async pipeline
-        "model_id": GPT_4_TURBO,  # Specify LLM model id (gpt-3.5-turbo, claude-3-haiku, etc.)
+        "function": run_preprocessing_pipeline_async,  # Async function to call
         "io": {
             "openai": {
                 "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
@@ -123,8 +172,7 @@ PIPELINE_CONFIG = {
     "2a": {
         "stage": PipelineStage.EVALUATION,  # Evaluation stage
         "description": "Create/upsert mapping file for iteration 0",
-        # Create or update the reference file w/t file paths in iteration 0
-        "function": "run_upserting_mapping_file_pipeline_iter0",
+        "function": run_upserting_mapping_file_iter0_mini_pipeline,
         # * Function to create/update mapping file
         "io": {
             "openai": {
@@ -145,9 +193,9 @@ PIPELINE_CONFIG = {
         "stage": PipelineStage.EVALUATION,
         "description": "Flatten responsibilities and requirements files",
         # * Nested resume files -> flatten JSON / responsibilities only files
-        # * Nested job postings -> flatted JSON & job requirements only files
-        "function": "run_flat_requirements_and_responsibilities_pipeline",
-        # Function to flatten JSON files
+        # * Nested job requirements -> flatted JSON & job requirements only files
+        "function": run_flatten_resps_reqs_processing_mini_pipeline,
+        # File: /pipelines/run_flatten_resps_reqs_processing_mini_pipeline.py
         "io": {
             "openai": {
                 "mapping_file": ITERATE_0_OPENAI_DIR
@@ -168,25 +216,24 @@ PIPELINE_CONFIG = {
     "2c": {
         "stage": PipelineStage.EVALUATION,
         "description": "Resume evaluation in iteration 0 (add similarity metrics)",
-        # Match responsibilities and requirements and cacluate similarity metrics
-        "function": "run_resume_comparison_pipeline",
-        # Function to match & create similarity metrics
+        "function": run_metrics_processing_pipeline,
         "io": {
             "openai": {
-                "mapping_file": ITERATE_0_OPENAI_DIR
-                / mapping_file_name,  # Referene file w/t file paths in the dir
+                "mapping_file": ITERATE_0_OPENAI_DIR / mapping_file_name,
             },
             "anthropic": {
-                "mapping_file": ITERATE_0_ANTHROPIC_DIR
-                / mapping_file_name,  # Referene file w/t file paths in the dir
+                "mapping_file": ITERATE_0_ANTHROPIC_DIR / mapping_file_name,
             },
+        },
+        "kwargs": {  # Generic place for additional arguments (like callables)
+            "generate_metrics": generate_metrics_from_flat_json
         },
     },
     "2c_async": {
         "stage": PipelineStage.EVALUATION,
         "description": "Async resume evaluation in iteration 0 (add similarity metrics)",
         # Async version: Match responsibilities and requirements and cacluate similarity metrics
-        "function": "run_resume_comparison_pipeline",
+        "function": run_metrics_processing_pipeline_async,
         # Function to match & create similarity metrics
         "io": {
             "openai": {
@@ -198,12 +245,15 @@ PIPELINE_CONFIG = {
                 / mapping_file_name,  # Referene file w/t file paths in the dir
             },
         },
+        "kwargs": {  # Generic place for additional arguments (like callables)
+            "generate_metrics": generate_metrics_from_flat_json_async
+        },
     },
     "2d": {
         "stage": PipelineStage.EVALUATION,
-        "description": "Add indices to metrics files based on similarity metrics",
-        # Add extra indices (composite and PCA scores) to similarity files
-        "function": "run_adding_multivariate_indices_mini_pipeline",
+        "description": "Add extra indices (composite and PCA scores) to metrics files based \
+on similarity metrics",
+        "function": run_multivariate_indices_processing_mini_pipeline,
         # Function to add extra metrics to similarity metrics files
         "io": {
             "openai": {
@@ -215,12 +265,16 @@ PIPELINE_CONFIG = {
                 / mapping_file_name,  # Referene file w/t file paths in the dir
             },
         },
+        "kwargs": {  # Generic place for additional arguments (like callables)
+            "generate_metrics": generate_metrics_from_flat_json_async
+        },
     },
-    "2d_async": {
+    "2d_async": {  # Run async to save time
         "stage": PipelineStage.EVALUATION,
-        "description": "Async add indices to metrics files based on similarity metrics",
+        "description": "Asynchronously add extra indices (composite and PCA scores) to \
+metrics files based on similarity metrics",
         # Async: Add extra indices (composite and PCA scores) to similarity files
-        "function": "run_adding_multivariate_indices_mini_pipeline_async",
+        "function": run_multivariate_indices_processing_mini_pipeline_async,
         "io": {  # todo: need to double check this one - updated io from just dir to mapping_file
             "openai": {
                 "mapping_file": ITERATE_0_OPENAI_DIR
@@ -235,19 +289,13 @@ PIPELINE_CONFIG = {
     "2e": {
         "stage": PipelineStage.EVALUATION,
         "description": "Copy and exclude responsibilities to pruned_responsibilities folder",
-        # Exclude certain responsibilities (like "promoted to ... in ...") ->
-        # copy to pruned resp. folder (final bin) of iteration 0
-        "function": "run_excluding_responsibilities_mini_pipeline",
-        # function to filter and save resp. files to the final bin
+        "function": [
+            run_copying_resps_to_pruned_resps_dir_mini_pipeline,
+            run_excluding_resps_mini_pipeline,
+        ],  # 2 functions
         "io": {
-            "openai": {
-                "mapping_file": ITERATE_0_OPENAI_DIR
-                / mapping_file_name,  # Reference file with all file paths in the dir
-            },
-            "anthropic": {
-                "mapping_file": ITERATE_0_ANTHROPIC_DIR
-                / mapping_file_name,  # Reference file with all file paths in the dir
-            },
+            "openai": {"mapping_file": ITERATE_0_OPENAI_DIR / mapping_file_name},
+            "anthropic": {"mapping_file": ITERATE_0_ANTHROPIC_DIR / mapping_file_name},
         },
     },
     "3a": {

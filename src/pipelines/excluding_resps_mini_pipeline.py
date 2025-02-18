@@ -13,14 +13,13 @@ Functions:
 
 from pathlib import Path
 import logging
-import logging_config
 from utils.generic_utils import read_from_json_file, save_to_json_file
 from utils.exclude_and_reinsert_resps_keys import exclude_keys
 
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(mapping_file):
+def run_excluding_resps_mini_pipeline(mapping_file):
     """
     Run the exclusion mini pipeline to remove specific responsibility keys from job posting files.
 
