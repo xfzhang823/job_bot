@@ -10,24 +10,15 @@ import asyncio
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
 
 # Pipeline functions
-
-
-from pipelines.copying_reqs_to_next_iter_mini_pipeline import (
-    run_pipeline as run_copying_requirements_to_next_iteration_mini_pipeline,
-)
-from pipelines.upserting_mapping_file_iter1_mini_pipeline import (
-    run_pipeline as run_upserting_mapping_file_pipeline_iter1,
-)
 from pipelines.resume_editing_pipeline import (
-    run_pipeline as run_resume_editing_pipeline,
+    run_resume_editing_pipeline as run_resume_editing_pipeline,
 )
 from pipelines.resume_eval_pipeline import (
     run_metrics_re_processing_pipeline as re_run_resume_comparison_pipeline,
 )
 
-
 from pipelines.resume_editing_pipeline_async import (
-    run_pipeline_async as run_resume_editting_pipeline_async,
+    run_resume_editing_pipeline_async as run_resume_editting_pipeline_async,
 )
 from project_config import (
     OPENAI,
@@ -311,26 +302,25 @@ def run_pipeline_2d(llm_provider: str = OPENAI):
 
 def run_pipeline_2e(llm_provider: str = OPENAI):
     """
-    Pipeline to copy files in responsibilities folder to pruned_responsibilities folder,
-    and exclude certain responsibilities.
+    Pipeline to clean up metrics csv files by removing empty rows.
     """
-    # Calls `run_pipeline("2e")`, which runs both mini pipelines from PIPELINE_CONFIG
     run_pipeline("2e", llm_provider=llm_provider)
 
 
-def run_pipeline_3a(llm_provider: str = "openai"):
+def run_pipeline_2f(llm_provider: str = OPENAI):
+    """
+    Pipeline to copy files in responsibilities folder to pruned_responsibilities folder,
+    and exclude certain responsibilities.
+    """
+    # Calls `run_pipeline("2f")`, which runs both mini pipelines from PIPELINE_CONFIG
+    run_pipeline("2f", llm_provider=llm_provider)
+
+
+def run_pipeline_3a(llm_provider: str = OPENAI):
     """
     Pipeline to create or upsert the mapping file for iteration 1.
     """
-    config = PIPELINE_CONFIG["3a"]
-    io_config = config["io"][llm_provider]
-
-    run_upserting_mapping_file_pipeline_iter1(
-        job_descriptions_file=io_config["job_descriptions_file"],
-        iteration_dir=io_config["iteration_dir"],
-        iteration=io_config["iteration"],
-        mapping_file_name=io_config["mapping_file_name"],
-    )
+    run_pipeline("3a", llm_provider=llm_provider)
 
 
 def run_pipeline_3b(llm_provider: str = OPENAI, model_id=GPT_4_TURBO):
@@ -340,64 +330,37 @@ def run_pipeline_3b(llm_provider: str = OPENAI, model_id=GPT_4_TURBO):
     Args:
         llm_provider (str): The LLM provider, e.g., 'openai' or 'claude'.
     """
-    config = PIPELINE_CONFIG["3b_async"]
-    io_config = config["io"][llm_provider]
-
-    # Retrieve and validate model_id
-    model_id = config.get("model_id")
-    if model_id is None:
-        raise ValueError(
-            f"Model ID is not defined for pipeline '3b_async' using provider '{llm_provider}'."
-        )
-
-    # Validate other essential inputs
-    mapping_file_prev = io_config.get("mapping_file_prev")
-    mapping_file_curr = io_config.get("mapping_file_curr")
-    if not mapping_file_prev or not mapping_file_curr:
-        raise ValueError(
-            f"One or more required I/O configurations are missing for provider '{llm_provider}'."
-        )
-
-    run_resume_editing_pipeline(
-        mapping_file_prev=mapping_file_prev,
-        mapping_file_curr=mapping_file_curr,
-        llm_provider=llm_provider,
-        model_id=model_id,
-    )
+    run_pipeline("3b", llm_provider=llm_provider, model_id=model_id)
 
 
 def run_pipeline_3c(llm_provider: str = "openai"):
     """
     Pipeline to copy requirements files from iteration 0 to iteration 1.
     """
-    config = PIPELINE_CONFIG["3c"]
-    io_config = config["io"][llm_provider]
-
-    run_copying_requirements_to_next_iteration_mini_pipeline(
-        mapping_file_prev=io_config["mapping_file_prev"],
-        mapping_file_curr=io_config["mapping_file_curr"],
-    )
+    run_pipeline("3c", llm_provider=llm_provider)
 
 
 def run_pipeline_3d(llm_provider: str = "openai"):
     """
-    Pipeline to match resume's responsibilities to job postings' requirements
-    and generate similarity metrics.
+    Pipeline to evaluate (modified resumes against job requirements and generate similarity metrics.
     """
-    config = PIPELINE_CONFIG["3d"]
-    io_config = config["io"][llm_provider]
-
-    re_run_resume_comparison_pipeline(io_config["mapping_file"])
+    run_pipeline("3d", llm_provider=llm_provider)
 
 
 def run_pipeline_3e(llm_provider: str = "openai"):
     """
     Pipeline to add multivariate indices to metrics files in iteration 1.
     """
-    config = PIPELINE_CONFIG["3e"]
-    io_config = config["io"][llm_provider]
+    run_pipeline("3e", llm_provider=llm_provider)
 
     # run_adding_multivariate_indices_mini_pipeline(io_config["mapping_file"])
+
+
+def run_pipeline_3f(llm_provider: str = OPENAI):
+    """
+    Pipeline to clean up metrics csv files by removing empty rows.
+    """
+    run_pipeline("3f", llm_provider=llm_provider)
 
 
 # * Async Functions
@@ -418,7 +381,8 @@ async def run_pipeline_1_async(
 
 async def run_pipeline_2c_async(llm_provider: str = OPENAI):
     """
-    Async pipeline for resume evaluation in iteration 0.
+    Async pipeline to evaluate resumes against job requirements and generate similarity \
+metrics in iter 0.
     """
     asyncio.run(run_pipeline_async("2_async", llm_provider=llm_provider))
 
@@ -431,36 +395,23 @@ async def run_pipeline_2d_async(llm_provider: str = OPENAI):
     asyncio.run(run_pipeline_async("2d_async", llm_provider=llm_provider))
 
 
-async def run_pipeline_3b_async(llm_provider: str, model_id: str):
+async def run_pipeline_3b_async(
+    llm_provider: str = OPENAI, model_id: str = GPT_4_TURBO
+):
     """
     Async pipeline for modifying responsibilities text based on requirements using LLM.
 
     Args:
         llm_provider (str): The LLM provider, e.g., 'openai' or 'claude'.
     """
-    config = PIPELINE_CONFIG["3b_async"]
-    io_config = config["io"][llm_provider]
-
-    # Validate other essential inputs
-    mapping_file_prev = io_config.get("mapping_file_prev")
-    mapping_file_curr = io_config.get("mapping_file_curr")
-    if not mapping_file_prev or not mapping_file_curr:
-        raise ValueError(
-            f"One or more required I/O configurations are missing for provider '{llm_provider}'."
-        )
-    await run_resume_editting_pipeline_async(
-        mapping_file_prev=mapping_file_prev,
-        mapping_file_curr=mapping_file_curr,
-        llm_provider=llm_provider,
-        model_id=model_id,
+    asyncio.run(
+        run_pipeline_async("3b_async", llm_provider=llm_provider, model_id=model_id)
     )
 
 
 async def run_pipeline_3d_async(llm_provider: str):
     """
-    Async version of the resume comparison pipeline for iteration 1.
+    Async pipeline to evaluate resumes against job requirements and generate \
+similarity metrics in iter 1.
     """
-    config = PIPELINE_CONFIG["3d_async"]
-    io_config = config["io"][llm_provider]
-
-    await re_run_resume_comparison_pipeline_async(io_config["mapping_file"])
+    asyncio.run(run_pipeline_async("3d_async", llm_provider=llm_provider))

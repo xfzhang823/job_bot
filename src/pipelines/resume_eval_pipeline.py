@@ -30,6 +30,7 @@ from utils.generic_utils import (
     save_to_json_file,
 )
 from evaluation_optimization.evaluation_optimization_utils import (
+    add_multivariate_indices,
     get_new_urls_and_file_names,
     get_new_urls_and_metrics_file_paths,
     get_files_wo_multivariate_indices,
@@ -45,37 +46,6 @@ from models.resume_job_description_io_models import (
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
-
-def add_multivariate_indices(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add multivariate indices to the DataFrame using the MultivariateIndexer.
-
-    Parameters:
-    - df: The input DataFrame.
-
-    Returns:
-    - DataFrame with multivariate indices added, or raises an appropriate error.
-    """
-    try:
-        # Check if df is a valid DataFrame
-        if not isinstance(df, pd.DataFrame):
-            raise ValueError("Input is not a valid DataFrame.")
-
-        # Check if df is empty
-        if df.empty:
-            raise ValueError("Input DataFrame is empty.")
-
-        # Initialize the MultivariateIndexer and add indices
-        indexer = MultivariateIndexer(df)
-        df = indexer.add_multivariate_indices_to_df()
-
-        logger.info("Multivariate indices added.")
-        return df
-
-    except ValueError as ve:
-        logger.error(f"Error in multivariate index calculation: {ve}")
-        return df  # Return the original DataFrame if there's an error
 
 
 # *Processing the dataframe first and then validate w/t pydantic

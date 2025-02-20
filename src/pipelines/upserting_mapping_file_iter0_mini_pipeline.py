@@ -1,4 +1,4 @@
-"""upserting_mapping_file_iter1.py"""
+"""upserting_mapping_file_iter0_mini_pipeline.py"""
 
 import os
 import json
@@ -10,6 +10,7 @@ from evaluation_optimization.create_mapping_file import (
 )
 from utils.generic_utils import read_from_json_file, save_to_json_file
 from evaluation_optimization.create_mapping_file import MappingConfig
+from models.resume_job_description_io_models import JobFileMappings
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def run_upserting_mapping_file_iter0_mini_pipeline(
     iteration: int,
     iteration_dir: Union[str, Path],
     mapping_file_name: str,
-) -> Dict:
+) -> JobFileMappings:
     """
     Create or update the mapping file based on job descriptions for a specific iteration.
 
@@ -86,10 +87,11 @@ def run_upserting_mapping_file_iter0_mini_pipeline(
         mapping_file_name (str): The name of the mapping file for the current iteration.
 
     Returns:
-        Dict: The updated or newly created mapping file content.
+        JobFileMappings: The updated or newly created mapping file content pydantic model.
 
     Raises:
-        ValueError: If the job descriptions file cannot be loaded or is not in valid JSON format.
+        ValueError: If the job descriptions file cannot be loaded or is not in
+        valid JSON format.
 
     Example:
         run_pipeline(

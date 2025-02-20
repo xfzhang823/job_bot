@@ -17,7 +17,7 @@ from anthropic import AsyncAnthropic
 
 from evaluation_optimization.resume_editor_async import TextEditorAsync
 from utils.generic_utils import save_to_json_file
-from llm_providers.llm_api_utils import get_openai_api_key, get_claude_api_key
+from llm_providers.llm_api_utils import get_openai_api_key, get_anthropic_api_key
 from models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
@@ -25,7 +25,7 @@ from models.resume_job_description_io_models import (
     Responsibilities,
     Requirements,
 )
-
+from project_config import OPENAI, ANTHROPIC, GPT_4_TURBO, CLAUDE_HAIKU
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -64,8 +64,8 @@ async def modify_resp_based_on_reqs_async(
         tuple: A tuple containing:
             - 'resp_key' (str): The same responsibility_key passed to the function.
             - 'local_modifications' (dict): A dictionary of modified responsibility texts
-              for each requirement, keyed by the requirement identifier. The value is a dict
-              containing the final `optimized_text`.
+              for each requirement, keyed by the requirement identifier.
+              The value is a dict containing the final `optimized_text`.
 
     Example:
         >>> await modify_resp_based_on_reqs_async(
@@ -93,20 +93,20 @@ async def modify_resp_based_on_reqs_async(
         This step provides more freedom to reshape the sentence while retaining
         authenticity and consistency with the original style of the resume.
 
-        Overall, the temperature strategy balances precision in alignment (low temperature)
-        and structural freedom (high temperature) to ensure a result that is both
-        semantically aligned with the job posting and consistent with the original
-        resume's one and style.
+        Overall, the temperature strategy balances precision in alignment
+        (low temperature) and structural freedom (high temperature) to ensure
+        a result that is both semantically aligned with the job posting and
+        consistent with the original resume's one and style.
     """
 
     # Initialize the client based on llm_provider if needed
-    if llm_provider == "openai":
+    if llm_provider == OPENAI:
         openai_api_key = get_openai_api_key()
         client = AsyncOpenAI(api_key=openai_api_key)
         logger.info("OpenAI API initialized.")
 
-    elif llm_provider == "claude":
-        claude_api_key = get_claude_api_key()
+    elif llm_provider == ANTHROPIC:
+        claude_api_key = get_anthropic_api_key()
         client = AsyncAnthropic(api_key=claude_api_key)
         logger.info("Claude API initialized.")
 
@@ -167,10 +167,13 @@ async def modify_resp_based_on_reqs_async(
 
 
 async def modify_multi_resps_based_on_reqs_async(
-    responsibilities, requirements, llm_provider, model_id
-):
+    responsibilities: Dict[str, str],
+    requirements: Dict[str, str],
+    llm_provider: str,
+    model_id: str,
+) -> ResponsibilityMatches:
     """
-    This is the Async version of the modify_multi_resps_based_on_reqs function.
+    * Async version of the modify_multi_resps_based_on_reqs function.
 
     Modify multiple responsibilities by aligning them with multiple job requirements.
 
@@ -190,17 +193,17 @@ async def modify_multi_resps_based_on_reqs_async(
     Args:
         - responsibilities (dict): A dictionary of responsibility texts, where keys are
         unique identifiers and values are the responsibility texts.
-        - requirements (dict): A dictionary of job requirement texts, where keys are unique
-        requirement identifiers and values are the requirement texts.
-        - TextEditor (callable): The class responsible for performing the text modifications.
-        - model (str, optional): The name of the model to be used (e.g., "openai").
-        Defaults to "openai".
-        - model_id (str, optional): The specific model version to be used (e.g., "gpt-3.5-turbo").
+        - requirements (dict): A dictionary of job requirement texts, where keys
+        are unique requirement identifiers and values are the requirement texts.
+        - llm_provider (str, optional): The name of the model to be used (e.g., "openai").
+        - model_id (str, optional): The specific model version to be used
+        (e.g., "gpt-3.5-turbo").
         Defaults to "gpt-3.5-turbo".
         -n_jobs (int, optional): The number of parallel jobs to run. Defaults to -1,
             which means using all available processors.
 
     Returns:
+        * ResponsibilityMatches:
         Pydantic object of a dictionary where keys are responsibility identifiers
         and values are dictionaries of modified responsibility texts, each aligned
         with multiple job requirements.
@@ -220,7 +223,7 @@ async def modify_multi_resps_based_on_reqs_async(
     # can run simultaneously
     semaphore = asyncio.Semaphore(7)  # Adjust limit as needed
 
-    async def modify_resp_with_limit(resp_key, resp):
+    async def modify_resp_with_limit(resp_key: str, resp: str):
         async with semaphore:
             return await modify_resp_based_on_reqs_async(
                 resp_key, resp, requirements, llm_provider, model_id

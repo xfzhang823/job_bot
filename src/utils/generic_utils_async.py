@@ -1,13 +1,13 @@
 """Async tool functions"""
 
 import os
+import logging
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 import json
 import io
 import pandas as pd
-import aiofiles
-import logging
-from typing import Any, Dict, List, Optional, Union
+import asyncio
 import aiofiles
 from pydantic import BaseModel
 
@@ -531,49 +531,76 @@ async def save_df_to_csv_file_async(
     df: pd.DataFrame, filepath: Union[Path, str]
 ) -> None:
     """
-    Asynchronously write CSV file.
+    Asynchronously save a DataFrame as a CSV file.
 
     Args:
         - df (pd.DataFrame): The DataFrame to be saved.
-        - filepath (Path or str): The full path to the file where the data
-        will be saved.
+        - filepath (Path or str): The full path where the CSV file will be stored.
+
+    * Note on Async CSV Writing:
+    `aiofiles.open()` **does not support** `pandas.DataFrame.to_csv()` directly because
+    `to_csv()` writes to file handles synchronously, while `aiofiles` requires asynchronous
+    string-based writing.
+
+    Two Solutions:
+    1. **For full async writing** (small/medium files, cloud storage):
+    - Convert the DataFrame to a string using `StringIO`, then write asynchronously with
+    `aiofiles.open()`.
+    - This avoids blocking but may not be ideal for large files.
+
+    2. **For high-performance writing** (large files):
+    - Use `asyncio.to_thread(df.to_csv, str(filepath))` to offload the CSV writing to
+    a separate thread.
+    - This leverages multithreading for better efficiency without blocking async execution.
     """
-    filepath = Path(filepath)
+
+    filepath = Path(filepath)  # Convert to Path obj if it's str
+
+    # Ensure parent directory exists
     if not filepath.parent.exists():
-        logging.error(f"Directory '{filepath.parent}' does not exist.")
+        logger.error(f"Directory '{filepath.parent}' does not exist.")
         raise FileNotFoundError(f"Directory '{filepath.parent}' does not exist.")
 
+    df.reset_index(drop=True, inplace=True)  # Reset and drop original index
+
     try:
-        async with aiofiles.open(filepath, mode="w") as f:
-            await f.write(df.to_csv(index=False))
+        # Convert to string first and then save
+        csv_data = df.to_csv(index=False, encoding="utf-8")
+
+        # Write CSV asynchronously
+        async with aiofiles.open(filepath, mode="w", encoding="utf-8") as f:
+            await f.write(csv_data)
+
         logger.info(f"Successfully saved DataFrame to {filepath}")
+
     except OSError as e:
-        logging.error(f"OS error writing to file {filepath}: {e}")
+        logger.error(f"OS error writing to file {filepath}: {e}")
     except Exception as e:
-        logging.error(f"Unexpected error saving DataFrame to {filepath}: {e}")
+        logger.error(f"Unexpected error saving DataFrame to {filepath}: {e}")
         raise
 
 
 async def save_data_to_json_file_async(
-    data: Union[Dict, List, BaseModel], file_path: Union[str, Path]
+    data: Union[Dict, List, BaseModel, pd.DataFrame], file_path: Union[str, Path]
 ) -> None:
     """
-    Asynchronously saves a Python dictionary, list, or Pydantic model to a JSON file.
+    Asynchronously saves a Python dictionary, list, Pydantic model, or DataFrame
+    to a JSON file.
 
     Args:
-        - data (Union[Dict, List, BaseModel]): The data to be saved in JSON format.
-        Can be a dict, list, or Pydantic model (serializable data generally).
+        - data (Union[Dict, List, BaseModel, pd.DataFrame]): The data to be saved in
+        JSON format. Can be a dict, list, Pydantic model, or DataFrame.
         - file_path (str or Path): The full path to the file where the data will be saved.
 
     Raises:
-        - ValueError: If the data is not a dictionary, list, or Pydantic model.
+        - ValueError: If the data is not serializable.
         - FileNotFoundError: If the provided file path's directory does not exist.
         - IOError: For any I/O-related errors during file saving.
 
     Returns:
         None
     """
-    # Change file_path to Path if it's str.
+    # Convert file_path to Path if it's a string
     file_path = Path(file_path)
 
     try:
@@ -584,35 +611,37 @@ async def save_data_to_json_file_async(
                 f"Directory does not exist for the file path: {file_path}"
             )
 
-        # Convert Pydantic models to dict
+        # Convert Pydantic models to dictionary
         if isinstance(data, BaseModel):
             data = data.model_dump()
             logger.debug("Converted Pydantic model to dictionary.")
 
+        # Convert DataFrame to list of dictionaries
+        if isinstance(data, pd.DataFrame):
+            data = data.to_dict(orient="records")
+            logger.debug("Converted DataFrame to list of dictionaries.")
+
         # Validate data type
         if not isinstance(data, (dict, list)):
             raise ValueError(
-                f"Invalid data type. Expected dict, list, or Pydantic model, got {type(data).__name__}"
+                f"Invalid data type. Expected dict, list, Pydantic model, or DataFrame, got {type(data).__name__}"
             )
-
-        # Convert all dict keys and Path objects to strings
-        serializable_data = convert_keys_and_paths_to_str(data)
-        logger.debug("Converted all dictionary keys and Path objects to strings.")
 
         # Asynchronously write data to the JSON file
         async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
-            await f.write(json.dumps(serializable_data, indent=4, ensure_ascii=False))
-        logger.info(f"Data successfully saved to {file_path}.")
+            await f.write(json.dumps(data, indent=4, ensure_ascii=False))
+
+        logger.info(f"✅ Data successfully saved to {file_path}.")
 
     except FileNotFoundError as e:
-        logger.error(f"File path not found: {file_path} - Error: {e}")
+        logger.error(f"❌ File path not found: {file_path} - Error: {e}")
         raise
     except ValueError as e:
-        logger.error(f"ValueError: {e}")
+        logger.error(f"❌ ValueError: {e}")
         raise
     except TypeError as e:
-        logger.error(f"TypeError: {e}")
+        logger.error(f"❌ TypeError: {e}")
         raise
     except Exception as e:
-        logger.error(f"Failed to save JSON to {file_path}: {e}")
+        logger.error(f"❌ Failed to save JSON to {file_path}: {e}")
         raise

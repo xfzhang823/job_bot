@@ -3,12 +3,10 @@ from pathlib import Path
 import logging
 from typing import Union
 import asyncio
-from tqdm import tqdm
-
 
 # from joblib import Parallel, delayed
+
 from models.resume_job_description_io_models import (
-    OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
     Responsibilities,
@@ -31,6 +29,7 @@ from utils.generic_utils import (
     verify_file,
 )
 from utils.generic_utils_async import save_data_to_json_file_async
+from project_config import OPENAI, GPT_35_TURBO, GPT_4_TURBO
 
 
 # Set up logging
@@ -86,15 +85,20 @@ def set_directory_paths(
     warnings for any URLs that are missing in the current mapping file.
 
     Args:
-        mapping_file_prev (Union[str, Path]): Path to the mapping file for the previous iteration.
-        mapping_file_curr (Union[str, Path]): Path to the mapping file for the current iteration.
+        - mapping_file_prev (Union[str, Path]): Path to the mapping file for
+        the previous iteration.
+        - mapping_file_curr (Union[str, Path]): Path to the mapping file for
+        the current iteration.
 
     Returns:
-        dict: A dictionary where each key is a URL from the mapping, and the value is another
-        dictionary containing:
-            - 'requirements_input': Path to the requirements file from the previous iteration.
-            - 'responsibilities_input': Path to the pruned responsibilities file from the previous iteration.
-            - 'responsibilities_output': Path to the responsibilities file for the current iteration.
+        dict: A dictionary where each key is a URL from the mapping, and the value
+        is another dictionary containing:
+            - 'requirements_input': Path to the requirements file from the
+            previous iteration.
+            - 'responsibilities_input': Path to the pruned responsibilities file
+            from the previous iteration.
+            - 'responsibilities_output': Path to the responsibilities file for
+            the current iteration.
 
         If any file is missing or an error occurs, the function logs the issue and skips
         processing for that URL.
@@ -208,23 +212,28 @@ def verify_directory_paths(mapping_file_prev, mapping_file_curr) -> bool:
     return all_valid
 
 
-async def run_pipeline_async(
+async def run_resume_editing_pipeline_async(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
-    llm_provider: str = "openai",
-    model_id: str = "gpt-3.5-turbo",
+    llm_provider: str = OPENAI,
+    model_id: str = GPT_4_TURBO,
     # n_jobs: int = -1, # Run non-parellel for now
 ):
     """
-    Run the pipeline to modify responsibilities based on the previous and current mapping files.
-    The piple uses joblib to process jobs in parallel.
+    Run the pipeline to modify responsibilities based on the previous and current
+    mapping files. The piple uses joblib to process jobs in parallel.
 
     Args:
-        mapping_file_prev (Union[str, Path]): Path to the mapping file for the previous iteration.
-        mapping_file_curr (Union[str, Path]): Path to the mapping file for the current iteration.
-        model (str, optional): Model name to be used for modifications. Defaults to 'openai'.
-        model_id (str, optional): Specific model version to be used. Defaults to 'gpt-3.5-turbo'.
-        n_jobs (int, optional): Number of parallel jobs. Defaults to -1 (use all available).
+        - mapping_file_prev (Union[str, Path]): Path to the mapping file for
+        the previous iteration.
+        - mapping_file_curr (Union[str, Path]): Path to the mapping file for
+        the current iteration.
+        - model (str, optional): Model name to be used for modifications.
+        Defaults to 'openai'.
+        - model_id (str, optional): Specific model version to be used.
+        Defaults to 'gpt-3.5-turbo'.
+        - n_jobs (int, optional): Number of parallel jobs.
+        Defaults to -1 (use all available).
 
     Returns:
         None
@@ -268,34 +277,30 @@ async def run_pipeline_async(
             if not reqs_file.exists() or not resps_file.exists():
                 raise FileNotFoundError(f"Files ({reqs_file} not found for {url}")
 
+            # Load data from JSON files (as dicts)
             responsibilities = read_from_json_file(resps_file)
             requirements = read_from_json_file(reqs_file)
 
             if not responsibilities or not requirements:
                 raise ValueError(f"Files are empty for {url}")
 
-            # Use Pydantic for validation
-            validated_responsibilities = Responsibilities(
-                responsibilities=responsibilities
-            )
-            validated_requirements = Requirements(requirements=requirements)
+            # Convert to validated pyd. model
+            validated_responsibilities = Responsibilities(**responsibilities)
+            validated_requirements = Requirements(**requirements)
 
         except (FileNotFoundError, ValueError) as error:
             logger.error(error)
             continue
 
         # Step 3: Modify responsibilities based on requirements
-        with tqdm(
-            total=len(responsibilities), desc=f"Modifying responsibilities for {url}"
-        ) as pbar:
-            modified_resps = await modify_multi_resps_based_on_reqs_async(
-                responsibilities=validated_responsibilities.responsibilities,
-                requirements=validated_requirements.requirements,
-                llm_provider=llm_provider,
-                model_id=model_id,
-                # n_jobs=n_jobs,
-            )  # the function returns a pyd object
-            pbar.update(1)
+        logger.info(f"Modifying responsibilities for {url}...")
+
+        modified_resps = await modify_multi_resps_based_on_reqs_async(
+            responsibilities=validated_responsibilities.responsibilities,
+            requirements=validated_requirements.requirements,
+            llm_provider=llm_provider,
+            model_id=model_id,
+        )  # The function returns a Pydantic object
 
         # Step 4: Save the modified responsibilities
         output_file = paths["responsibilities_output"]

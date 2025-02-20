@@ -111,7 +111,7 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
 
     logger.info(
         f"Executing Pipeline ID '{pipeline_id}' - {description} with provider \
-            '{llm_provider}' and model ID '{model_id}'"
+'{llm_provider}' and model ID '{model_id}'"
     )
 
     # Run the appropriate pipeline function based on async/sync type
@@ -146,20 +146,26 @@ def main_anthropic():
     # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
     execute_pipeline("2d_async", llm_provider=ANTHROPIC)
 
-    # ✅ Step 6: Copy & Prune Responsibilities
+    # ✅ Step 6: Clean Up Sim Metrics CSV Files (Removing Empty Rows)
     execute_pipeline("2e", llm_provider=ANTHROPIC)
 
-    # ✅ Step 7: Iteration 1 - Modify Responsibilities Based on Requirements
+    # ✅ Step 7: Copy & Prune Responsibilities
+    execute_pipeline("2f", llm_provider=ANTHROPIC)
+
+    # ✅ Step 8: Creating/updating mapping file for iteration 1
     execute_pipeline("3a", llm_provider=ANTHROPIC)
+
+    # ✅ Step 9: Modify Responsibilities Based on Requirements from Iter 0
+    # & Save to Iter 1
     execute_pipeline("3b_async", llm_provider=ANTHROPIC, model_id=model_id)
 
-    # ✅ Step 8: Copy Requirements from Iteration 0 to Iteration 1
+    # ✅ Step 10: Copy Requirements from Iteration 0 to Iteration 1
     execute_pipeline("3c", llm_provider=ANTHROPIC)
 
-    # ✅ Step 9: Async Resume Evaluation in Iteration 1
+    # ✅ Step 11: Async Resume Evaluation in Iteration 1
     execute_pipeline("3d_async", llm_provider=ANTHROPIC, model_id=model_id)
 
-    # ✅ Step 10: Add Multivariate Indices to Metrics Files in Iteration 1
+    # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
     execute_pipeline("3e", llm_provider=ANTHROPIC, model_id=model_id)
 
 
@@ -169,36 +175,39 @@ def main_openai():
     # Define default OpenAI model
     model_id = GPT_4_TURBO
 
-    # ☑️ Step 1: Preprocessing job posting webpages
+    # ✅ Step 1: Preprocessing job posting webpages
     execute_pipeline("1_async", llm_provider=OPENAI, model_id=model_id)
 
-    # ☑️ Step 2: Creating/updating mapping file for iteration 0
+    # ✅ Step 2: Creating/updating mapping file for iteration 0
     execute_pipeline("2a", llm_provider=OPENAI)
 
-    # ☑️ Step 3: Extracting & Flattening Job Requirements and Responsibilities
+    # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
     execute_pipeline("2b", llm_provider=OPENAI)
 
-    # ☑️ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
+    # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
     execute_pipeline("2c_async", llm_provider=OPENAI)
 
-    # ☑️ Step 5: Add Composite Scores & PCA Scores to Metrics
+    # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
     execute_pipeline("2d_async", llm_provider=OPENAI)
 
-    # ☑️ Step 6: Copy & Prune Responsibilities
+    # ✅ Step 6: Clean Up Sim Metrics CSV Files (Removing Empty Rows)
     execute_pipeline("2e", llm_provider=OPENAI)
 
-    # ☑️ Step 7: Iteration 1 - Modifying Responsibilities Based on Requirements
-    execute_pipeline("3a_async", llm_provider=OPENAI, model_id=model_id)
+    # ✅ Step 7: Copy & Prune Responsibilities
+    execute_pipeline("2f", llm_provider=OPENAI)
+
+    # ✅ Step 8: Iteration 1 - Modify Responsibilities Based on Requirements
+    execute_pipeline("3a", llm_provider=OPENAI)
     execute_pipeline("3b_async", llm_provider=OPENAI, model_id=model_id)
 
-    # ☑️ Step 8: Copy Requirements from Iteration 0 to Iteration 1
+    # ✅ Step 9: Copy Requirements from Iteration 0 to Iteration 1
     execute_pipeline("3c", llm_provider=OPENAI)
 
-    # ☑️ Step 9: Async Resume Evaluation in Iteration 1
-    execute_pipeline("3d_async", llm_provider=OPENAI)
+    # ✅ Step 10: Async Resume Evaluation in Iteration 1
+    execute_pipeline("3d_async", llm_provider=OPENAI, model_id=model_id)
 
-    # ☑️ Step 10: Add Multivariate Indices to Metrics Files in Iteration 1
-    execute_pipeline("3e", llm_provider=OPENAI)
+    # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
+    execute_pipeline("3e", llm_provider=OPENAI, model_id=model_id)
 
 
 if __name__ == "__main__":

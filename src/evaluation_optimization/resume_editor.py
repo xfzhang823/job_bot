@@ -12,7 +12,6 @@ import openai
 import jsonschema
 import pandas as pd
 from typing import Dict, Optional, Union
-import logging_config
 from pydantic import ValidationError, BaseModel
 from openai import OpenAI
 from anthropic import Anthropic
@@ -25,8 +24,8 @@ from prompts.prompt_templates import (
 )
 from llm_providers.llm_api_utils import (
     get_openai_api_key,
-    get_claude_api_key,
-    call_claude_api,
+    get_anthropic_api_key,
+    call_anthropic_api,
     call_openai_api,
     call_llama3,
 )
@@ -39,7 +38,12 @@ from models.llm_response_models import (
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    NestedRequirements,
+    RequirementsResponse,
 )
+
+import logging_config
+
 
 # logging
 logger = logging.getLogger(__name__)
@@ -109,16 +113,16 @@ class TextEditor:
         logger.debug(f"Client initialized: {self.client}")  # debugging
 
         # Conditionally initialize the client based on model
-        if self.llm_provider == "claude" and not self.client:
-            claude_api_key = get_claude_api_key()
+        if self.llm_provider.lower() == "anthropic" and not self.client:
+            claude_api_key = get_anthropic_api_key()
             self.client = Anthropic(api_key=claude_api_key)
-        if self.llm_provider == "openai" and not self.client:
+        if self.llm_provider.lower() == "openai" and not self.client:
             # Initialize OpenAI API client if it's not provided
             openai_api_key = get_openai_api_key()  # Fetch the API key
             self.client = OpenAI(
                 api_key=openai_api_key
             )  # Instantiate OpenAI API client
-        elif self.llm_provider == "llama3":
+        elif self.llm_provider.lower() == "llama3":
             # If using LLaMA3, no OpenAI client initialization is needed
             # You may initialize LLaMA3-specific settings here if needed
             logger.info("Using LLaMA3 model for text editing.")
@@ -149,6 +153,8 @@ class TextEditor:
         CodeResponse,
         EditingResponse,
         JobSiteResponse,
+        NestedRequirements,
+        RequirementsResponse,
     ]:
         """
         Call the specified LLM API (OpenAI, Claude, LLaMA3) with the provided prompt
@@ -207,10 +213,10 @@ class TextEditor:
             )  # TODO debugging; delete later
             logger.info(f"returned model: {response_model}")
 
-        if llm_provider == "claude":
-            logger.debug("Using Claude client.")  # debugging
+        if llm_provider.lower() == "anthropic":
+            logger.debug("Using Anthropic client.")  # debugging
 
-            response_model = call_claude_api(
+            response_model = call_anthropic_api(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
