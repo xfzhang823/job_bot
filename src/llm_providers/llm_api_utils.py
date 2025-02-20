@@ -40,6 +40,8 @@ from llm_providers.llm_response_validators import (
     validate_response_type,
 )
 from project_config import (
+    OPENAI,
+    ANTHROPIC,
     GPT_35_TURBO,
     GPT_4,
     GPT_4_TURBO,
@@ -63,13 +65,13 @@ def get_openai_api_key() -> str:
     return api_key
 
 
-def get_claude_api_key() -> str:
-    """Retrieves the Claude API key from environment variables."""
+def get_anthropic_api_key() -> str:
+    """Retrieves the Anthropic API key from environment variables."""
     load_dotenv()
-    api_key = os.getenv("CLAUDE_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        logger.error("Claude API key not found. Please set it in the .env file.")
-        raise EnvironmentError("Claude API key not found.")
+        logger.error("Anthropic API key not found. Please set it in the .env file.")
+        raise EnvironmentError("Anthropic API key not found.")
     return api_key
 
 
@@ -92,30 +94,25 @@ def call_api(
     EditingResponse,
     JobSiteResponse,
     NestedRequirements,
+    RequirementsResponse,
 ]:
     """
-    Unified function to handle API calls for OpenAI, Claude, and Llama. This method handles
-    provider-specific nuances (e.g., multi-block responses for Claude) and validates responses
+    Unified function to handle API calls for OpenAI, Anthroic, and Llama. This method handles
+    provider-specific nuances (e.g., multi-block responses for Anthropic) and validates responses
     against expected types and Pydantic models.
 
     Args:
-        client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]):
-            The API client instance for the respective provider.
-            If None, a new client is instantiated.
-        model_id (str):
-            The model ID to use for the API call (e.g., "gpt-4-turbo" for OpenAI).
-        prompt (str):
-            The input prompt for the LLM.
-        expected_res_type (str):
-            The expected type of response (e.g., "json", "tabular", "str", "code").
-        json_type (str):
-            Specifies the type of JSON model for validation (e.g., "job_site", "editing").
-        temperature (float):
-            Sampling temperature for the LLM.
-        max_tokens (int):
-            Maximum number of tokens for the response.
-        llm_provider (str):
-            The name of the LLM provider ("openai", "claude", or "llama3").
+        - client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]): The API client instance for
+        the respective provider. If None, a new client is instantiated.
+        - model_id (str): The model ID to use for the API call (e.g., "gpt-4-turbo" for OpenAI).
+        - prompt (str): The input prompt for the LLM.
+        - expected_res_type (str): The expected type of response (e.g., "json", "tabular",
+        "str", "code").
+        - json_type (str): Specifies the type of JSON model for validation
+        (e.g., "job_site", "editing").
+        - temperature (float): Sampling temperature for the LLM.
+        - max_tokens (int): Maximum number of tokens for the response.
+        - llm_provider (str): The name of the LLM provider ("openai", "anthropic", or "llama3").
 
     Returns:
         Union[JSONResponse, TabularResponse, CodeResponse, TextResponse, EditingResponseModel,
@@ -128,11 +125,12 @@ def call_api(
         Exception: For other unexpected errors during API interaction.
 
     Notes:
-    - OpenAI returns single-block responses, while Claude may return multi-block responses.
-    - Llama3 API is synchronous and is executed using an async executor. that needs special treatment.
-    #* Therefore, the API calling for each LLM provider need to remain separate:
-    #* Combining them into a single code block will have complications;
-    #* keep them separate here for each provider is a more clean and modular.
+    - OpenAI returns single-block responses, while Anthropic may return multi-block responses.
+    - Llama3 API is synchronous and is executed using an async executor that needs
+    special treatment.
+    * Therefore, the API calling for each LLM provider need to remain separate:
+    * Combining them into a single code block will have complications;
+    * keep them separate here for each provider is a more clean and modular.
 
     Examples:
     >>> await call_api_async(
@@ -152,7 +150,7 @@ def call_api(
         response_content = ""
 
         # Step  1: Make the API call and receive the response
-        if llm_provider == "openai":
+        if llm_provider.lower() == "openai":
             openai_client = cast(OpenAI, client)  # Cast to OpenAI
             response = openai_client.chat.completions.create(
                 model=model_id,
@@ -168,12 +166,12 @@ def call_api(
             )
             response_content = response.choices[0].message.content
 
-        elif llm_provider == "claude":
-            claude_client = cast(Anthropic, client)  # Cast to Anthropic (Claude)
+        elif llm_provider.lower() == "anthropic":
+            anthropic_client = cast(Anthropic, client)  # Cast to Anthropic (Claude)
             system_instruction = (
                 "You are a helpful assistant who adheres to instructions."
             )
-            response = claude_client.messages.create(
+            response = anthropic_client.messages.create(
                 model=model_id,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": system_instruction + prompt}],
@@ -181,7 +179,7 @@ def call_api(
             )
 
             # *Need to add an extra step to extract content from response object's TextBlocks
-            # *(Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
+            # *(Unlike GPT and LlaMA, Anthropic uses multi-blocks in its responses:
             # *The content attribute of Message is a list of TextBlock objects,
             # *whereas others wrap everything into a single block.)
             response_content = (
@@ -255,6 +253,8 @@ def call_openai_api(
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    RequirementsResponse,
+    NestedRequirements,
 ]:
     """
     Calls OpenAI API and parses response.
@@ -281,18 +281,18 @@ def call_openai_api(
 
     # Call call_api function and return
     return call_api(
-        openai_client,
-        model_id,
-        prompt,
-        expected_res_type,
-        json_type,
-        temperature,
-        max_tokens,
-        "openai",
+        client=openai_client,
+        model_id=model_id,
+        prompt=prompt,
+        expected_res_type=expected_res_type,
+        json_type=json_type,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        llm_provider=OPENAI,
     )
 
 
-def call_claude_api(
+def call_anthropic_api(
     prompt: str,
     model_id: str = CLAUDE_SONNET,
     expected_res_type: str = "str",
@@ -307,19 +307,21 @@ def call_claude_api(
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    NestedRequirements,
+    RequirementsResponse,
 ]:
     """
-    Calls the Claude API to generate responses based on a given prompt and expected response type.
+    Calls the Anthropic API to generate responses based on a given prompt and expected response type.
 
     Args:
         prompt (str): The prompt to send to the API.
-        - model_id (str): Model ID to use for the Claude API call.
+        - model_id (str): Model ID to use for the Anthropic/Claude API call.
         - expected_res_type (str): The expected type of response from the API
         ('str', 'json', 'tabular', or 'code').
         - context_type (str): Context type for JSON responses ("editing" or "job_site").
         - temperature (float): Controls the creativity of the response.
         - max_tokens (int): Maximum number of tokens for the response.
-        - client (Optional[Anthropic]): A Claude client instance.
+        - client (Optional[Anthropic]): An Anthropic client instance.
         If None, a new client is instantiated.
 
     Returns:
@@ -327,17 +329,17 @@ def call_claude_api(
         The structured response from the API.
     """
     # Use provided client or initialize a new one if not given
-    claude_client = client if client else Anthropic(api_key=get_claude_api_key())
-    logger.info("Claude client ready for API call.")
+    anthropic_client = client if client else Anthropic(api_key=get_anthropic_api_key())
+    logger.info("Anthropic client ready for API call.")
     return call_api(
-        claude_client,
-        model_id,
-        prompt,
-        expected_res_type,
-        json_type,
-        temperature,
-        max_tokens,
-        "claude",
+        client=anthropic_client,
+        model_id=model_id,
+        prompt=prompt,
+        expected_res_type=expected_res_type,
+        json_type=json_type,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        llm_provider=ANTHROPIC,
     )
 
 
@@ -355,6 +357,8 @@ def call_llama3(
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    NestedRequirements,
+    RequirementsResponse,
 ]:
     """Calls the Llama 3 API and parses response."""
     return call_api(

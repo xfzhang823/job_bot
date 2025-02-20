@@ -169,7 +169,7 @@ def verify_directory_paths(mapping_file_prev, mapping_file_curr) -> bool:
     return all_valid
 
 
-def run_pipeline(
+def run_resume_editing_pipeline(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
     llm_provider: str = "openai",

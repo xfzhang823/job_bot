@@ -6,15 +6,13 @@ and requirements.
 """
 
 # Import dependencies
-import os
 from pathlib import Path
-import pandas as pd
 import json
 import logging
 import asyncio
 import aiofiles
 from typing import Any, Callable, Coroutine, Optional, Union
-
+import numpy as np
 import pandas as pd
 from pydantic import HttpUrl, ValidationError, TypeAdapter
 
@@ -38,6 +36,9 @@ from evaluation_optimization.metrics_calculator import (
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
 from evaluation_optimization.text_similarity_finder import TextSimilarity
+from evaluation_optimization.evaluation_optimization_utils import (
+    add_multivariate_indices,
+)
 from utils.generic_utils import (
     read_from_json_file,
     save_to_json_file,
@@ -57,44 +58,6 @@ from evaluation_optimization.evaluation_optimization_utils import (
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
-
-def add_multivariate_indices(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add multivariate indices to the DataFrame using the MultivariateIndexer.
-
-    Parameters:
-    - df: The input DataFrame.
-
-    Returns:
-    - DataFrame with multivariate indices added, or raises an appropriate error.
-    """
-    try:
-        # Check if df is a valid DataFrame
-        if not isinstance(df, pd.DataFrame):
-            raise ValueError("Input is not a valid DataFrame.")
-
-        # Check if df is empty
-        if df.empty:
-            raise ValueError("Input DataFrame is empty.")
-
-        # Initialize the MultivariateIndexer and add indices
-        indexer = MultivariateIndexer(df)
-        df = indexer.add_multivariate_indices_to_df()
-
-        logger.info("Multivariate indices added.")
-        return df
-
-    except ValueError as ve:
-        # Log or print as desired, then re-raise to adhere to the return contract
-        logger.error(f"ValueError: {ve}")
-        raise
-    except AttributeError as ae:
-        logger.error(f"AttributeError: {ae}")
-        raise
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
-        raise
 
 
 async def generate_metrics_from_flat_json_async(
@@ -231,11 +194,29 @@ async def generate_metrics_from_flat_json_async(
                 similarity_df,
             )
 
-            # Step 7: Add the job posting URL as the first column
-            df.insert(0, "job_posting_url", url)
+            # Step 7: Ensure URL column is first and converted to string
+            df["job_posting_url"] = str(url)  # Assign first
+            df = df[
+                ["job_posting_url"]
+                + [col for col in df.columns if col != "job_posting_url"]
+            ]
 
-            # Step 8: Save the metrics CSV asynchronously
+            # Step 8: Validate before saving
+            if df.empty:
+                logger.warning(
+                    f"Skipping CSV save: DataFrame is empty for {sim_metrics_file}"
+                )
+                return
+
+            # Count Empty Rows
+            empty_rows = df[df.isnull().all(axis=1)]
+            logger.debug(f"Empty Rows Before Saving: {len(empty_rows)}")
+
+            # Step 9: Save the metrics CSV asynchronously
             await save_df_to_csv_file_async(df, sim_metrics_file)
+
+            # # Simple save
+            # df.to_csv(sim_metrics_file, index=False, encoding="utf-8")
 
             logger.info(f"Metrics saved to {sim_metrics_file} with URL column added.")
 
@@ -243,7 +224,6 @@ async def generate_metrics_from_flat_json_async(
             logger.error(f"Error during similarity computation or saving CSV: {e}")
 
 
-# todo: need to fix and add url
 async def generate_metrics_from_nested_json_async(
     reqs_file: Union[Path, str],
     resps_file: Union[Path, str],
@@ -410,12 +390,15 @@ async def run_metrics_processing_pipeline_async(
     logger.info("Starting async metrics processing pipeline...")
 
     mapping_file = Path(mapping_file)  # Ensure file path is a Path object.
+    if not mapping_file.exists():
+        raise ValueError(f"The file '{mapping_file}' does not exist.")
+
+    logger.info(f"Loading mapping file: {mapping_file}")
 
     # Step 1: Read the mapping file (synchronously)
     file_mapping_model = load_mappings_model_from_json(
         mapping_file
     )  # Returns pyd model
-
     if file_mapping_model is None:
         logger.error("Failed to load mapping file. Exiting pipeline.")
         return
@@ -515,6 +498,8 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
     if not mapping_file.exists():
         raise ValueError(f"The file '{mapping_file}' does not exist.")
 
+    logger.info(f"Loading mapping file: {mapping_file}")
+
     # Step 1: Load the mapping file into a Pydantic model
     # Don't really need to use async for loading json file
     file_mapping_model = load_mappings_model_from_json(mapping_file)
@@ -550,7 +535,24 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
     # Step 3: For each file that needs indices, read & update it asynchronously
     for file_path in files_need_to_process:
         try:
+            logger.info(f"Processing file: {file_path}")
+
             df = await read_from_csv_async(file_path)
+
+            # todo: debugging, delete later
+            logger.debug(
+                f"DataFrame from {file_path}: shape={df.shape}, columns={df.columns.tolist()}"
+            )
+
+            # Check for empty rows
+            empty_rows = df[df.isnull().all(axis=1)]
+            empty_row_count = len(empty_rows)
+
+            if empty_row_count > 0:
+                logger.warning(
+                    f"File '{file_path}' contains {empty_row_count} completely empty row(s)."
+                )
+            # todo: delete later
 
             # Verify required columns
             required_columns = {
@@ -589,13 +591,47 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 
             validated_df = pd.DataFrame(validated_rows)
 
+            # todo: debugging, check for url col and empty rows
+            logger.debug(
+                f"DataFrame from {file_path}: shape={df.shape}, columns={df.columns.tolist()}"
+            )
+            # Check for empty rows
+            empty_rows = df[df.isnull().all(axis=1)]
+            empty_row_count = len(empty_rows)
+
+            if empty_row_count > 0:
+                logger.warning(
+                    f"File '{file_path}' contains {empty_row_count} completely empty row(s)."
+                )
+
+            logger.debug(
+                f"Original row count: {df.shape[0]}, Validated row count: {len(validated_rows)}"
+            )
+            # todo: delete later
+
             # Apply the function to add multivariate indices
+            logger.debug(
+                f"Before adding indices: {validated_df.shape}"
+            )  # todo: debugging; delete later
             updated_df = add_indices_func(validated_df)
             if updated_df is None:
                 logger.error(
                     f"'{add_indices_func.__name__}' returned None for file '{file_path}'. Skipping."
                 )
                 continue
+            logger.debug(
+                f"After adding indices: {updated_df.shape}"
+            )  # todo: debugging; delete later
+
+            # Remove fully empty rows (where all columns are NaN) and replace empty strings with NaN
+            updated_df = updated_df.replace(r"^\s*$", np.nan, regex=True).dropna(
+                how="all"
+            )
+
+            # Log before saving
+            logger.debug(
+                f"Final DataFrame shape before saving: {updated_df.shape}"
+            )  # TODO: Remove later
 
             # Save the updated DataFrame asynchronously
             await save_df_to_csv_file_async(updated_df, file_path)

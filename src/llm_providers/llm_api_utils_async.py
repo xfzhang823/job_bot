@@ -1,18 +1,18 @@
 """Async version of llm_api_utils_async.py
 
 This module provides asynchronous utility functions for interacting with various LLM APIs, 
-including OpenAI, Claude (Anthropic), and Llama3. It handles API calls, validates responses, 
+including OpenAI, Anthropic, and Llama3. It handles API calls, validates responses, 
 and manages provider-specific nuances such as single-block versus multi-block responses.
 
 Key Features:
-- Asynchronous support for OpenAI and Claude APIs.
+- Asynchronous support for OpenAI and Anthropic APIs.
 - Compatibility with synchronous Llama3 API via an async executor.
 - Validation and structuring of responses into Pydantic models.
 - Modular design to accommodate provider-specific response handling.
 
 Modules and Methods:
 - `call_openai_api_async`: Asynchronously interacts with the OpenAI API.
-- `call_claude_api_async`: Asynchronously interacts with the Claude API.
+- `call_anthropic_api_async`: Asynchronously interacts with the Anthropic API.
 - `call_llama3_async`: Asynchronously interacts with the Llama3 API using a synchronous executor.
 - `call_api_async`: Unified async function for handling API calls with validation.
 - `run_in_executor_async`: Executes synchronous functions in an async context.
@@ -47,7 +47,7 @@ from models.llm_response_models import (
     RequirementsResponse,
 )
 from llm_providers.llm_api_utils import (
-    get_claude_api_key,
+    get_anthropic_api_key,
     get_openai_api_key,
 )
 from llm_providers.llm_response_validators import (
@@ -55,6 +55,8 @@ from llm_providers.llm_response_validators import (
     validate_response_type,
 )
 from project_config import (
+    OPENAI,
+    ANTHROPIC,
     GPT_35_TURBO,
     GPT_4,
     GPT_4_TURBO,
@@ -103,9 +105,9 @@ async def call_api_async(
     RequirementsResponse,
 ]:
     """
-    Asynchronous function for handling API calls to OpenAI, Claude, and Llama.
+    Asynchronous function for handling API calls to OpenAI, Anthropic, and Llama.
 
-    This method handles provider-specific nuances (e.g., multi-block responses for Claude)
+    This method handles provider-specific nuances (e.g., multi-block responses for Anthropic)
     and validates responses against expected types and Pydantic models.
 
     Args:
@@ -125,7 +127,7 @@ async def call_api_async(
         max_tokens (int):
             Maximum number of tokens for the response.
         llm_provider (str):
-            The name of the LLM provider ("openai", "claude", or "llama3").
+            The name of the LLM provider ("openai", "anthropic", or "llama3").
 
     Returns:
         Union[JSONResponse, TabularResponse, CodeResponse, TextResponse, EditingResponseModel,
@@ -138,7 +140,7 @@ async def call_api_async(
         Exception: For other unexpected errors during API interaction.
 
     Notes:
-    - OpenAI & Llama3 always returns single-block responses, while Claude may
+    - OpenAI & Llama3 always returns single-block responses, while anthropic may
     return multi-block responses, which needs special treatment.
     - Llama3 API is synchronous and is executed using an async executor.
     #* Therefore, the API calling for each LLM provider need to remain separate:
@@ -161,7 +163,7 @@ async def call_api_async(
         logger.info(f"Making API call with expected response type: {expected_res_type}")
         response_content = ""
 
-        if llm_provider == "openai":
+        if llm_provider.lower() == "openai":
             openai_client = cast(AsyncOpenAI, client)
             response = await openai_client.chat.completions.create(
                 model=model_id,
@@ -174,12 +176,12 @@ async def call_api_async(
             )
             response_content = response.choices[0].message.content
 
-        elif llm_provider == "claude":
-            claude_client = cast(AsyncAnthropic, client)
+        elif llm_provider.lower() == "anthropic":
+            anthropic_client = cast(AsyncAnthropic, client)
             system_instruction = (
                 "You are a helpful assistant who adheres to instructions."
             )
-            response = await claude_client.messages.create(
+            response = await anthropic_client.messages.create(
                 model=model_id,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": system_instruction + prompt}],
@@ -187,7 +189,7 @@ async def call_api_async(
             )
 
             # *Add an extra step to extract content from response object's TextBlocks
-            # *(Unlike GPT and LlaMA, Claude uses multi-blocks in its responses:
+            # *(Unlike GPT and LlaMA, Anthropic uses multi-blocks in its responses:
             # *The content attribute of Message is a list of TextBlock objects,
             # *whereas others wrap everything into a single block.)
             response_content = (
@@ -196,7 +198,7 @@ async def call_api_async(
                 else str(response.content[0])
             )
 
-        elif llm_provider == "llama3":
+        elif llm_provider.lower() == "llama3":
             # Llama3 remains synchronous, so run it in an executor
             options = {
                 "temperature": temperature,
@@ -275,11 +277,11 @@ async def call_openai_api_async(
         json_type=json_type,
         temperature=temperature,
         max_tokens=max_tokens,
-        llm_provider="openai",
+        llm_provider=OPENAI,
     )
 
 
-# Async wrapper for Claude
+# Async wrapper for Anthropic
 async def call_anthropic_api_async(
     prompt: str,
     model_id: str = CLAUDE_SONNET,
@@ -297,9 +299,9 @@ async def call_anthropic_api_async(
     JobSiteResponse,
     RequirementsResponse,
 ]:
-    """Asynchronously calls the Claude API to generate responses based on a given prompt."""
-    anthropic_client = client or AsyncAnthropic(api_key=get_claude_api_key())
-    logger.info("Claude client ready for async API call.")
+    """Asynchronously calls the Anthropic API to generate responses based on a given prompt."""
+    anthropic_client = client or AsyncAnthropic(api_key=get_anthropic_api_key())
+    logger.info("Anthropic client ready for async API call.")
     return await call_api_async(
         client=anthropic_client,
         model_id=model_id,
@@ -308,7 +310,7 @@ async def call_anthropic_api_async(
         json_type=json_type,
         temperature=temperature,
         max_tokens=max_tokens,
-        llm_provider="claude",
+        llm_provider=ANTHROPIC,
     )
 
 

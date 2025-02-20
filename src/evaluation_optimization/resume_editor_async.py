@@ -38,6 +38,7 @@ from models.llm_response_models import (
     JSONResponse,
     TabularResponse,
     CodeResponse,
+    RequirementsResponse,
 )
 
 # logging
@@ -139,6 +140,7 @@ class TextEditorAsync:
         CodeResponse,
         EditingResponse,
         JobSiteResponse,
+        RequirementsResponse,
     ]:
         """
         *Async version of the method.
@@ -158,8 +160,8 @@ class TextEditorAsync:
         """
         temperature = temperature if temperature is not None else self.temperature
         # Choose the appropriate LLM API
-        if llm_provider == "openai":
-            response_pyd_obj = await call_openai_api_async(
+        if llm_provider.lower() == "openai":
+            response_model = await call_openai_api_async(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
@@ -168,8 +170,8 @@ class TextEditorAsync:
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, AsyncOpenAI) else None,
             )
-        elif llm_provider == "claude":
-            response_pyd_obj = await call_anthropic_api_async(
+        elif llm_provider.lower() == "anthropic":
+            response_model = await call_anthropic_api_async(
                 prompt=prompt,
                 model_id=self.model_id,
                 expected_res_type="json",
@@ -178,8 +180,8 @@ class TextEditorAsync:
                 max_tokens=self.max_tokens,
                 client=self.client if isinstance(self.client, AsyncAnthropic) else None,
             )
-        elif llm_provider == "llama3":
-            response_pyd_obj = await call_llama3_async(
+        elif llm_provider.lower() == "llama3":
+            response_model = await call_llama3_async(
                 prompt=prompt,
                 expected_res_type="json",
                 json_type="editing",
@@ -189,7 +191,7 @@ class TextEditorAsync:
         else:
             raise ValueError(f"Unsupported LLM provider: {llm_provider}")
 
-        return response_pyd_obj
+        return response_model
 
     async def edit_for_dp_async(
         self,

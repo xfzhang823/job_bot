@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from openai import OpenAI
 
 from evaluation_optimization.resume_editor import TextEditor
-from llm_providers.llm_api_utils import get_claude_api_key, get_openai_api_key
+from llm_providers.llm_api_utils import get_anthropic_api_key, get_openai_api_key
 from project_config import CLAUDE_HAIKU
 
 from project_config import CLAUDE_HAIKU, GPT_4_TURBO
@@ -20,7 +20,7 @@ text_to_compare = "We are looking for a solution to streamline internal operatio
 
 def main_claude():
     # Instantiate the client
-    api_key = get_claude_api_key()
+    api_key = get_anthropic_api_key()
     client = OpenAI(api_key=api_key)
 
     # Initialize TextEditor

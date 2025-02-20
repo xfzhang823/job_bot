@@ -131,7 +131,7 @@ def verify_paths(mapping_file_prev, mapping_file_curr) -> bool:
     return all_valid
 
 
-def run_pipeline(
+def run_copying_reqs_to_next_iter_mini_pipeline(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
 ):
@@ -151,8 +151,9 @@ def run_pipeline(
         None
     """
     # Step 0: Ensure mapping file paths are Path objects
-    mapping_file_prev = Path(mapping_file_prev)
-    mapping_file_curr = Path(mapping_file_curr)
+    mapping_file_prev, mapping_file_curr = Path(mapping_file_prev), Path(
+        mapping_file_curr
+    )
 
     # Step 1: Verify paths before proceeding
     if not verify_paths(mapping_file_prev, mapping_file_curr):

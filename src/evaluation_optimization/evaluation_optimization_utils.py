@@ -24,6 +24,40 @@ import logging_config
 logger = logging.getLogger(__name__)
 
 
+def add_multivariate_indices(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add multivariate indices to the DataFrame using the MultivariateIndexer.
+
+    Ensures that even if errors occur, a valid DataFrame is returned.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame
+
+    Returns:
+        pd.DataFrame: Processed DataFrame with indices or original if failure occurs.
+    """
+    try:
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("Input is not a valid DataFrame.")
+
+        if df.empty:
+            raise ValueError("Input DataFrame is empty.")
+
+        indexer = MultivariateIndexer(df)
+        df = indexer.add_multivariate_indices_to_df()
+
+        logger.info("Multivariate indices added.")
+        return df
+
+    except (ValueError, AttributeError) as e:
+        logger.error(f"Error in multivariate index calculation: {e}")
+        return df  # Return original to prevent crashes
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise  # Raise unknown errors
+
+
 def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict:
     """
     Check if the keys (URLs) in the previous and current mapping files are the same.

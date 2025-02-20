@@ -23,7 +23,6 @@ from enum import Enum
 import logging
 
 # * User defined: import pipeline functions
-
 # Proprocessing
 from pipelines.preprocessing_pipeline import run_preprocessing_pipeline
 from pipelines.preprocessing_pipeline_async import run_preprocessing_pipeline_async
@@ -48,6 +47,16 @@ from pipelines.resume_eval_pipeline_async import (
     run_metrics_processing_pipeline_async,
     generate_metrics_from_flat_json_async,
     run_multivariate_indices_processing_mini_pipeline_async,
+    run_metrics_re_processing_pipeline_async,
+)
+
+from evaluation_optimization.evaluation_optimization_utils import (
+    add_multivariate_indices,
+)
+
+# Clean metric files (couldn't get it cleaned in previous pipelines)
+from pipelines.cleaning_metrics_files_pipeline import (
+    run_cleaning_similarity_metrics_files_pipeline,
 )
 
 # Copy responsibilities over to pruned resps dir (for consistency)
@@ -58,13 +67,19 @@ from pipelines.copying_resps_to_pruned_resps_dir_mini_pipeline import (
 # Exclude some resume items
 from pipelines.excluding_resps_mini_pipeline import run_excluding_resps_mini_pipeline
 
+# Create/upsert mapping file for iteration 1
+from pipelines.upserting_mapping_file_iter1_mini_pipeline import (
+    run_upserting_mapping_file_iter1_mini_pipeline,
+)
 
-from pipelines.resume_eval_pipeline_async import (
-    run_metrics_re_processing_pipeline_async as re_run_resume_comparison_pipeline_async,
+# Edidting responsitibilites by matching requirements: iter 0 -> iter 1
+from pipelines.resume_editing_pipeline import run_resume_editing_pipeline
+from pipelines.resume_editing_pipeline_async import run_resume_editing_pipeline_async
+
+from pipelines.copying_reqs_to_next_iter_mini_pipeline import (
+    run_copying_reqs_to_next_iter_mini_pipeline,
 )
-from pipelines.resume_eval_pipeline_async import (
-    run_multivariate_indices_processing_mini_pipeline_async as run_adding_multivariate_indices_mini_pipeline_async,
-)
+
 
 # File & dir paths
 from project_config import (
@@ -130,6 +145,8 @@ DEFAULT_MODEL_IDS = {
     "openai": GPT_35_TURBO,  # Default OpenAI model
     "anthropic": CLAUDE_HAIKU,  # Default Anthropic (Claude) model
 }
+
+
 # Dictionary of configurations for each pipeline stage
 PIPELINE_CONFIG = {
     "1": {
@@ -266,7 +283,7 @@ on similarity metrics",
             },
         },
         "kwargs": {  # Generic place for additional arguments (like callables)
-            "generate_metrics": generate_metrics_from_flat_json_async
+            "add_indices_func": add_multivariate_indices
         },
     },
     "2d_async": {  # Run async to save time
@@ -275,7 +292,7 @@ on similarity metrics",
 metrics files based on similarity metrics",
         # Async: Add extra indices (composite and PCA scores) to similarity files
         "function": run_multivariate_indices_processing_mini_pipeline_async,
-        "io": {  # todo: need to double check this one - updated io from just dir to mapping_file
+        "io": {
             "openai": {
                 "mapping_file": ITERATE_0_OPENAI_DIR
                 / mapping_file_name,  # Referene file w/t file paths in the dir
@@ -285,8 +302,20 @@ metrics files based on similarity metrics",
                 / mapping_file_name,  # Referene file w/t file paths in the dir
             },
         },
+        "kwargs": {  # Generic place for additional arguments (like callables)
+            "add_indices_func": add_multivariate_indices
+        },
     },
     "2e": {
+        "stage": PipelineStage.EVALUATION,
+        "description": "Cleaning similarity metrics files by removing empty rows (iter 0)",
+        "function": run_cleaning_similarity_metrics_files_pipeline,
+        "io": {
+            "openai": {"mapping_file": ITERATE_0_OPENAI_DIR / mapping_file_name},
+            "anthropic": {"mapping_file": ITERATE_0_ANTHROPIC_DIR / mapping_file_name},
+        },
+    },
+    "2f": {
         "stage": PipelineStage.EVALUATION,
         "description": "Copy and exclude responsibilities to pruned_responsibilities folder",
         "function": [
@@ -303,7 +332,7 @@ metrics files based on similarity metrics",
         "description": "Create/upsert mapping file for iteration 1",
         # Check if new urls (jobpostings) need to be added, create or update the reference file
         # w/t file paths in iteration 1
-        "function": "run_upserting_mapping_file_pipeline_iter1",
+        "function": run_upserting_mapping_file_iter1_mini_pipeline,
         # function to check, create, or update the reference file of the dir
         "io": {
             "openai": {
@@ -326,7 +355,7 @@ metrics files based on similarity metrics",
         "stage": PipelineStage.EDITING,
         "description": "Modify responsibilities based on requirements using LLM",
         # Text alignment with 3-step LLM prompts: responsibilities -> job requirements
-        "function": "run_resume_editing_pipeline",
+        "function": run_resume_editing_pipeline,
         # functio to run text alignmetn pipeline
         "llm_provider": "openai",
         "io": {
@@ -348,7 +377,7 @@ metrics files based on similarity metrics",
         "stage": PipelineStage.EDITING,
         "description": "Async modification of responsibilities based on requirements",
         # Async: Text alignment with 3-step LLM prompts: responsibilities -> job requirements
-        "function": "run_resume_editing_pipeline_async",
+        "function": run_resume_editing_pipeline_async,
         # functio to async run text alignment pipeline_async
         "llm_provider": "openai",
         "io": {
@@ -370,7 +399,7 @@ metrics files based on similarity metrics",
         "stage": PipelineStage.EDITING,
         "description": "Copy requirements from iteration 0 to iteration 1",
         # Copy requirements from prev iteration to current iteration
-        "function": "run_copying_requirements_to_next_iteration_mini_pipeline",
+        "function": run_copying_reqs_to_next_iter_mini_pipeline,
         # Funciton to copy files to current iteration folder
         "io": {
             "openai": {
@@ -392,7 +421,7 @@ metrics files based on similarity metrics",
         "description": "Resume evaluation in iteration 1 (add similarity metrics)",
         # Match edited responsibilities against requirements again to compute &
         # add similarity scores
-        "function": "run_resume_comparison_pipeline",
+        "function": run_metrics_re_processing_pipeline_async,
         # Function to compute similarity scores
         "io": {
             "openai": {
@@ -404,13 +433,14 @@ metrics files based on similarity metrics",
                 / mapping_file_name,  # Reference file w/t all file paths in the dir
             },
         },
+        "kwargs": {"generate_metrics": generate_metrics_from_flat_json_async},
     },
     "3d_async": {
         "stage": PipelineStage.EDITING,
         "description": "Async resume evaluation in iteration 1 (add similarity metrics)",
         # Async: Match edited responsibilities against requirements again to compute &
         # add similarity scores
-        "function": "re_run_resume_comparison_pipeline_async",
+        "function": run_metrics_re_processing_pipeline_async,
         "io": {
             "openai": {
                 "mapping_file": ITERATE_1_OPENAI_DIR
@@ -421,12 +451,13 @@ metrics files based on similarity metrics",
                 / mapping_file_name,  # Reference file w/t all file paths in the dir
             },
         },
+        "kwargs": {"generate_metrics": generate_metrics_from_flat_json_async},
     },
     "3e": {
         "stage": PipelineStage.EDITING,
         "description": "Adding multivariate indices to metrics files in iteration 1",
         # Add extra indices (composite and PCA scores) to similarity files
-        "function": "run_adding_multivariate_indices_mini_pipeline",
+        "function": run_multivariate_indices_processing_mini_pipeline,
         # Function to calculate and add extra indices
         "io": {
             "openai": {
@@ -437,6 +468,16 @@ metrics files based on similarity metrics",
                 "mapping_file": ITERATE_1_ANTHROPIC_DIR
                 / mapping_file_name,  # Reference file with all file paths in the dir
             },
+        },
+        "kwargs": {"add_indices_func": add_multivariate_indices},
+    },
+    "3f": {
+        "stage": PipelineStage.EVALUATION,
+        "description": "Cleaning similarity metrics files by removing empty rows (iter 1).",
+        "function": run_cleaning_similarity_metrics_files_pipeline,
+        "io": {
+            "openai": {"mapping_file": ITERATE_1_OPENAI_DIR / mapping_file_name},
+            "anthropic": {"mapping_file": ITERATE_1_ANTHROPIC_DIR / mapping_file_name},
         },
     },
 }

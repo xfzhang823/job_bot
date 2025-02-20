@@ -321,6 +321,7 @@ class SimilarityMetrics(BaseModel):
     #    value is not a valid float (type=type_error.float)
     """
 
+    job_posting_url: str = Field(..., description="Job posting url")
     responsibility_key: str = Field(..., description="Responsibility key")
     responsibility: str = Field(..., description="Responsibility text")
     requirement_key: str = Field(..., description="Requirement key")
