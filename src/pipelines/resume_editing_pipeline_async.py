@@ -11,6 +11,7 @@ from models.resume_job_description_io_models import (
     ResponsibilityMatches,
     Responsibilities,
     Requirements,
+    NestedResponsibilities,
 )
 from evaluation_optimization.resume_editor import TextEditor
 from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
@@ -34,6 +35,12 @@ from project_config import OPENAI, GPT_35_TURBO, GPT_4_TURBO
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+import time
+
+
+async def debug_log(msg: str):
+    logger.info(f"[DEBUG] {msg} | Time: {time.time()}")
 
 
 def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict:
@@ -218,7 +225,7 @@ async def run_resume_editing_pipeline_async(
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_TURBO,
     # n_jobs: int = -1, # Run non-parellel for now
-):
+) -> None:
     """
     Run the pipeline to modify responsibilities based on the previous and current
     mapping files. The piple uses joblib to process jobs in parallel.
@@ -277,7 +284,7 @@ async def run_resume_editing_pipeline_async(
             if not reqs_file.exists() or not resps_file.exists():
                 raise FileNotFoundError(f"Files ({reqs_file} not found for {url}")
 
-            # Load data from JSON files (as dicts)
+            # Load data from JSON files (as dicts) (both dicts)
             responsibilities = read_from_json_file(resps_file)
             requirements = read_from_json_file(reqs_file)
 
@@ -295,16 +302,75 @@ async def run_resume_editing_pipeline_async(
         # Step 3: Modify responsibilities based on requirements
         logger.info(f"Modifying responsibilities for {url}...")
 
+        logger.info(
+            f"Before modify_multi_resps_based_on_reqs_async()"
+        )  # todo: debug; delete later
+
         modified_resps = await modify_multi_resps_based_on_reqs_async(
             responsibilities=validated_responsibilities.responsibilities,
             requirements=validated_requirements.requirements,
             llm_provider=llm_provider,
             model_id=model_id,
-        )  # The function returns a Pydantic object
+        )  # returns model ResponsibilityMatches
 
-        # Step 4: Save the modified responsibilities
+        logger.info(
+            f"After modify_multi_resps_based_on_reqs_async()"
+        )  # todo: debug; delete later
+
+        # todo: debug; delete later; Log before moving to NestedResponsibilities
+        logger.info(f"Before constructing NestedResponsibilities")
+        logger.info(f"Type of modified_resps: {type(modified_resps)}")
+        logger.info(
+            f"Is instance of ResponsibilityMatches? {isinstance(modified_resps, ResponsibilityMatches)}"
+        )  # todo: debugging; delete later
+
+        # Step 4: ResponsibilityMatches -> NestedResponsibilities model
+        logger.info(
+            f"Constructing NestedResponsibilities with url: {url}"
+        )  # todo: debug; delete later
+        logger.info(
+            f"URL is {url} and its type is{type(url)}"
+        )  # todo: debug; delete later
+
+        logger.info(
+            f"Attempting to serialize to {output_file}"
+        )  # todo debug; delete later
+        try:
+            modified_resps_with_url = NestedResponsibilities(
+                url=url, responsibilities=modified_resps
+            )
+            logger.info(
+                f"Successfully constructed NestedResponsibilities: {modified_resps_with_url}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to construct NestedResponsibilities: {e}", exc_info=True
+            )
+            raise
+
+        # todo: debug; delete later
+        logger.info(
+            f"Is instance of NestedResponsibilities? {isinstance(modified_resps_with_url, NestedResponsibilities)}"
+        )
+        logger.info(f"After adding url: {modified_resps_with_url}")
+        logger.info(
+            f"Before saving modified responsibilities to JSON"
+        )  # todo: debug; Log before file save; delete later
+
+        # Step 5: Save the modified responsibilities
         output_file = paths["responsibilities_output"]
-        await save_data_to_json_file_async(modified_resps, output_file)
+        logger.info(f"Attempting to serialize to {output_file}")
+
+        try:
+            modified_resps_dict = modified_resps_with_url.model_dump()
+            logger.info(f"Serialized dict (preview): {str(modified_resps_dict)[:1000]}")
+        except Exception as e:
+            logger.error(f"Serialization failed: {e}", exc_info=True)
+            raise
+        await debug_log("Before file write")
+        await save_data_to_json_file_async(modified_resps_dict, output_file)
+        await debug_log("After file write")
+
         logger.info(f"Modified responsibilities for {url} saved to {output_file}")
 
     logger.info("Pipeline execution completed.")

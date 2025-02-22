@@ -130,9 +130,7 @@ def create_mapping_entry(
     return job_file_paths_model  # Return the validated JobFilePaths instance
 
 
-def load_mappings_model_from_json(
-    mapping_file: Union[str, Path]
-) -> Optional[JobFileMappings]:
+def load_mappings_model_from_json(mapping_file: Union[str, Path]) -> JobFileMappings:
     """
     Load job file mappings from a JSON file using the JobFileMappings model.
 

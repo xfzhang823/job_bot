@@ -183,12 +183,12 @@ async def modify_multi_resps_based_on_reqs_async(
     the process, especially when dealing with large datasets.
 
     Each responsibility undergoes a three-step modification process:
-    1. Semantic Alignment: Ensures that the responsibility text matches the meaning of the
-       job requirement.
-    2. Entailment Alignment: Ensures that the responsibility text can be logically inferred
-       from the job requirement.
-    3. Dependency Parsing Alignment (DP): Ensures that the structure of the responsibility
-       text is preserved while aligning it with the job requirement.
+    1. Semantic Alignment: Ensures that the responsibility text matches the meaning
+    of the job requirement.
+    2. Entailment Alignment: Ensures that the responsibility text can be logically
+    inferred from the job requirement.
+    3. Dependency Parsing Alignment (DP): Ensures that the structure of the
+    responsibility text is preserved while aligning it with the job requirement.
 
     Args:
         - responsibilities (dict): A dictionary of responsibility texts, where keys are
@@ -221,7 +221,7 @@ async def modify_multi_resps_based_on_reqs_async(
 
     # Limit the number of concurrent tasks (in this case, coroutines) that
     # can run simultaneously
-    semaphore = asyncio.Semaphore(7)  # Adjust limit as needed
+    semaphore = asyncio.Semaphore(3)  # Adjust limit as needed
 
     async def modify_resp_with_limit(resp_key: str, resp: str):
         async with semaphore:
@@ -258,8 +258,11 @@ async def modify_multi_resps_based_on_reqs_async(
         )
 
         logger.info(
-            f"Before validated by ResponsibilityMatches: \n{validated_modified_responsibilities}"
+            f"After validated by ResponsibilityMatches: \n{validated_modified_responsibilities}"
         )  # TODO: for debugging; delete afterwards
+
+        # Ensure event loop does not stall due to rapid execution (rate limit issue)
+        await asyncio.sleep(0.1)
 
         return validated_modified_responsibilities
 

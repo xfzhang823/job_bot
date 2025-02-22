@@ -41,11 +41,13 @@ from pipelines.flattened_resps_reqs_processing_mini_pipeline import (
 from pipelines.resume_eval_pipeline import (
     run_metrics_processing_pipeline,
     generate_metrics_from_flat_json,
+    generate_metrics_from_nested_json,
     run_multivariate_indices_processing_mini_pipeline,
 )
 from pipelines.resume_eval_pipeline_async import (
-    run_metrics_processing_pipeline_async,
     generate_metrics_from_flat_json_async,
+    generate_metrics_from_nested_json_async,
+    run_metrics_processing_pipeline_async,
     run_multivariate_indices_processing_mini_pipeline_async,
     run_metrics_re_processing_pipeline_async,
 )
@@ -433,7 +435,7 @@ metrics files based on similarity metrics",
                 / mapping_file_name,  # Reference file w/t all file paths in the dir
             },
         },
-        "kwargs": {"generate_metrics": generate_metrics_from_flat_json_async},
+        "kwargs": {"generate_metrics": generate_metrics_from_nested_json},
     },
     "3d_async": {
         "stage": PipelineStage.EDITING,
@@ -451,7 +453,7 @@ metrics files based on similarity metrics",
                 / mapping_file_name,  # Reference file w/t all file paths in the dir
             },
         },
-        "kwargs": {"generate_metrics": generate_metrics_from_flat_json_async},
+        "kwargs": {"generate_metrics": generate_metrics_from_nested_json_async},
     },
     "3e": {
         "stage": PipelineStage.EDITING,

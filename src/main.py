@@ -33,6 +33,7 @@ facilitating modular, reusable code for various stages of the process.
 # Dependencies
 import logging
 import asyncio  # Add this line to import asyncio
+import matplotlib
 
 # User defined
 from pipelines.run_pipelines import (
@@ -44,6 +45,9 @@ from project_config import OPENAI, ANTHROPIC, CLAUDE_SONNET, GPT_4_TURBO, CLAUDE
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+
+matplotlib.use("Agg")
 
 
 # High level function to call the run_pipeline functions (sync and async)
@@ -165,7 +169,7 @@ def main_anthropic():
     # ✅ Step 11: Async Resume Evaluation in Iteration 1
     execute_pipeline("3d_async", llm_provider=ANTHROPIC, model_id=model_id)
 
-    # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
+    # ✅ Step 12: Add Multivariate Indices to Metrics Files in Iteration 1
     execute_pipeline("3e", llm_provider=ANTHROPIC, model_id=model_id)
 
 
