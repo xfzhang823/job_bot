@@ -14,6 +14,7 @@ from pydantic import (
     DirectoryPath,
     RootModel,
 )
+from pydantic_core import Url
 import logging
 import logging_config
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Model to validate responsibility input
 class Responsibilities(BaseModel):
     """
-    Pydantic model for validating responsibilities.
+    Pydantic model for validating flattened responsibilities.
     Ensures all responsibility JSON files contain both a `url` (unique identifier)
     and `responsibilities` (flattened responsibilities).
 
@@ -190,15 +191,116 @@ class ResponsibilityMatches(BaseModel):
         Validates the inner `optimized_text` for each requirement.
         Contains a single string field for the text itself.
     - ResponsibilityMatch:
-        Maps `requirement_key`s (e.g., "0.pie_in_the_sky.0") to instances of `OptimizedText`.
+        Maps `requirement_key`s (e.g., "0.pie_in_the_sky.0") to instances of
+        `OptimizedText`.
 
-    This model ensures the correct format for nested responsibilities and their corresponding
-    requirement matches, facilitating easier processing and validation of complex nested data.
+    This model ensures the correct format for nested responsibilities and their
+    corresponding requirement matches, facilitating easier processing and validation
+    of complex nested data.
     """
 
     responsibilities: Dict[str, ResponsibilityMatch] = Field(
         ..., description="Mapping from responsibilty keys to nested requirement matches"
     )
+
+
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+from typing import Dict
+
+
+class NestedResponsibilities(BaseModel):
+    """
+    Pydantic model for validating job responsibilities after iteration 1.
+
+    This model is designed to support the structured representation of responsibilities
+    after they have been aligned with job requirements. It removes unnecessary nesting,
+    making it easier to validate and process responsibilities efficiently.
+
+    Structure Overview:
+    - `url`: Stores the job posting URL (string or `HttpUrl`).
+    - `responsibilities`: A dictionary mapping responsibility keys
+    (e.g., `"0.responsibilities.0"`) to `ResponsibilityMatch` objects, which contain
+    optimized texts for various job requirements.
+
+    Example JSON Structure:
+    ```json
+    {
+        "url": "https://careers.example.com/job/12345/",
+        "responsibilities": {
+            "0.responsibilities.0": {
+                "optimized_by_requirements": {
+                    "1.down_to_earth.0": {
+                        "optimized_text": "Led strategic initiatives for a multinational IT corporation."
+                    },
+                    "1.down_to_earth.1": {
+                        "optimized_text": "Developed scalable solutions for optimizing service partnerships."
+                    }
+                }
+            },
+            "0.responsibilities.1": {
+                "optimized_by_requirements": {
+                    "2.other.0": {
+                        "optimized_text": "Managed cross-functional projects for international expansion."
+                    }
+                }
+            }
+        }
+    }
+    ```
+
+    Attributes:
+    - `url` (`str` | `HttpUrl`): The URL of the job posting, validated as a proper URL.
+    - `responsibilities` (`Dict[str, ResponsibilityMatch]`): A dictionary where:
+        - Keys are responsibility identifiers (e.g., `"0.responsibilities.0"`).
+        - Values are `ResponsibilityMatch` objects containing requirement-based
+        optimizations.
+
+    Usage Example:
+    ```python
+    from pydantic import ValidationError
+    import json
+
+    # Load the JSON data
+    with open("responsibilities.json", "r") as f:
+        json_data = json.load(f)
+
+    try:
+        # Validate the JSON structure using the NestedResponsibilities model
+        validated_data = NestedResponsibilities.model_validate(json_data)
+        print("Validation successful:", validated_data)
+
+    except ValidationError as e:
+        print(f"Validation error: {e}")
+    ```
+
+    Notes:
+    - This model replaces the previous `ResponsibilityMatches` wrapper with a
+    **direct dictionary mapping**.
+    - The `coerce_url_to_str` method ensures that `HttpUrl` objects are converted
+    to strings before validation.
+    - The model is designed for **iteration 1 and beyond**, where responsibilities
+    have been refined based on job requirements.
+    """
+
+    url: str | HttpUrl = Field(
+        ...,
+        description="URL of the job posting (required). Can be a string or an HttpUrl object.",
+    )
+    responsibilities: Dict[
+        str, ResponsibilityMatch
+    ]  # ✅ Simulates ResponsibilityMatches (direct ResponsibilityMatches creates an unwanted "wrapper")
+
+    @field_validator("url", mode="before")  # Ensures URLs are always strings
+    def coerce_url_to_str(cls, v):  # pylint: disable=no-self-argument
+        """
+        Convert `HttpUrl` or `Url` objects to a string before validation.
+
+        This ensures that any URL stored in the `url` field is always treated as a string,
+        avoiding issues with serialization and downstream processing.
+        """
+        if isinstance(v, Url):
+            return str(v)
+        return v  # Leave strings or other types as they are
 
 
 # Model to validate requirement input

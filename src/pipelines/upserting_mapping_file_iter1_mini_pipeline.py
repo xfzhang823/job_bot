@@ -21,7 +21,7 @@ from models.resume_job_description_io_models import JobFileMappings
 logger = logging.getLogger(__name__)
 
 
-def customize_mapping_config(
+def customize_mapping_config_iter1(
     iteration: float, iteration_dir: Union[str, Path], mapping_file_name: str
 ) -> MappingConfig:
     """
@@ -53,7 +53,7 @@ def customize_mapping_config(
         metrics_dir_name="similarity_metrics",
         pruned_resps_dir_name="pruned_responsibilities",
         reqs_suffix=f"_reqs_flat_iter{iteration}",
-        resps_suffix=f"_resps_flat_iter{iteration}",
+        resps_suffix=f"_resps_nested_iter{iteration}",
         metrics_suffix=f"_sim_metrics_iter{iteration}",
         pruned_resps_suffix=f"_pruned_resps_flat_iter{iteration}",
     )
@@ -102,7 +102,7 @@ def run_upserting_mapping_file_iter1_mini_pipeline(
     if job_descriptions is None:
         raise ValueError("Failed to load job descriptions")
 
-    mapping_config = customize_mapping_config(
+    mapping_config = customize_mapping_config_iter1(
         iteration=iteration,
         iteration_dir=iteration_dir,
         mapping_file_name=mapping_file_name,

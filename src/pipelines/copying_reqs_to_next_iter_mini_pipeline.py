@@ -110,8 +110,14 @@ def set_directory_paths(
     return paths_dict
 
 
-def verify_paths(mapping_file_prev, mapping_file_curr) -> bool:
+def verify_paths(
+    mapping_file_prev: Union[Path, str], mapping_file_curr: Union[Path, str]
+) -> bool:
     """Function to test input files exist and output directories are valid."""
+    mapping_file_prev, mapping_file_curr = Path(mapping_file_prev), Path(
+        mapping_file_curr
+    )  # Change to Path obj if str
+
     # Get the directory paths
     paths_dict = set_directory_paths(mapping_file_prev, mapping_file_curr)
 
@@ -134,7 +140,7 @@ def verify_paths(mapping_file_prev, mapping_file_curr) -> bool:
 def run_copying_reqs_to_next_iter_mini_pipeline(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
-):
+) -> None:
     """
     Copy JSON files from the requirements folder in the previous iteration to the
     requirements folder in the current iteration.
@@ -144,8 +150,10 @@ def run_copying_reqs_to_next_iter_mini_pipeline(
     and logs any errors encountered during the process.
 
     Args:
-        mapping_file_prev (Union[Path, str]): Path to the previous iteration's mapping file.
-        mapping_file_curr (Union[Path, str]): Path to the current iteration's mapping file.
+        - mapping_file_prev (Union[Path, str]): Path to the previous iteration's
+        mapping file.
+        - mapping_file_curr (Union[Path, str]): Path to the current iteration's
+        mapping file.
 
     Returns:
         None
@@ -192,7 +200,7 @@ def run_copying_reqs_to_next_iter_mini_pipeline(
                 )
 
             # Use Pydantic for validation and save the validated requirements
-            validated_requirements = Requirements(requirements=requirements_in)
+            validated_requirements = Requirements(**requirements_in)
             save_to_json_file(validated_requirements.model_dump(), output_file)
 
             logger.info(f"Requirements file saved: {output_file}")

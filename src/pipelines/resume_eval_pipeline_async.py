@@ -7,14 +7,15 @@ and requirements.
 
 # Import dependencies
 from pathlib import Path
+from typing import Any, Callable, Coroutine, Optional, Union
 import json
 import logging
 import asyncio
 import aiofiles
-from typing import Any, Callable, Coroutine, Optional, Union
 import numpy as np
 import pandas as pd
 from pydantic import HttpUrl, ValidationError, TypeAdapter
+from IPython.display import display
 
 # User defined
 from preprocessing.resume_preprocessor import ResumeParser
@@ -23,6 +24,7 @@ from models.resume_job_description_io_models import (
     JobFileMappings,
     Requirements,
     Responsibilities,
+    NestedResponsibilities,
     ResponsibilityMatches,
     SimilarityMetrics,
 )
@@ -72,16 +74,16 @@ async def generate_metrics_from_flat_json_async(
     between resume responsibilities and job requirements, saving the results
     as a CSV file.
 
-    **Processing Steps:**
-    1. **Load JSON files asynchronously** (`reqs_file`, `resps_file`).
-    2. **Validate job requirements and responsibilities** using Pydantic models.
-    3. **Ensure loaded JSON data is a dictionary** and contains the expected keys.
-    4. **Compute similarity metrics** using
+    Processing Steps:
+    1. Load JSON files asynchronously (`reqs_file`, `resps_file`).
+    2. Validate job requirements and responsibilities using Pydantic models.
+    3. Ensure loaded JSON data is a dictionary** and contains the expected keys.
+    4. Compute similarity metrics using
     `calculate_many_to_many_similarity_metrices()`.
-    5. **Categorize similarity scores** using `categorize_scores_for_df()`.
-    6. **Clean the DataFrame** (remove newline characters, trim whitespace).
-    7. **Insert job posting URL** as a new column in the DataFrame.
-    8. **Save the DataFrame asynchronously** as a CSV file using
+    5. Categorize similarity scores** using `categorize_scores_for_df()`.
+    6. Clean the DataFrame (remove newline characters, trim whitespace).
+    7. Insert job posting URL as a new column in the DataFrame.
+    8. Save the DataFrame asynchronously** as a CSV file using
     `save_df_to_csv_file_async()`.
 
     *Concurrency Control:
@@ -90,7 +92,7 @@ async def generate_metrics_from_flat_json_async(
     - Ensures controlled execution, reducing memory spikes and preventing
     system overload.
 
-    **Args:**
+    Args:
         - `reqs_file` (Union[Path, str]):
           Path to the flattened job requirements JSON file.
         - `resps_file` (Union[Path, str]):
@@ -151,6 +153,7 @@ async def generate_metrics_from_flat_json_async(
                     f_req.read(), f_resp.read()
                 )
 
+            # Raw str -> Dict (pydantic model can't read raw str.)
             reqs_data, resps_data = json.loads(reqs_data), json.loads(resps_data)
 
             # Step 3: Validate JSON structure using Pydantic models
@@ -227,9 +230,14 @@ async def generate_metrics_from_flat_json_async(
 async def generate_metrics_from_nested_json_async(
     reqs_file: Union[Path, str],
     resps_file: Union[Path, str],
-    metrics_csv_file: Union[Path, str],
+    sim_metrics_file: Union[Path, str],
+    url: str,
+    semaphore: asyncio.Semaphore,
 ) -> None:
     """
+    * The method is almost identical to the generate_metrics_from_flat_json_async
+    * but reading nested responsibilities (edited resps) w/t many-to-many mapping.
+
     Generate similarity metrics between nested responsibilities and requirements
     and save to a CSV file asynchronously.
 
@@ -238,158 +246,198 @@ async def generate_metrics_from_nested_json_async(
         - resps_file (Path or str): Path to the nested responsibilities JSON file.
         - metrics_csv_file (Path or str): Path where the output CSV file should be saved.
         - url (str): The job posting URL to be included in the output DataFrame.
+        - semaphore (asyncio.Semaphore): Controls the number of concurrent executions.
 
     Returns:
         None
+
+    Key Features:
+    ✅ Uses `aiofiles.open()` for async file reading.
+    ✅ Uses `asyncio.to_thread()` for CPU-bound operations.
+    ✅ Handles many-to-many mapping of responsibilities to requirements.
+    ✅ Efficient error handling and structured logging.
     """
-    logger.info(f"Generating metrics for: {metrics_csv_file}")
+    logger.info(f"Generating metrics for: {sim_metrics_file}")
 
-    # Step 0: Ensure inputs are Path objects.
-    reqs_file = Path(reqs_file)
-    resps_file = Path(resps_file)
-    metrics_csv_file = Path(metrics_csv_file)
+    async with semaphore:
 
-    # Step 1: Load and validate responsibilities and requirements using
-    # Pydantic models asynchronously
-    try:
-        resps_data = await asyncio.to_thread(read_from_json_file, resps_file)
-        validated_resps_data = ResponsibilityMatches.model_validate(resps_data)
+        # Step 1: Ensure inputs are Path objects.
+        reqs_file, resps_file, sim_metrics_file = (
+            Path(reqs_file),
+            Path(resps_file),
+            Path(sim_metrics_file),
+        )
 
-        reqs_data = await asyncio.to_thread(read_from_json_file, reqs_file)
-        validated_reqs_data = Requirements.model_validate(reqs_data)
+        # Step 2: Load and validate responsibilities and requirements asynchronously
+        # (w/t pyd models)
+        try:
+            # Read responsibilities & requirements from JSON files
+            async with aiofiles.open(reqs_file, "r") as f_req, aiofiles.open(
+                resps_file, "r"
+            ) as f_resp:
+                reqs_data, resps_data = await asyncio.gather(
+                    f_req.read(), f_resp.read()
+                )
 
-        if not validated_resps_data or not validated_reqs_data:
-            logger.error(
-                "One of the required datasets (responsibilities or requirements) is empty."
-            )
+            # Convert JSON strings to dictionaries (pyd models can't read raw str)
+            reqs_data, resps_data = json.loads(reqs_data), json.loads(resps_data)
+
+            # Validate with correct models
+            validated_reqs_data = Requirements(**reqs_data)
+            validated_resps_data = NestedResponsibilities(
+                **resps_data
+            )  # Uses NestedResponsibilities (responsibilities are edited & in nested format)
+
+            if (
+                not validated_resps_data.responsibilities
+                or not validated_reqs_data.requirements
+            ):
+                logger.error("Responsibilities or requirements are empty. Exiting.")
+                return
+
+        except ValidationError as ve:
+            logger.error(f"Validation error in JSON files: {ve}")
+            return
+        except FileNotFoundError as e:
+            logger.error(f"File not found: {e.filename}")
+            return
+        except Exception as e:
+            logger.error(f"Error loading files: {e}")
             return
 
-    except FileNotFoundError as e:
-        logger.error(f"File not found: {e.filename}")
-        return
-    except ValidationError as ve:
-        logger.error(f"Validation error when parsing JSON files: {ve}")
-        return
-    except Exception as e:
-        logger.error(f"Error loading files: {e}")
-        return
+        validated_rows = []
 
-    validated_rows = []
-
-    # Step 2: Iterate through the responsibilities and requirements
-    for (
-        responsibility_key,
-        responsibility_match,
-    ) in validated_resps_data.responsibilities.items():
+        # Step 3: Process similarity metrics by
+        # iterate through the responsibilities and requirements
         for (
-            requirement_key,
-            optimized_text_obj,
-        ) in responsibility_match.optimized_by_requirements.items():
-            responsibility_text = optimized_text_obj.optimized_text
+            responsibility_key,
+            responsibility_matches,
+        ) in validated_resps_data.responsibilities.items():
+            for (
+                requirement_key,
+                optimized_text_obj,
+            ) in responsibility_matches.optimized_by_requirements.items():
 
-            # Access the corresponding requirement using the Pydantic model
-            try:
-                requirement_text = validated_reqs_data.requirements[requirement_key]
-            except KeyError:
-                logger.warning(
-                    f"No matching requirement found for requirement_key: {requirement_key}"
+                # Fetch responsibility text
+                responsibility_text = optimized_text_obj.optimized_text
+
+                # Fetch matching requirement text
+                requirement_text = validated_reqs_data.requirements.get(
+                    requirement_key, None
                 )
-                continue
+                if not requirement_text:
+                    logger.warning(
+                        f"No matching requirement found for requirement_key: {requirement_key}"
+                    )
+                    continue
 
-            # Step 3: Calculate similarity metrics asynchronously
-            similarity_metrics = await asyncio.to_thread(
-                calculate_text_similarity_metrics, responsibility_text, requirement_text
-            )
-
-            # Step 4: Validate using SimilarityMetrics model
-            try:
-                similarity_metrics_model = SimilarityMetrics(
-                    responsibility_key=responsibility_key,
-                    responsibility=responsibility_text,
-                    requirement_key=requirement_key,
-                    requirement=requirement_text,
-                    bert_score_precision=similarity_metrics[
-                        "bert_score_precision"
-                    ],  # Explicit mapping
-                    soft_similarity=similarity_metrics[
-                        "soft_similarity"
-                    ],  # Explicit mapping
-                    word_movers_distance=similarity_metrics[
-                        "word_movers_distance"
-                    ],  # Explicit mapping
-                    deberta_entailment_score=similarity_metrics[
-                        "deberta_entailment_score"
-                    ],  # Explicit mapping
-                    # Optional fields (if present in similarity metrics)
-                    bert_score_precision_cat=similarity_metrics.get(
-                        "bert_score_precision_cat"
-                    ),
-                    soft_similarity_cat=similarity_metrics.get("soft_similarity_cat"),
-                    word_movers_distance_cat=similarity_metrics.get(
-                        "word_movers_distance_cat"
-                    ),
-                    deberta_entailment_score_cat=similarity_metrics.get(
-                        "deberta_entailment_score_cat"
-                    ),
-                    scaled_bert_score_precision=similarity_metrics.get(
-                        "scaled_bert_score_precision"
-                    ),
-                    scaled_deberta_entailment_score=similarity_metrics.get(
-                        "scaled_deberta_entailment_score"
-                    ),
-                    scaled_soft_similarity=similarity_metrics.get(
-                        "scaled_soft_similarity"
-                    ),
-                    scaled_word_movers_distance=similarity_metrics.get(
-                        "scaled_word_movers_distance"
-                    ),
-                    composite_score=similarity_metrics.get("composite_score"),
-                    pca_score=similarity_metrics.get("pca_score"),
+                # Step 4: Compute similarity metrics asynchronously
+                similarity_metrics = await asyncio.to_thread(
+                    calculate_text_similarity_metrics,
+                    responsibility_text,
+                    requirement_text,
                 )
-                validated_rows.append(similarity_metrics_model.model_dump())
 
-            except ValidationError as ve:
-                logger.error(
-                    f"Validation error for responsibility {responsibility_key}: {ve}"
-                )
-                continue
+                # Step 5: Validate Using SimilarityMetrics Model
+                # * This is needed b/c it matches multiple responsibilities to multiple requirements
+                # * (many-to-many mapping).
+                try:
+                    similarity_metrics_model = SimilarityMetrics(
+                        job_posting_url=url,
+                        responsibility_key=responsibility_key,
+                        responsibility=responsibility_text,
+                        requirement_key=requirement_key,
+                        requirement=requirement_text,
+                        **similarity_metrics,  # ✅ Automatically adds all fields from the dict
+                        # bert_score_precision=similarity_metrics[
+                        #     "bert_score_precision"
+                        # ],  # Explicit mapping
+                        # soft_similarity=similarity_metrics[
+                        #     "soft_similarity"
+                        # ],  # Explicit mapping
+                        # word_movers_distance=similarity_metrics[
+                        #     "word_movers_distance"
+                        # ],  # Explicit mapping
+                        # deberta_entailment_score=similarity_metrics[
+                        #     "deberta_entailment_score"
+                        # ],  # Explicit mapping
+                        # # Optional fields (if present in similarity metrics)
+                        # bert_score_precision_cat=similarity_metrics.get(
+                        #     "bert_score_precision_cat"
+                        # ),
+                        # soft_similarity_cat=similarity_metrics.get(
+                        #     "soft_similarity_cat"
+                        # ),
+                        # word_movers_distance_cat=similarity_metrics.get(
+                        #     "word_movers_distance_cat"
+                        # ),
+                        # deberta_entailment_score_cat=similarity_metrics.get(
+                        #     "deberta_entailment_score_cat"
+                        # ),
+                        # scaled_bert_score_precision=similarity_metrics.get(
+                        #     "scaled_bert_score_precision"
+                        # ),
+                        # scaled_deberta_entailment_score=similarity_metrics.get(
+                        #     "scaled_deberta_entailment_score"
+                        # ),
+                        # scaled_soft_similarity=similarity_metrics.get(
+                        #     "scaled_soft_similarity"
+                        # ),
+                        # scaled_word_movers_distance=similarity_metrics.get(
+                        #     "scaled_word_movers_distance"
+                        # ),
+                        # composite_score=similarity_metrics.get("composite_score"),
+                        # pca_score=similarity_metrics.get("pca_score"),
+                    )
 
-    # Step 5: Convert validated results to a DataFrame and categorize scores
-    if validated_rows:
-        final_df = await asyncio.to_thread(pd.DataFrame, validated_rows)
-        final_df = await asyncio.to_thread(categorize_scores_for_df, final_df)
+                    validated_rows.append(similarity_metrics_model.model_dump())
 
-        # Step 6: Save the validated metrics to a CSV file asynchronously
-        await asyncio.to_thread(final_df.to_csv, metrics_csv_file, index=False)
-        logger.info(f"Similarity metrics saved successfully to {metrics_csv_file}")
-    else:
-        logger.error("No valid similarity metrics data to save.")
-        return
+                except ValidationError as ve:
+                    logger.error(
+                        f"Validation error for responsibility {responsibility_key}: {ve}"
+                    )
+                    continue
 
-    # Display the top rows of the DataFrame for verification
-    print(final_df.head(5))
+        # Step 6: Convert Validated Data to DataFrame & Save
+        if validated_rows:
+            df = await asyncio.to_thread(pd.DataFrame, validated_rows)
+            df = await asyncio.to_thread(categorize_scores_for_df, df)
+
+            # Step 4: Save the validated metrics to a CSV file asynchronously
+            await save_df_to_csv_file_async(df=df, filepath=sim_metrics_file)
+            # await asyncio.to_thread(final_df.to_csv, metrics_csv_file, index=False)
+            logger.info(f"Similarity metrics saved successfully to {sim_metrics_file}")
+        else:
+            logger.error("No valid similarity metrics data to save.")
+            return
+
+        # Display the top rows of the DataFrame for verification
+        display(df.head(5))
 
 
 async def run_metrics_processing_pipeline_async(
-    mapping_file: Union[Path, str],
-    generate_metrics: Callable,
-    batch_size: int = 7,  # Adjust batch size as needed
+    mapping_file: Path | str,
+    generate_metrics: Callable = generate_metrics_from_flat_json_async,
+    batch_size: int = 7,  # Limit group size for batching (# of tasks/batch)
+    max_concurrent: int = 4,  # Limit number of concurrent tasks
 ) -> None:
     """
-    Asynchronous pipeline to process and create missing similarity metrics files
-    by reading from the job file mapping JSON.
+    * Asynchronous pipeline to process and create missing similarity metrics files
+    * by reading from the job file mapping JSON.
 
     Args:
-        - mapping_file (Union[Path, str]): Path to the JSON mapping file.
+        - mapping_file (str | Path): Path to the JSON mapping file.
         - generate_metrics (Callable): Function to generate the metrics CSV file.
         - batch_size (int): Number of tasks to process concurrently.
+        - max_concurrent (int): Number of concurrent tasks.
 
     Returns:
         None
     """
     logger.info("Starting async metrics processing pipeline...")
 
-    mapping_file = Path(mapping_file)  # Ensure file path is a Path object.
+    # Ensure mapping_file is a Path object
+    mapping_file = Path(mapping_file)
     if not mapping_file.exists():
         raise ValueError(f"The file '{mapping_file}' does not exist.")
 
@@ -398,7 +446,7 @@ async def run_metrics_processing_pipeline_async(
     # Step 1: Read the mapping file (synchronously)
     file_mapping_model = load_mappings_model_from_json(
         mapping_file
-    )  # Returns pyd model
+    )  # Returns Pydantic model
     if file_mapping_model is None:
         logger.error("Failed to load mapping file. Exiting pipeline.")
         return
@@ -407,31 +455,31 @@ async def run_metrics_processing_pipeline_async(
 
     # Step 2: Identify missing similarity metrics files
     missing_metrics = {
-        str(url): job_paths.sim_metrics
+        str(url): Path(job_paths.sim_metrics)  # Convert to Path directly
         for url, job_paths in file_mapping_model.root.items()
-        if not Path(job_paths.sim_metrics).exists()  # Directly check existence
+        if not Path(job_paths.sim_metrics).exists()
     }
 
     if not missing_metrics:
         logger.info("All similarity metrics files exist. Exiting pipeline.")
         return
 
-    logger.debug(
-        f"Missing similarity metrics files: {len(missing_metrics)} items found."
-    )
+    logger.info(f"Found {len(missing_metrics)} missing similarity metrics files.")
 
     # Step 3: Process missing sim_metrics files concurrently with batching
 
-    semaphore = asyncio.Semaphore(batch_size)
+    # Step 3.1: Setup placeholders
+    semaphore = asyncio.Semaphore(max_concurrent)
     tasks = []
 
+    # Step 3.2: Iterate through missing sim_metrics files
     for url, sim_metrics_file in missing_metrics.items():
         logger.info(f"Processing missing metrics for {url}")
 
         try:
             # Convert `url` to `HttpUrl` using TypeAdapter (Explicit Validation)
             job_url = TypeAdapter(HttpUrl).validate_python(url)
-            job_paths = file_mapping_model.root[job_url]  # Use converted HttpUrl
+            job_paths = file_mapping_model.root[job_url]
         except ValidationError as e:
             logger.error(f"Invalid URL format: {url}. Skipping. Error: {e}")
             continue
@@ -440,12 +488,33 @@ async def run_metrics_processing_pipeline_async(
         reqs_file = Path(job_paths.reqs)
         resps_file = Path(job_paths.resps)
 
-        # Step 3.1: Check if reqs and resps files exist
-        if not reqs_file.exists() or not resps_file.exists():
-            logger.error(f"Missing files for {url}. Skipping.")
+        # Validate the requirements file
+        try:
+            reqs_data = read_from_json_file(reqs_file)
+            validated_requirements = Requirements.model_validate(reqs_data)
+            logger.info(f"Loaded and validated requirements from {reqs_file}")
+        except ValidationError as e:
+            logger.error(f"Validation error for requirements in {reqs_file}: {e}")
             continue
 
-        # Step 3.2: Create async task for each URL
+        # Validate the responsibilities file
+        try:
+            resps_data = read_from_json_file(resps_file)
+
+            # If "responsibilities" is missing, wrap the structure
+            if "responsibilities" not in resps_data:
+                resps_data = {"responsibilities": resps_data}
+
+            validated_responsibilities = ResponsibilityMatches.model_validate(
+                resps_data
+            )
+            logger.info(f"Loaded and validated responsibilities from {resps_file}")
+
+        except ValidationError as e:
+            logger.error(f"Validation error for responsibilities in {resps_file}: {e}")
+            continue
+
+        # Queue tasks after validation succeeds
         tasks.append(
             generate_metrics(
                 reqs_file=reqs_file,
@@ -455,16 +524,18 @@ async def run_metrics_processing_pipeline_async(
                 semaphore=semaphore,
             )
         )
+        logger.info(f"Queued metrics generation for {url} -> {sim_metrics_file}")
 
     # Step 4: Process tasks in batches
     for i in range(0, len(tasks), batch_size):
         batch = tasks[i : i + batch_size]
+
         logger.info(
-            f"Processing batch {i // batch_size + 1}/{(len(tasks) + batch_size - 1) // batch_size} "
-            f"with {len(batch)} tasks..."
+            f"Starting batch {i // batch_size + 1} of {len(tasks) // batch_size + 1} "
+            f"({len(batch)} tasks in this batch)..."
         )
 
-        # Ensuring batch continues even if one task fails
+        # Run the batch asynchronously and handle failures
         results = await asyncio.gather(*batch, return_exceptions=True)
 
         # Log errors in the batch
@@ -472,7 +543,8 @@ async def run_metrics_processing_pipeline_async(
             if isinstance(result, Exception):
                 logger.error(f"Task {i + j} failed with error: {result}")
 
-    logger.info("Finished processing all missing similarity metrics files.")
+    # Log completion with accurate task count
+    logger.info(f"Successfully processed {len(tasks)} similarity metrics files.")
 
 
 async def run_multivariate_indices_processing_mini_pipeline_async(
@@ -660,108 +732,143 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 
 
 async def run_metrics_re_processing_pipeline_async(
-    mapping_file: Path,
-    generate_metrics: Callable[
-        [Path, Path, Path], Coroutine[Any, Any, None]
-    ] = generate_metrics_from_nested_json_async,
+    mapping_file: Union[Path, str],
+    generate_metrics: Callable = generate_metrics_from_nested_json_async,
+    batch_size: int = 7,
+    max_concurrent: int = 4,
 ) -> None:
     """
-    Re-run the pipeline to process and create missing sim_metrics files by reading from
-    the mapping file asynchronously.
+    * Re-run the pipeline asynchronously to process and create missing sim_metrics files
+    * by reading from the mapping file.
 
     Args:
         - mapping_file (str | Path): Path to the JSON mapping file.
         - generate_metrics (Callable[[Path, Path, Path], Coroutine[Any, Any, None]], optional):
             Asynchronous function to generate the metrics CSV file.
-            Defaults to generate_matching_metrics_from_nested_json_async.
+            Defaults to generate_metrics_from_nested_json_async.
+        - batch_size (int): Number of tasks to process concurrently.
+        - max_concurrent (int): Number of concurrent tasks allowed.
 
     Returns:
         None
     """
-    # Step 1: Read / Validate file mapping
-    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
-        mapping_file
-    )
 
-    if file_mappings_model is None:
+    # Step 1: Ensure mapping_file is a Path object (if it's a string, convert it)
+    mapping_file = Path(mapping_file)
+
+    # Step 2: Load the mapping file into a validated Pydantic model
+    # This ensures the file structure and expected fields are correct before proceeding.
+    file_mappings_model: JobFileMappings = load_mappings_model_from_json(mapping_file)
+    if (
+        file_mappings_model is None
+    ):  # Error handling: Exit if mapping file fails validation.
         logger.error("Failed to load and validate the mapping file. Exiting pipeline.")
         return
 
-    file_mappings_dict = file_mappings_model.root
+    logger.debug(f"Loaded mapping data from {mapping_file}")
 
-    # Step 2: Check if all sim_metrics files exist
+    # Step 3: Identify missing sim_metrics files
+    # (i.e., job posting URLs where the similarity metrics file does not exist)
     missing_metrics = {
-        url: mapping.sim_metrics
-        for url, mapping in file_mappings_dict.items()
-        if not Path(mapping.sim_metrics).exists()
+        str(url): Path(
+            job_paths.sim_metrics
+        )  # Convert sim_metrics path directly to Path object
+        for url, job_paths in file_mappings_model.root.items()
+        if not Path(
+            job_paths.sim_metrics
+        ).exists()  # Check if the sim_metrics file exists
     }
 
+    # If no missing metrics, exit early to save computational resources.
     if not missing_metrics:
         logger.info("All sim_metrics files already exist. Exiting pipeline.")
         return
 
-    # Step 3: Process missing sim_metrics files asynchronously
+    # Log the total number of missing files to provide an overview of the workload.
+    logger.info(f"Found {len(missing_metrics)} missing similarity metrics files.")
+
+    # Step 4: Process missing sim_metrics files asynchronously
+
+    # Step 4.1: Set up concurrency control
+    # ✅ `semaphore` ensures that at most `max_concurrent` tasks run simultaneously.
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    # ✅ List of tasks to be executed asynchronously.
     tasks = []
+
+    # Step 4.2: Iterate through missing sim_metrics files
     for url, sim_metrics_file in missing_metrics.items():
         logger.info(f"Processing missing metrics for {url}")
 
-        # Convert sim_metrics_file to Path object if it's not already
-        sim_metrics_file = Path(sim_metrics_file)
-
-        # Load the requirements and responsibilities files from the mapping
-        reqs_file = Path(file_mappings_dict[url].reqs)
-        resps_file = Path(file_mappings_dict[url].resps)
-
-        # Step 3.1: Check if reqs and resps files exist and are valid JSON files
-        if not reqs_file.exists() or not resps_file.exists():
-            if not reqs_file.exists():
-                logger.error(f"Skipping {url}: Missing requirements file {reqs_file}")
-            if not resps_file.exists():
-                logger.error(
-                    f"Skipping {url}: Missing responsibilities file {resps_file}"
-                )
-            continue
-
-        # Step 3.2: validate the requirements and responsibilities files with pyd models
         try:
-            reqs_data = read_from_json_file(reqs_file)
+            # Convert `url` string to a validated `HttpUrl` object.
+            job_url = TypeAdapter(HttpUrl).validate_python(url)
+            # Fetch the corresponding file paths from the mapping.
+            job_paths = file_mappings_model.root[job_url]
+        except ValidationError as e:
+            logger.error(f"Invalid URL format: {url}. Skipping. Error: {e}")
+            continue  # Skip this iteration if URL validation fails.
 
-            # Validate using the Requirements model
-            validated_requirements = Requirements.model_validate(reqs_data)
+        # ✅ Load the file paths for requirements and responsibilities.
+        reqs_file = Path(job_paths.reqs)  # Convert to Path object
+        resps_file = Path(job_paths.resps)  # Convert to Path object
+
+        # Step 4.3: Validate the requirements JSON file before processing
+        try:
+            reqs_data = read_from_json_file(reqs_file)  # Load file content
+            validated_requirements = Requirements.model_validate(
+                reqs_data
+            )  # Validate with Pydantic
             logger.info(f"Loaded and validated requirements from {reqs_file}")
         except ValidationError as e:
-            logger.error(f"Validation error for requirements: {e}")
-            continue
+            logger.error(f"Validation error for requirements in {reqs_file}: {e}")
+            continue  # Skip processing if validation fails.
 
-        # Attempt to load and validate the responsibilities JSON with ResponsibilityMatches model
+        # Step 4.4: Validate the responsibilities JSON file before processing
         try:
-            resps_data = read_from_json_file(resps_file)
+            resps_data = read_from_json_file(resps_file)  # Load file content
 
-            # If the file lacks a top-level "responsibilities" key, wrap it
+            # ✅ Ensure the file contains a top-level "responsibilities" key.
             if "responsibilities" not in resps_data:
-                resps_data = {"responsibilities": resps_data}
-
-            # If the file lacks a top-level "responsibilities" key, wrap it
-            if "responsibilities" not in resps_data:
-                resps_data = {"responsibilities": resps_data}
+                resps_data = {"responsibilities": resps_data}  # Wrap data if necessary.
 
             validated_responsibilities = ResponsibilityMatches.model_validate(
                 resps_data
-            )
+            )  # Validate with Pydantic
             logger.info(f"Loaded and validated responsibilities from {resps_file}")
         except ValidationError as e:
-            logger.error(f"Validation error when parsing JSON files: {e}")
-            continue
+            logger.error(f"Validation error for responsibilities in {resps_file}: {e}")
+            continue  # ✅ Skip processing if validation fails.
 
-        # Step 3.3: Generate the metrics file asynchronously
-        tasks.append(generate_metrics(reqs_file, resps_file, sim_metrics_file))
-        logger.info(
-            f"Queued metrics generation for {url} to be saved to {sim_metrics_file}"
+        # Step 4.5: Queue task for each missing sim_metrics file - runs asynchronously
+        tasks.append(
+            generate_metrics(
+                reqs_file=reqs_file,
+                resps_file=resps_file,
+                sim_metrics_file=sim_metrics_file,
+                url=url,
+                semaphore=semaphore,  # ✅ Pass the semaphore to control concurrency.
+            )
         )
 
-    # Step 4: run all the tasks concurrently
-    if tasks:
-        await asyncio.gather(*tasks)
-        logger.info("Finished processing all missing sim_metrics files.")
-    else:
-        logger.info("No valid files were found to process.")
+    # Step 5: Process tasks in batches
+    # ✅ Prevents memory overload by processing `batch_size` tasks at a time.
+    for i in range(0, len(tasks), batch_size):
+        batch = tasks[i : i + batch_size]  # Select a batch of tasks
+
+        # Log batch progress (which batch is being processed).
+        logger.info(
+            f"Processing batch {i // batch_size + 1}/{(len(tasks) + batch_size - 1) // batch_size} "
+            f"with {len(batch)} tasks..."
+        )
+
+        # Run the batch asynchronously and handle failures gracefully.
+        results = await asyncio.gather(*batch, return_exceptions=True)
+
+        # Log errors encountered in the batch.
+        for j, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Task {i + j} failed with error: {result}")
+
+    # Final log message to indicate completion of the processing pipeline.
+    logger.info(f"Successfully processed {len(tasks)} similarity metrics files.")

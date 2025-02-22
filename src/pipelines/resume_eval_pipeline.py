@@ -177,7 +177,7 @@ def generate_metrics_from_flat_json(
 
 # *add metrics by processing each row of the dataframe, validate w/t pydantic
 # * and then append the rows to form the dataframe.
-def generate_matching_metrics_from_nested_json(
+def generate_metrics_from_nested_json(
     reqs_file: Union[Path, str],
     resps_file: Union[Path, str],
     metrics_csv_file: Union[Path, str],
@@ -531,7 +531,7 @@ def run_metrics_re_processing_pipeline(
     mapping_file,
     generate_metrics: Callable[
         [Path, Path, Path], None
-    ] = generate_matching_metrics_from_nested_json,
+    ] = generate_metrics_from_nested_json,
 ) -> None:
     """
     Re-run the pipeline to process and create missing sim_metrics files by reading

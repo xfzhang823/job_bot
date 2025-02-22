@@ -30,10 +30,13 @@ from typing import Union, Optional, cast
 import json
 import logging
 from pydantic import ValidationError
+import time
+import httpx
 
 # LLM imports
 from openai import AsyncOpenAI
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, Anthropic
+from anthropic._exceptions import RateLimitError
 import ollama  # ollama remains synchronous as there’s no async client yet
 
 # From own modules
@@ -65,6 +68,7 @@ from project_config import (
     CLAUDE_OPUS,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +87,47 @@ async def run_in_executor_async(func, *args):
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as pool:
         return await loop.run_in_executor(pool, func, *args)
+
+
+# Global variables for rate limiting
+last_request_time = 0
+rate_limit_lock = asyncio.Lock()
+
+
+async def with_rate_limit_and_retry(api_func):
+    """
+    Wrapper to apply rate limiting, retries, and exponential backoff for any API call.
+    """
+    global last_request_time
+
+    min_interval = 0.5  # Ensure at least 500ms between requests
+    max_retries = 5  # Allow up to 5 retries
+    base_delay = 1  # Initial backoff delay (1 sec, 2 sec, 3 sec...)
+
+    for attempt in range(max_retries):
+        async with rate_limit_lock:  # Prevent multiple requests at the same time
+            current_time = time.time()
+            time_since_last = current_time - last_request_time
+
+            if time_since_last < min_interval:
+                await asyncio.sleep(min_interval - time_since_last)
+
+            try:
+                result = await api_func()  # Execute API function
+                last_request_time = time.time()  # Update only after success
+                return result
+
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    retry_after = int(
+                        e.response.headers.get("Retry-After", base_delay + attempt)
+                    )
+                    logger.warning(
+                        f"Rate limit hit, retrying in {retry_after} seconds..."
+                    )
+                    await asyncio.sleep(min(10, retry_after))  # Limit max wait time
+                    continue  # Retry after delay
+                raise  # Stop retrying if max retries exceeded
 
 
 # Unified async API calling function
@@ -109,6 +154,8 @@ async def call_api_async(
 
     This method handles provider-specific nuances (e.g., multi-block responses for Anthropic)
     and validates responses against expected types and Pydantic models.
+
+    Also inclues automatic rate limiting and retry logic to handle API restrictions.
 
     Args:
         client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]):
@@ -165,15 +212,24 @@ async def call_api_async(
 
         if llm_provider.lower() == "openai":
             openai_client = cast(AsyncOpenAI, client)
-            response = await openai_client.chat.completions.create(
-                model=model_id,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+
+            async def openai_request():
+                return await openai_client.chat.completions.create(
+                    model=model_id,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+
+            response = await with_rate_limit_and_retry(openai_request)
+
+            # Handle cases where response or choices is None
+            if not response or not response.choices:
+                raise ValueError("OpenAI API returned an invalid or empty response.")
+
             response_content = response.choices[0].message.content
 
         elif llm_provider.lower() == "anthropic":
@@ -181,22 +237,40 @@ async def call_api_async(
             system_instruction = (
                 "You are a helpful assistant who adheres to instructions."
             )
-            response = await anthropic_client.messages.create(
-                model=model_id,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": system_instruction + prompt}],
-                temperature=temperature,
-            )
+
+            async def anthropic_request():
+                return await anthropic_client.messages.create(
+                    model=model_id,
+                    max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": system_instruction + prompt}],
+                    temperature=temperature,
+                )
+
+            response = await with_rate_limit_and_retry(anthropic_request)
 
             # *Add an extra step to extract content from response object's TextBlocks
             # *(Unlike GPT and LlaMA, Anthropic uses multi-blocks in its responses:
             # *The content attribute of Message is a list of TextBlock objects,
             # *whereas others wrap everything into a single block.)
+
+            # Validate response structure
+            if not response or not response.content:
+                raise ValueError("Empty response received from Anthropic API")
+
+            # Safely access the first content block
+            first_block = response.content[0]
             response_content = (
-                response.content[0].text
-                if hasattr(response.content[0], "text")
-                else str(response.content[0])
+                first_block.text if hasattr(first_block, "text") else str(first_block)
             )
+
+            if not response_content:
+                raise ValueError("Empty content in response from Anthropic API")
+
+            # response_content = (
+            #     response.content[0].text
+            #     if hasattr(response.content[0], "text")
+            #     else str(response.content[0])
+            # )
 
         elif llm_provider.lower() == "llama3":
             # Llama3 remains synchronous, so run it in an executor
