@@ -12,10 +12,9 @@ from pydantic import ValidationError
 
 # User defined
 from models.resume_job_description_io_models import Requirements, Responsibilities
-from utils.generic_utils import read_from_json_file
+from utils.generic_utils import read_from_json_file, save_to_json_file
 from utils.get_file_names import get_file_names
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from utils.generic_utils import save_to_json_file
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
 import logging_config
@@ -47,6 +46,8 @@ def add_multivariate_indices(df: pd.DataFrame) -> pd.DataFrame:
         df = indexer.add_multivariate_indices_to_df()
 
         logger.info("Multivariate indices added.")
+        logger.info(f"After adding indices, First few rows:\n{df.head()}")
+
         return df
 
     except (ValueError, AttributeError) as e:

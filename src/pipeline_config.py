@@ -473,6 +473,24 @@ metrics files based on similarity metrics",
         },
         "kwargs": {"add_indices_func": add_multivariate_indices},
     },
+    "3e_async": {
+        "stage": PipelineStage.EDITING,
+        "description": "Adding multivariate indices to metrics files in iteration 1",
+        # Add extra indices (composite and PCA scores) to similarity files
+        "function": run_multivariate_indices_processing_mini_pipeline_async,
+        # Function to calculate and add extra indices
+        "io": {
+            "openai": {
+                "mapping_file": ITERATE_1_OPENAI_DIR
+                / mapping_file_name,  # Reference file with all file paths in the dir
+            },
+            "anthropic": {
+                "mapping_file": ITERATE_1_ANTHROPIC_DIR
+                / mapping_file_name,  # Reference file with all file paths in the dir
+            },
+        },
+        "kwargs": {"add_indices_func": add_multivariate_indices},
+    },
     "3f": {
         "stage": PipelineStage.EVALUATION,
         "description": "Cleaning similarity metrics files by removing empty rows (iter 1).",

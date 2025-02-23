@@ -333,27 +333,25 @@ def run_pipeline_3b(llm_provider: str = OPENAI, model_id=GPT_4_TURBO):
     run_pipeline("3b", llm_provider=llm_provider, model_id=model_id)
 
 
-def run_pipeline_3c(llm_provider: str = "openai"):
+def run_pipeline_3c(llm_provider: str = OPENAI):
     """
     Pipeline to copy requirements files from iteration 0 to iteration 1.
     """
     run_pipeline("3c", llm_provider=llm_provider)
 
 
-def run_pipeline_3d(llm_provider: str = "openai"):
+def run_pipeline_3d(llm_provider: str = OPENAI):
     """
     Pipeline to evaluate (modified resumes against job requirements and generate similarity metrics.
     """
     run_pipeline("3d", llm_provider=llm_provider)
 
 
-def run_pipeline_3e(llm_provider: str = "openai"):
+def run_pipeline_3e(llm_provider: str = OPENAI):
     """
     Pipeline to add multivariate indices to metrics files in iteration 1.
     """
     run_pipeline("3e", llm_provider=llm_provider)
-
-    # run_adding_multivariate_indices_mini_pipeline(io_config["mapping_file"])
 
 
 def run_pipeline_3f(llm_provider: str = OPENAI):
@@ -409,9 +407,16 @@ async def run_pipeline_3b_async(
     )
 
 
-async def run_pipeline_3d_async(llm_provider: str):
+async def run_pipeline_3d_async(llm_provider: str = OPENAI):
     """
-    Async pipeline to evaluate resumes against job requirements and generate \
-similarity metrics in iter 1.
+    Async pipeline to evaluate resumes against job requirements and generate
+    similarity metrics in iter 1.
     """
     asyncio.run(run_pipeline_async("3d_async", llm_provider=llm_provider))
+
+
+def run_pipeline_3e_async(llm_provider: str = OPENAI):
+    """
+    Async pipeline to add multivariate indices to metrics files in iteration 1.
+    """
+    asyncio.run(run_pipeline_async("3e_async", llm_provider=llm_provider))

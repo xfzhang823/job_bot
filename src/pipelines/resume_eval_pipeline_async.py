@@ -404,6 +404,13 @@ async def generate_metrics_from_nested_json_async(
             df = await asyncio.to_thread(categorize_scores_for_df, df)
 
             # Step 4: Save the validated metrics to a CSV file asynchronously
+            logger.info(
+                f"DataFrame columns before saving: {df.columns}"
+            )  # todo: debug; delete later
+            logger.info(
+                f"DataFrame first few rows:\n{df.head()}"
+            )  # todo: debug; delete later
+
             await save_df_to_csv_file_async(df=df, filepath=sim_metrics_file)
             # await asyncio.to_thread(final_df.to_csv, metrics_csv_file, index=False)
             logger.info(f"Similarity metrics saved successfully to {sim_metrics_file}")
@@ -628,6 +635,7 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 
             # Verify required columns
             required_columns = {
+                "job_posting_url",
                 "responsibility_key",
                 "responsibility",
                 "requirement_key",
@@ -686,6 +694,7 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
                 f"Before adding indices: {validated_df.shape}"
             )  # todo: debugging; delete later
             updated_df = add_indices_func(validated_df)
+            logger.debug(f"updated df: {updated_df}")  # todo: debug; delete later
             if updated_df is None:
                 logger.error(
                     f"'{add_indices_func.__name__}' returned None for file '{file_path}'. Skipping."
@@ -693,6 +702,12 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
                 continue
             logger.debug(
                 f"After adding indices: {updated_df.shape}"
+            )  # todo: debugging; delete later
+            logger.info(
+                f"Columns after adding indices: {df.columns}"
+            )  # todo: debugging; delete later
+            logger.info(
+                f"First few rows:\n{df.head()}"
             )  # todo: debugging; delete later
 
             # Remove fully empty rows (where all columns are NaN) and replace empty strings with NaN
@@ -734,8 +749,8 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 async def run_metrics_re_processing_pipeline_async(
     mapping_file: Union[Path, str],
     generate_metrics: Callable = generate_metrics_from_nested_json_async,
-    batch_size: int = 7,
-    max_concurrent: int = 4,
+    batch_size: int = 10,
+    max_concurrent: int = 6,
 ) -> None:
     """
     * Re-run the pipeline asynchronously to process and create missing sim_metrics files
