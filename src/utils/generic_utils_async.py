@@ -543,7 +543,7 @@ async def save_df_to_csv_file_async(
     string-based writing.
 
     Two Solutions:
-    1. **For full async writing** (small/medium files, cloud storage):
+    1. For full async writing (small/medium files, cloud storage):
     - Convert the DataFrame to a string using `StringIO`, then write asynchronously with
     `aiofiles.open()`.
     - This avoids blocking but may not be ideal for large files.

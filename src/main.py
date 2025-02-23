@@ -170,7 +170,10 @@ def main_anthropic():
     execute_pipeline("3d_async", llm_provider=ANTHROPIC, model_id=model_id)
 
     # ✅ Step 12: Add Multivariate Indices to Metrics Files in Iteration 1
-    execute_pipeline("3e", llm_provider=ANTHROPIC, model_id=model_id)
+    execute_pipeline("3e_async", llm_provider=ANTHROPIC, model_id=model_id)
+
+    # ✅ Step 13: Clean Metrics Files in Iteration 1
+    execute_pipeline("3f", llm_provider=ANTHROPIC, model_id=model_id)
 
 
 def main_openai():
@@ -211,7 +214,10 @@ def main_openai():
     execute_pipeline("3d_async", llm_provider=OPENAI, model_id=model_id)
 
     # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
-    execute_pipeline("3e", llm_provider=OPENAI, model_id=model_id)
+    execute_pipeline("3e_asyc", llm_provider=OPENAI, model_id=model_id)
+
+    # ✅ Step 12: Clean Metrics Files in Iteration 1
+    execute_pipeline("3f", llm_provider=OPENAI, model_id=model_id)
 
 
 if __name__ == "__main__":

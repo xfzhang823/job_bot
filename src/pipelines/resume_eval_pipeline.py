@@ -501,7 +501,9 @@ def run_multivariate_indices_processing_mini_pipeline(
                 continue
 
             # Save the updated DataFrame asynchronously
-            save_to_json_file(data=updated_df, file_path=file)
+            save_df_to_csv_file(
+                data=updated_df, file_path=file
+            )  # todo: need to fix - save to df func is only in async version now
             logger.info(f"Successfully processed and saved '{file}'.")
 
         except FileNotFoundError:
