@@ -3,13 +3,12 @@
 import os
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Type, Union
 import json
 import io
 import pandas as pd
-import asyncio
 import aiofiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 # User defined
 from utils.get_file_names import get_file_names
@@ -445,67 +444,109 @@ def pretty_print_json(data):
         print("The provided data is not a valid JSON object (dict or list).")
 
 
-async def read_from_json_async(filename, key=None):
+async def read_json_file_async(filename: Path | str, key: str = "") -> Any:
     """
-    Asynchronous version of reading a JSON file:
-    Loads data from a master JSON file and extracts specific sections or values.
+    Asynchronously reads a JSON file and extracts a specific section
+    if a key is provided.
 
     Args:
-        filename (str): The path to the master JSON file.
-        key (str, optional): If provided, extracts the data under this specific key.
+        filename (Path | str): The path to the JSON file.
+        key (str, optional): Extracts the data under this specific key if provided.
 
     Returns:
-        dict or list: The extracted data from the JSON file.
-        None: If the file does not exist or is empty.
+        dict | list | None: Extracted JSON content or None if file is missing/empty.
 
     Raises:
-        KeyError: If the specified key is not found in the JSON data.
-        FileNotFoundError: If the JSON file is not found.
-        JSONDecodeError: If there is an error decoding the JSON data.
+        FileNotFoundError: If the directory does not exist.
+        KeyError: If the specified key is missing in the JSON data.
+        json.JSONDecodeError: If JSON parsing fails.
     """
-    # Check directory exist or not
-    directory = os.path.dirname(filename)
-    if not os.path.exists(directory):
+    filename = Path(filename)  # Convert to Path object if string
+    directory = filename.parent
+
+    # Ensure directory exists
+    if not directory.exists():
         raise FileNotFoundError(
             f"Directory '{directory}' does not exist. Please create the directory first."
         )
 
-    # Check if the file exists; if not, return an empty dictionary to handle the creation
-    if not os.path.exists(filename):
-        logging.info(f"File {filename} not found. It will be created.")
+    # If file doesn't exist, return empty data
+    if not filename.exists():
+        logger.info(f"File {filename} not found. It will be created.")
         return {}
 
     try:
         async with aiofiles.open(filename, "r", encoding="utf-8") as f:
             file_content = await f.read()
 
-        # Parse the JSON content
+        # Parse JSON content
         master_data = json.loads(file_content)
 
-        # Debugging: Log the loaded data structure
+        # Debugging: Log loaded structure
         logger.info(f"Loaded data from {filename}")
 
-        # If a key is provided, extract data under that key
+        # Extract data under the key if provided
         if key:
             if key in master_data:
-                logging.info(f"Data for key '{key}' found in {filename}.")
+                logger.info(f"Data for key '{key}' found in {filename}.")
                 return master_data[key]
             else:
                 raise KeyError(f"Key '{key}' not found in the JSON data.")
-        else:
-            return master_data  # Return the entire JSON data if no key is provided
+
+        return master_data  # Return entire JSON data if no key is specified
 
     except json.JSONDecodeError as e:
-        print(f"Error decoding JSON from {filename}: {e}")
         logger.error(f"Error decoding JSON from {filename}: {e}")
-        raise  # Re-raise the exception to handle it outside the function
+        raise  # Re-raise so caller function can handle it
     except Exception as e:
-        print(f"Error loading data from {filename}: {e}")
         logger.error(f"Error loading data from {filename}: {e}")
-        raise  # Re-raise any other exceptions to handle them outside the function
+        raise
 
 
-async def read_from_csv_async(filepath):
+async def read_and_validate_json_async(
+    file_path: Path | str, model: Type[BaseModel], expected_key: str = ""
+) -> BaseModel | None:
+    """
+    Asynchronously loads and validates JSON data using a Pydantic model.
+
+    Args:
+        - file_path (Path | str): Path to the JSON file.
+        - model (Type[BaseModel]): Pydantic model to validate the data.
+        - expected_key (str, optional): If provided, extracts and validates
+        data under this key.
+
+    Returns:
+        BaseModel | None: Validated data if successful, None otherwise.
+
+    Raises:
+        FileNotFoundError: If file is missing.
+        ValidationError: If data does not match expected structure.
+    """
+    try:
+        data = await read_json_file_async(
+            file_path
+        )  # Read once, avoid duplicate file I/O
+
+        # Ensure expected_key exists before modifying structure
+        if expected_key:
+            if isinstance(data, dict) and expected_key not in data:
+                data = {expected_key: data}
+
+        validated_data = model.model_validate(data)  # Validate with Pydantic
+        logger.info(f"Loaded and validated {expected_key or 'data'} from {file_path}")
+        return validated_data
+
+    except ValidationError as e:
+        logger.error(f"Validation error in {file_path}: {e}")
+    except FileNotFoundError:
+        logger.error(f"File not found: {file_path}")
+    except Exception as e:
+        logger.error(f"Unexpected error in {file_path}: {e}")
+
+    return None  # Return None if validation fails
+
+
+async def read_csv_file_async(filepath):
     """Asynchronously read CSV file using aiofiles and io.StringIO."""
     async with aiofiles.open(filepath, mode="r") as f:
         content = await f.read()

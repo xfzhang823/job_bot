@@ -46,8 +46,9 @@ from utils.generic_utils import (
     save_to_json_file,
 )
 from utils.generic_utils_async import (
-    read_from_json_async,
-    read_from_csv_async,
+    read_json_file_async,
+    read_csv_file_async,
+    read_and_validate_json_async,
     save_df_to_csv_file_async,
     save_data_to_json_file_async,
 )
@@ -425,8 +426,8 @@ async def generate_metrics_from_nested_json_async(
 async def run_metrics_processing_pipeline_async(
     mapping_file: Path | str,
     generate_metrics: Callable = generate_metrics_from_flat_json_async,
-    batch_size: int = 7,  # Limit group size for batching (# of tasks/batch)
-    max_concurrent: int = 4,  # Limit number of concurrent tasks
+    batch_size: int = 10,  # Limit group size for batching (# of tasks/batch)
+    max_concurrent: int = 6,  # Limit number of concurrent tasks
 ) -> None:
     """
     * Asynchronous pipeline to process and create missing similarity metrics files
@@ -441,10 +442,14 @@ async def run_metrics_processing_pipeline_async(
     Returns:
         None
     """
+    strict_mode = False  # Set to False if you want to skip bad files
+
     logger.info("Starting async metrics processing pipeline...")
 
     # Ensure mapping_file is a Path object
-    mapping_file = Path(mapping_file)
+    if not isinstance(mapping_file, Path):
+        mapping_file = Path(mapping_file)
+
     if not mapping_file.exists():
         raise ValueError(f"The file '{mapping_file}' does not exist.")
 
@@ -474,7 +479,6 @@ async def run_metrics_processing_pipeline_async(
     logger.info(f"Found {len(missing_metrics)} missing similarity metrics files.")
 
     # Step 3: Process missing sim_metrics files concurrently with batching
-
     # Step 3.1: Setup placeholders
     semaphore = asyncio.Semaphore(max_concurrent)
     tasks = []
@@ -491,39 +495,32 @@ async def run_metrics_processing_pipeline_async(
             logger.error(f"Invalid URL format: {url}. Skipping. Error: {e}")
             continue
 
-        # Load the requirements and responsibilities files from the mapping
+        # Load & validate the requirements and responsibilities files from mapping
+        # w/t read_and_validate_json function
         reqs_file = Path(job_paths.reqs)
         resps_file = Path(job_paths.resps)
 
-        # Validate the requirements file
-        try:
-            reqs_data = read_from_json_file(reqs_file)
-            validated_requirements = Requirements.model_validate(reqs_data)
-            logger.info(f"Loaded and validated requirements from {reqs_file}")
-        except ValidationError as e:
-            logger.error(f"Validation error for requirements in {reqs_file}: {e}")
-            continue
+        validated_requirements = await read_and_validate_json_async(
+            reqs_file, Requirements
+        )
+        validated_responsibilities = await read_and_validate_json_async(
+            resps_file, Responsibilities
+        )
 
-        # Validate the responsibilities file
-        try:
-            resps_data = read_from_json_file(resps_file)
+        if not validated_requirements or not validated_responsibilities:
+            logger.error(f"Validation failed for {reqs_file} or {resps_file}.")
 
-            # If "responsibilities" is missing, wrap the structure
-            if "responsibilities" not in resps_data:
-                resps_data = {"responsibilities": resps_data}
-
-            validated_responsibilities = ResponsibilityMatches.model_validate(
-                resps_data
-            )
-            logger.info(f"Loaded and validated responsibilities from {resps_file}")
-
-        except ValidationError as e:
-            logger.error(f"Validation error for responsibilities in {resps_file}: {e}")
-            continue
+            if strict_mode:  # If True, then stop the process...
+                raise ValueError(
+                    f"Stopping execution due to invalid JSON in {reqs_file} or {resps_file}."
+                )
+            else:
+                logger.warning("Skipping and continuing processing.")
+                continue
 
         # Queue tasks after validation succeeds
         tasks.append(
-            generate_metrics(
+            await generate_metrics(
                 reqs_file=reqs_file,
                 resps_file=resps_file,
                 sim_metrics_file=sim_metrics_file,
@@ -531,7 +528,7 @@ async def run_metrics_processing_pipeline_async(
                 semaphore=semaphore,
             )
         )
-        logger.info(f"Queued metrics generation for {url} -> {sim_metrics_file}")
+        logger.info(f"📝 Queued metrics generation for {url} -> {sim_metrics_file}")
 
     # Step 4: Process tasks in batches
     for i in range(0, len(tasks), batch_size):
@@ -616,7 +613,7 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
         try:
             logger.info(f"Processing file: {file_path}")
 
-            df = await read_from_csv_async(file_path)
+            df = await read_csv_file_async(file_path)
 
             # todo: debugging, delete later
             logger.debug(
@@ -758,7 +755,8 @@ async def run_metrics_re_processing_pipeline_async(
 
     Args:
         - mapping_file (str | Path): Path to the JSON mapping file.
-        - generate_metrics (Callable[[Path, Path, Path], Coroutine[Any, Any, None]], optional):
+        - generate_metrics (Callable[[Path, Path, Path], Coroutine[Any, Any, None]],
+        optional):
             Asynchronous function to generate the metrics CSV file.
             Defaults to generate_metrics_from_nested_json_async.
         - batch_size (int): Number of tasks to process concurrently.
@@ -767,9 +765,18 @@ async def run_metrics_re_processing_pipeline_async(
     Returns:
         None
     """
+    strict_mode = False  # If True, fail pipeline on validation errors
+
+    logger.info("🚀 Starting re-processing pipeline for missing similarity metrics...")
 
     # Step 1: Ensure mapping_file is a Path object (if it's a string, convert it)
-    mapping_file = Path(mapping_file)
+    if not isinstance(mapping_file, Path):
+        mapping_file = Path(mapping_file)
+
+    if not mapping_file.exists():
+        raise ValueError(f"❌ Mapping file '{mapping_file}' does not exist.")
+
+    logger.info(f"📂 Loading mapping file: {mapping_file}")
 
     # Step 2: Load the mapping file into a validated Pydantic model
     # This ensures the file structure and expected fields are correct before proceeding.
@@ -800,7 +807,7 @@ async def run_metrics_re_processing_pipeline_async(
         return
 
     # Log the total number of missing files to provide an overview of the workload.
-    logger.info(f"Found {len(missing_metrics)} missing similarity metrics files.")
+    logger.info(f"🔍 Found {len(missing_metrics)} missing similarity metrics files.")
 
     # Step 4: Process missing sim_metrics files asynchronously
 
@@ -824,47 +831,42 @@ async def run_metrics_re_processing_pipeline_async(
             logger.error(f"Invalid URL format: {url}. Skipping. Error: {e}")
             continue  # Skip this iteration if URL validation fails.
 
+        # Step 4.3: Validate the requirements JSON file before processing
         # ✅ Load the file paths for requirements and responsibilities.
         reqs_file = Path(job_paths.reqs)  # Convert to Path object
         resps_file = Path(job_paths.resps)  # Convert to Path object
 
-        # Step 4.3: Validate the requirements JSON file before processing
-        try:
-            reqs_data = read_from_json_file(reqs_file)  # Load file content
-            validated_requirements = Requirements.model_validate(
-                reqs_data
-            )  # Validate with Pydantic
-            logger.info(f"Loaded and validated requirements from {reqs_file}")
-        except ValidationError as e:
-            logger.error(f"Validation error for requirements in {reqs_file}: {e}")
-            continue  # Skip processing if validation fails.
+        # ✅ Validate JSON files asynchronously
+        validated_requirements = await read_and_validate_json_async(
+            reqs_file, Requirements
+        )
+        validated_responsibilities = await read_and_validate_json_async(
+            resps_file, NestedResponsibilities, "responsibilities"
+        )
 
-        # Step 4.4: Validate the responsibilities JSON file before processing
-        try:
-            resps_data = read_from_json_file(resps_file)  # Load file content
+        if not validated_requirements or not validated_responsibilities:
+            logger.error(f"❌ Validation failed for: {reqs_file} or {resps_file}.")
 
-            # ✅ Ensure the file contains a top-level "responsibilities" key.
-            if "responsibilities" not in resps_data:
-                resps_data = {"responsibilities": resps_data}  # Wrap data if necessary.
-
-            validated_responsibilities = ResponsibilityMatches.model_validate(
-                resps_data
-            )  # Validate with Pydantic
-            logger.info(f"Loaded and validated responsibilities from {resps_file}")
-        except ValidationError as e:
-            logger.error(f"Validation error for responsibilities in {resps_file}: {e}")
-            continue  # ✅ Skip processing if validation fails.
+            if strict_mode:
+                raise ValueError(
+                    f"❌ Stopping execution due to invalid JSON in {reqs_file} or {resps_file}."
+                )
+            else:
+                logger.warning("⚠️ Skipping and continuing processing.")
+                continue
 
         # Step 4.5: Queue task for each missing sim_metrics file - runs asynchronously
-        tasks.append(
+        task = asyncio.create_task(
             generate_metrics(
                 reqs_file=reqs_file,
                 resps_file=resps_file,
                 sim_metrics_file=sim_metrics_file,
                 url=url,
-                semaphore=semaphore,  # ✅ Pass the semaphore to control concurrency.
+                semaphore=semaphore,
             )
         )
+        tasks.append(task)
+        logger.info(f"📝 Queued metrics generation for {url} -> {sim_metrics_file}")
 
     # Step 5: Process tasks in batches
     # ✅ Prevents memory overload by processing `batch_size` tasks at a time.
@@ -873,7 +875,7 @@ async def run_metrics_re_processing_pipeline_async(
 
         # Log batch progress (which batch is being processed).
         logger.info(
-            f"Processing batch {i // batch_size + 1}/{(len(tasks) + batch_size - 1) // batch_size} "
+            f"🚀 Processing batch {i // batch_size + 1}/{(len(tasks) + batch_size - 1) // batch_size} "
             f"with {len(batch)} tasks..."
         )
 
