@@ -204,10 +204,6 @@ class ResponsibilityMatches(BaseModel):
     )
 
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
-from typing import Dict
-
-
 class NestedResponsibilities(BaseModel):
     """
     Pydantic model for validating job responsibilities after iteration 1.

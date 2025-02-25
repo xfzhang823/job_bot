@@ -171,6 +171,7 @@ async def modify_multi_resps_based_on_reqs_async(
     requirements: Dict[str, str],
     llm_provider: str,
     model_id: str,
+    no_of_concurrent_workers: int = 5,
 ) -> ResponsibilityMatches:
     """
     * Async version of the modify_multi_resps_based_on_reqs function.
@@ -221,13 +222,19 @@ async def modify_multi_resps_based_on_reqs_async(
 
     # Limit the number of concurrent tasks (in this case, coroutines) that
     # can run simultaneously
-    semaphore = asyncio.Semaphore(3)  # Adjust limit as needed
+    semaphore = asyncio.Semaphore(no_of_concurrent_workers)  # Adjust limit as needed
 
     async def modify_resp_with_limit(resp_key: str, resp: str):
+        logger.info(f"🔄 START processing {resp_key}")  # Log before starting
+
         async with semaphore:
-            return await modify_resp_based_on_reqs_async(
+            result = await modify_resp_based_on_reqs_async(
                 resp_key, resp, requirements, llm_provider, model_id
             )
+            logger.info(
+                f"✅ DONE processing {resp_key}.\nNo of optimized texts: {len(result[1].optimized_by_requirements)}"
+            )  # Log after finishing
+            return result
 
     tasks = [
         modify_resp_with_limit(resp_key, resp)
@@ -240,10 +247,23 @@ async def modify_multi_resps_based_on_reqs_async(
     for result in results:
         if isinstance(result, Exception):
             logger.error(f"Task failed with exception: {result}")
-        elif isinstance(result, tuple) and len(result) == 2:
+        elif (
+            isinstance(result, tuple) and len(result) == 2
+        ):  # Check if result is a tuple with 2 parameters (key and text)
             # Unpack only if it's a tuple with expected length
             resp_key, modifications = result
-            modified_responsibilities[resp_key] = modifications
+
+            # Get or initialize ResponsibilityMatch (setdefault fetches existing
+            # data first and then add new)
+            resp_match = modified_responsibilities.setdefault(
+                resp_key, ResponsibilityMatch(optimized_by_requirements={})
+            )
+
+            # Update existing requirement matches
+            resp_match.optimized_by_requirements.update(
+                modifications.optimized_by_requirements
+            )
+
         else:
             logger.warning(f"Unexpected result format: {result}")
 

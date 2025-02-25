@@ -311,6 +311,7 @@ async def run_resume_editing_pipeline_async(
             requirements=validated_requirements.requirements,
             llm_provider=llm_provider,
             model_id=model_id,
+            no_of_concurrent_workers=7,  # If running multiple urls, then dial this down to be safe
         )  # returns model ResponsibilityMatches
 
         logger.info(
@@ -336,8 +337,16 @@ async def run_resume_editing_pipeline_async(
             f"Attempting to serialize to {output_file}"
         )  # todo debug; delete later
         try:
+            # Dump the full modified_resps model into a dictionary
+            modified_resps_dict = modified_resps.model_dump()
+
+            # Extract only the "responsibilities" key, which is now fully converted
+            modified_resps_dict = modified_resps_dict["responsibilities"]
+
+            # Pass the fully converted dictionary to NestedResponsibilities
             modified_resps_with_url = NestedResponsibilities(
-                url=url, responsibilities=modified_resps
+                url=url,
+                responsibilities=modified_resps_dict,  # now a valid dict format
             )
             logger.info(
                 f"Successfully constructed NestedResponsibilities: {modified_resps_with_url}"
