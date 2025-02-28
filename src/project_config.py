@@ -62,7 +62,7 @@ INPUT_DIR = INPUT_OUTPUT_DIR / "input"
 
 # * Resume file in JSON format
 # resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
-RESUME_JSON_FILE = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
+RESUME_JSON_FILE = INPUT_DIR / "Resume_Xiaofei_Zhang_2025_template_for_LLM.json"
 JOB_POSTING_URLS_FILE = INPUT_DIR / "job_posting_urls.json"
 RESUME_DOCX_FILE = INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.docx"
 # resume_json_file_temp = (
@@ -114,13 +114,6 @@ SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR = (
 )
 url_to_file_mapping_file_iterate_0_openai = ITERATE_0_OPENAI_DIR / mapping_file_name
 
-
-# logging.info(
-#     f"Iteration 0 directories set to: {', '.join(str(dir) for dir in list_of_dirs)}"
-# )
-
-# Iteration 1
-# logging.info("Setting up iteration 1 directories")
 REQS_FILES_ITERATE_1_OPENAI_DIR = ITERATE_1_OPENAI_DIR / requirements_dir_name
 RESPS_FILES_ITERATE_1_OPENAI_DIR = ITERATE_1_OPENAI_DIR / responsibilities_dir_name
 PRUNED_RESPS_FILES_ITERATE_1_DIR_OPENAI = (
@@ -207,6 +200,11 @@ URL_TO_FILE_MAPPING_FILE_ITERATE_2_ANTHROPIC = (
     ITERATE_2_ANTHROPIC_DIR / mapping_file_name
 )
 
+# Human Review Directory
+HUMAN_REVIEW_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "human_review"
+RESPS_REQS_MATCHING_DIR = HUMAN_REVIEW_INPUT_OUTPUT_DIR / "resps_reqs_matching"
+
+# * Data File Configuration
 DATA_FILES_CONFIG = {
     "job_posting_urls_file": {
         "path": JOB_POSTING_URLS_FILE,

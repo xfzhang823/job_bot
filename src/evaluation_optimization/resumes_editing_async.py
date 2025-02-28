@@ -72,7 +72,7 @@ async def modify_resp_based_on_reqs_async(
                 resp_key="resp1",
                 resp="Managed a team of 5 developers",
                 reqs={"req1": "Experience leading software development teams."},
-                model="openai",
+                llm_provider="openai",
                 model_id="gpt-4-turbo"
             )
 

@@ -47,7 +47,7 @@ from project_config import OPENAI, ANTHROPIC, CLAUDE_SONNET, GPT_4_TURBO, CLAUDE
 logger = logging.getLogger(__name__)
 
 
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # Prevent interactive mode
 
 
 # High level function to call the run_pipeline functions (sync and async)

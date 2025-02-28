@@ -184,6 +184,7 @@ def generate_metrics_from_nested_json(
     reqs_file: Union[Path, str],
     resps_file: Union[Path, str],
     metrics_csv_file: Union[Path, str],
+    url: str,  # todo: fix later in the pipeline - add url to be passed in
 ) -> None:
     """
     Generate similarity metrics between nested responsibilities and requirements
@@ -260,6 +261,7 @@ def generate_metrics_from_nested_json(
             # Step 4: Validate using SimilarityMetrics model
             try:
                 similarity_metrics_model = SimilarityMetrics(
+                    job_posting_url=url,
                     responsibility_key=responsibility_key,
                     responsibility=responsibility_text,
                     requirement_key=requirement_key,

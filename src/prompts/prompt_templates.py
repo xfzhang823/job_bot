@@ -28,7 +28,9 @@ Format: Plain text output
 # !Therefore, you need to escape them by doubling them ({{ for { and }} for })!!!
 # Updated this with Claude's suggested prompt (generally better than other LLMs)
 CONVERT_JOB_POSTING_TO_JSON_PROMPT = """
-You are a skilled professional at analyzing job descriptions. Extract key information and relevant content from the provided job description, converting it into a comprehensive, valid JSON format. Exclude purely website-related information or general company boilerplate not specific to the job.
+You are a skilled professional at analyzing job descriptions. Extract key information and relevant content \
+from the provided job description, converting it into a comprehensive, valid JSON format. \
+Exclude purely website-related information or general company boilerplate not specific to the job.
 
 Instructions:
 1. Identify and extract the following key details if present:
@@ -75,126 +77,59 @@ Extract all job-relevant information, but exclude website-specific content and g
 """
 
 EXTRACT_JOB_REQUIREMENTS_PROMPT = """
-As a job description analyzer, extract and categorize qualifications, responsibilities, skills, and other criteria from \
-the following job description. 
-Ensure to:
-- Include technical and soft skills, educational and experience requirements, and cultural fit aspects.
-- Exclude any content related to benefits, perks, or compensation (e.g., health insurance, remote work options, \
-401(k) matching, paid time off, bonuses, stock options.)
+You are a job description analysis expert. Extract and organize **explicit** and **implied** job requirements \
+from the following job description. Group similar responsibilities into concise themes to avoid excessive bullets.
 
-**Job Description:**
+### **Instructions:**
+1️. **Extract Key Employer Expectations**  
+   - Identify requirements from sections like 'Qualifications,' 'Requirements,' 'Responsibilities,' 'Skills,' 'Experience,' 'What Will You Do' and similar.  
+   - Include both **explicit** qualifications (stated clearly) and **implied** qualifications (inferred from responsibilities).  
+   - Summarize responsibilities into **high-level themes** rather than listing every detail.
+
+2️. **Categorize into Five Tiers:**  
+   - **pie_in_the_sky**: Ambitious, high-level expectations (e.g., "Led multi-billion dollar transformations").  
+   - **down_to_earth**: Practical, commonly expected qualifications (e.g., "5+ years of business development experience").  
+   - **bare_minimum**: Essential, non-negotiable requirements (e.g., "Bachelor’s degree in marketing").  
+   - **cultural_fit**: Soft skills, values, and leadership qualities (e.g., "Collaborative, growth-oriented mindset").  
+   - **other**: Specific tools, certifications, or unique qualifications (e.g., "Expertise in Salesforce CRM").
+
+3️. **Group Responsibilities into Concise, Meaningful Insights If Possible**  
+   - Instead of listing **every** responsibility separately, **group similar responsibilities** into **high-level summaries**.  
+   - Example:
+     ✅ "Develop and execute enterprise sales strategies, manage key client relationships, and drive revenue growth."`
+     ❌ "Develop enterprise sales strategies."`, `"Manage client relationships."`, `"Drive revenue growth."` *(Too granular!)*  
+
+4️. **Limit Output Size**  
+   - ⚡ **Maximum 5-7 key points per category** (Choose the most representative ones).
+   - 🚀 **Avoid redundancy** (Don't repeat qualifications across categories).  
+
+
+### **Job Description to Analyze:**
 {content}
 
-<Instructions:>
-1. Extract all relevant information on employer expectations from sections like 'Qualifications,' 'Requirements,' 'Responsibilities,' 'Skills,' 'Education,' 'Experience,' 'About Us,' 'Company Overview,' 'Our Mission,' 'Core Values,' and similar.
 
-2. Create an 'ask list' from the employer's perspective.
-
-3. Categorize items into five levels, prioritizing within each category (1 being highest priority):
-   - **pie_in_the_sky**: Aspirational, ideal qualifications (e.g., '10+ years in emerging tech,' 'Ph.D. from top-tier university')
-   - **down_to_earth**: Practical, common requirements (e.g., '3+ years in related field,' 'Proficiency in Excel')
-   - **bare_minimum**: Essential, non-negotiable qualifications (e.g., 'Bachelor's degree,' 'Customer service experience')
-   - **cultural_fit**: Company culture and soft skills (e.g., 'Team player,' 'Committed to diversity')
-   - **other**: Unique or unusual requirements
-
-4. For quantitative requirements (e.g., years of experience, number of projects):
-   - Include the specific quantity in the requirement description
-   - If a range is given, use the lower bound for 'bare_minimum' and upper bound for 'down_to_earth' or 'pie_in_the_sky' as appropriate
-
-5. **Extract all implicit requirements**: If the job description implies a skill or qualification \
-(e.g., "collaborating with cross-functional teams" implies teamwork or communication skills), include it in \
-the appropriate category.
-
-6. Prioritize **completeness** over brevity. Ensure all relevant details are captured, even if they are not explicitly \
-stated in labeled sections.   
-
-</Instructions>
-
-Output Structure:
+### **Expected Output Format (JSON):**
 {{
   "pie_in_the_sky": [
-    "<Aspirational requirement 1>",
-    "<Aspirational requirement 2>",
-    ...
+    "Proven success leading large-scale business growth initiatives at the enterprise level.",
+    "Track record of driving multi-million dollar revenue increases through strategic market expansion."
   ],
   "down_to_earth": [
-    "<Practical requirement 1>",
-    "<Practical requirement 2>",
-    ...
+    "5+ years of experience in business development, client relationship management, or marketing.",
+    "Proficiency in CRM tools such as Salesforce for tracking and analyzing client interactions."
   ],
   "bare_minimum": [
-    "<Essential requirement 1>",
-    "<Essential requirement 2>",
-    ...
+    "Bachelor’s degree in marketing, business, or a related field.",
+    "Strong verbal and written communication skills."
   ],
   "cultural_fit": [
-    "<Cultural or values-based requirement 1>",
-    "<Cultural or values-based requirement 2>",
-    ...
+    "Collaborative leadership style with a growth-oriented mindset.",
+    "Ability to mentor and develop high-performing teams."
   ],
   "other": [
-    "<Other unique requirement 1>",
-    "<Other unique requirement 2>",
-    ...
+    "Experience working in professional services, Big Four firms, or consulting environments."
   ]
 }}
-
-Ensure valid JSON format and return JSON block only, without any explanations, preambles, markdown syntax. Remove non-ASCII and special characters. Trim spaces and newlines.
-"""
-
-
-EXTRACT_JOB_REQUIREMENTS_PROMPT_OLD_VERSION = """
-You are a skilled professional at analyzing job descriptions. Given the following job description, extract all sections relevant to a candidate's qualifications, responsibilities, skills, education, experience, company culture, values, or any other unique criteria that are important to the employer. Search broadly for sections that match these categories, including those with different titles or phrasing that express similar ideas. Use synonyms and context to find all relevant information. Prioritize recall over precision to ensure no important details are missed.
-
-**Job Description:**
-{content}
-
-<Instructions:>
-1. Extract any text that provides information on what the employer wants, needs, or expects from candidates. This includes but is not limited to sections labeled as 'Qualifications,' 'Requirements,' 'Responsibilities,' 'Skills,' 'Education,' 'Experience,' 'About Us,' 'Company Overview,' 'Our Mission,' 'Core Values,' or similar.
-2. Combine all the extracted information into a single 'ask list' from the employer's perspective, including both technical and soft skills, educational and experience requirements, cultural fit, and any other relevant criteria.
-3. Categorize the items in this 'ask list' into five levels based on their degree of importance or realism:
-   - **pie_in_the_sky**: Aspirational qualifications or skills that represent the ideal candidate. These are nice-to-have attributes that few candidates are likely to possess (e.g., '10+ years of experience in a specific emerging technology,' 'Ph.D. in Data Science from a top-tier university').
-   - **down_to_earth**: Practical and achievable requirements that many qualified candidates would meet. These are commonly expected skills or experience levels (e.g., '3+ years of experience in a related field,' 'Proficiency in Excel and PowerPoint').
-   - **bare_minimum**: Essential qualifications or skills that are non-negotiable for the role. These are the minimum requirements a candidate must meet to be considered (e.g., 'Bachelor's degree in relevant field,' 'Experience in customer service').
-   - **cultural_fit**: Attributes related to company culture, values, or soft skills that indicate a good match with the organization's environment and ethos (e.g., 'Strong team player,' 'Committed to diversity and inclusion').
-   - **other**: Any additional information that is relevant but does not fit into the above categories. Be creative and use your understanding of job descriptions to identify any unique or unusual requirements or expectations that the employer may have.
-</Instructions>
-
-Output Structure:
-{{
-  "pie_in_the_sky": [
-    "<Aspirational requirement 1>",
-    "<Aspirational requirement 2>",
-    "..."
-  ],
-  "down_to_earth": [
-    "<Practical requirement 1>",
-    "<Practical requirement 2>",
-    "..."
-  ],
-  "bare_minimum": [
-    "<Essential requirement 1>",
-    "<Essential requirement 2>",
-    "..."
-  ],
-  "cultural_fit": [
-    "<Cultural or values-based requirement 1>",
-    "<Cultural or values-based requirement 2>",
-    "..."
-  ],
-  "other": [
-    "<Other unique requirement 1>",
-    "<Other unique requirement 2>",
-    "..."
-  ]
-}}
-
-JSON Formatting Instructions:
-- Ensure every key and value is correctly enclosed in double quotes. 
-- Validate the JSON format before outputting it. 
-- Remove non-ASCII characters, special characters, and control characters. 
-- Trim leading and trailing spaces and newline characters from all values. 
-- Return only the JSON block without any explanations, preambles, markdown syntax, or other extraneous text in the output.
 """
 
 SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT = """

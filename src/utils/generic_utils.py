@@ -345,16 +345,18 @@ def fetch_new_urls(existing_url_list_file, url_list_file):
     return new_urls
 
 
-def find_project_root(starting_path=None, marker=".git"):
+def find_project_root(starting_path=None, marker=".git") -> Path | None:
     """
     Recursively find the root directory of the project by looking for a specific marker.
 
     Args:
-        starting_path (str or Path): The starting path to begin the search. Defaults to the current script's directory.
-        marker (str): The marker to look for (e.g., '.git', 'setup.py', 'README.md').
+        - starting_path (str or Path): The starting path to begin the search.
+        Defaults to the current script's directory.
+        - marker (str): The marker to look for (e.g., '.git', 'setup.py', 'README.md').
 
     Returns:
-        Path: The Path object pointing to the root directory of the project, or None if not found.
+        Path: The Path object pointing to the root directory of the project,
+        or None if not found.
     """
     # Start from the directory of the current file if not specified
     if starting_path is None:
