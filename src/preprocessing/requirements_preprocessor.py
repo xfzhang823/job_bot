@@ -137,6 +137,27 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
+    def extract_cultural_fit(self) -> Optional[List[str]]:
+        """
+        Extract 'cultural_fit' categories of job requirements from the job posting.
+
+        Returns:
+            list or None: A list of 'other' requirements, or None if not found.
+
+        Example:
+            >>> parser = JobRequirementsParser('job_requirements.json', 'https://example.com/job1')
+            >>> other_reqs = parser.extract_cultural_fit()
+            >>> print(other_reqs)
+            ["English proficiency required", "Experience working with international teams"]
+        """
+        if self.job_reqs_dict:
+            other_categories = fetch_subtrees(self.job_reqs_dict, "cultural_fit")
+            logging.info("Fetched 'cultural fit' job requirements.")
+            return other_categories
+        else:
+            logging.error("Invalid job requirements data.")
+            return None
+
     def extract_other(self) -> Optional[List[str]]:
         """
         Extract 'other' categories of job requirements from the job posting.
@@ -175,9 +196,12 @@ class JobRequirementsParser:
         try:
             pie_in_sky_reqs = self.extract_pie_in_the_sky() or []
             down_to_earth_reqs = self.extract_down_to_earth() or []
+            cultural_fit_reqs = self.extract_cultural_fit() or []
             other_reqs = self.extract_other() or []
 
-            combined_reqs = pie_in_sky_reqs + down_to_earth_reqs + other_reqs
+            combined_reqs = (
+                pie_in_sky_reqs + down_to_earth_reqs + cultural_fit_reqs + other_reqs
+            )
             flattened_reqs_dict = flatten_dict_and_list(combined_reqs)
 
             logging.info("Extracted and flattened job requirements.")

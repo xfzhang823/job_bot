@@ -37,7 +37,14 @@ from preprocessing.extract_requirements_with_llms_async import (
 )
 from preprocessing.preprocessing_utils import find_new_urls
 from models.llm_response_models import JobSiteResponse, RequirementsResponse
-from project_config import GPT_4_TURBO, GPT_35_TURBO, CLAUDE_HAIKU, CLAUDE_SONNET
+from project_config import (
+    OPENAI,
+    ANTHROPIC,
+    GPT_4_TURBO,
+    GPT_35_TURBO,
+    CLAUDE_HAIKU,
+    CLAUDE_SONNET,
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -52,8 +59,10 @@ async def process_single_url_async(
     job_requirements_json_file: Path,
     lock: asyncio.Lock,
     semaphore: asyncio.Semaphore,  # limit # of concurrent worker (avoid rate limit)
-    llm_provider: str = "opeanai",
+    llm_provider: str = OPENAI,
     model_id: str = GPT_4_TURBO,
+    max_tokens: int = 2048,
+    temperature: float = 0.3,
     web_scrape: bool = True,  # Flag to control whether to need to webscrape the content or not
 ) -> None:
     """
@@ -70,6 +79,8 @@ async def process_single_url_async(
         - semaphore (asyncio.Semaphore): To limit the number of concurrent tasks.
         - llm_provider (str): The LLM provider to use (default is "openai").
         - model_id (str): The model ID to use for GPT (default is "gpt-4-turbo").
+        - max_tokens (int): The maximum number of tokens to generate. Defaults to 2048.
+        - temperature (float): The temperature value. Defaults to 0.3.
         - scrape_content (bool): Flag to control whether to scrape the content or not.
 
     Returns:
@@ -83,7 +94,11 @@ async def process_single_url_async(
         if web_scrape:
             # Step 1a: If scraping, Webpage -> job description JSON format
             job_description_dict = await process_webpages_to_json_async(
-                urls=job_description_url, llm_provider=llm_provider, model_id=model_id
+                urls=job_description_url,
+                llm_provider=llm_provider,
+                model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
             )  # Returns a dict: Dict[str, Dict[str, Any]]
             logger.info(f"Job description fetched for URL: {job_description_url}")
         else:
@@ -102,11 +117,11 @@ async def process_single_url_async(
         job_description_json = json.dumps(job_description_dict, indent=2)
 
         # Extract job requirements using openai or anthropic
-        if llm_provider.lower() == "openai":
+        if llm_provider.lower() == OPENAI:
             requirements_dict = await extract_job_requirements_with_openai_async(
                 job_description=job_description_json, model_id=model_id
             )
-        elif llm_provider.lower() == "anthropic":
+        elif llm_provider.lower() == ANTHROPIC:
             requirements_dict = await extract_job_requirements_with_anthropic_async(
                 job_description=job_description_json, model_id=model_id
             )
@@ -146,6 +161,8 @@ async def process_urls_async(
     job_requirements_json_file: Path,
     llm_provider: str,
     model_id: str,
+    max_tokens: int,
+    temperature: float,
     web_scrape: bool,
     lock: asyncio.Lock,
     semaphore: asyncio.Semaphore,
@@ -166,6 +183,8 @@ async def process_urls_async(
                 semaphore=semaphore,
                 llm_provider=llm_provider,
                 model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 web_scrape=web_scrape,
             )
         )
@@ -180,6 +199,8 @@ async def run_preprocessing_pipeline_async(
     job_requirements_json_file: Union[Path, str],
     llm_provider: str = "openai",  # llm_provider is passed from the orchestrating function
     model_id: str = GPT_4_TURBO,  # default to gpt 4 turbo
+    max_tokens: int = 4096,
+    temperature: float = 0.3,
 ):
     """
     Asynchronous pipeline for preprocessing job posting webpage(s):
@@ -195,6 +216,8 @@ async def run_preprocessing_pipeline_async(
         JSON file.
         - llm_provider (str): The LLM provider to use (default is "openai").
         - model_id (str): The model ID to use for GPT (default is "gpt-4-turbo").
+        - max_tokens (int): The maximum number of tokens to generate. Defaults to 2048.
+        - temperature (float): The temperature value. Defaults to 0.3.
 
     Returns:
         None
@@ -248,6 +271,8 @@ async def run_preprocessing_pipeline_async(
         job_requirements_json_file,
         llm_provider,
         model_id,
+        max_tokens,
+        temperature,
         web_scrape=True,
         lock=lock,
         semaphore=semaphore,
@@ -259,6 +284,8 @@ async def run_preprocessing_pipeline_async(
         job_requirements_json_file,
         llm_provider,
         model_id,
+        max_tokens,
+        temperature,
         web_scrape=False,
         lock=lock,
         semaphore=semaphore,

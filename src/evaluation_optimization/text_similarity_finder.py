@@ -1,7 +1,7 @@
 """
 File: text_similarity_finder
 Author: XF Zhang
-Last updated on: 2024 Sep 11
+Last updated on: 2525 Feb
 
 text_similarity_finder module provides `TextSimilarity` classes that compute text similarity 
 using methods from models including:
@@ -31,6 +31,9 @@ from transformers import (
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics import pairwise_distances
 import spacy
+
+# User defined
+from utils.model_loader import get_hf_model, get_spacy_model
 
 
 # Set up logger
@@ -134,29 +137,67 @@ class TextSimilarity:
 
     def __init__(
         self,
-        bert_model_name: str = "bert-base-uncased",
-        sbert_model_name: str = "all-MiniLM-L6-v2",
-        sts_model_name: str = "stsb-roberta-base",
+        bert_model_name: str = "bert",  # actual model name: "bert-base-uncased"
+        sbert_model_name: str = "sbert",  # actual model name: "all-MiniLM-L6-v2"
+        sts_model_name: str = "sts",  # actual model name: "stsb-roberta-base"
     ):
         """
         Initialize models and tokenizers for BERT, SBERT, and STS.
+
+        Instead of reloading models on each function call, we use the `get_hf_model()`
+        or 'get_sp_model' function from `model_loader.py` to ensure that models are
+        loaded only once and retrieved from a global cache.
+
+        This prevents redundant API calls to Hugging Face (and/or others) and
+        speeds up execution.
+
+        Why use `get_model()` instead of initializing models directly?
+        -------------------------------------------------------------
+        ✅ **Avoids repeated downloads** – Ensures models are cached in `hf_cache`
+        at the project root level and only loaded once.
+        ✅ **Reduces Hugging Face API requests** – Prevents unnecessary `HEAD` requests
+        checking for updates each time a model is used.
+        ✅ **Improves performance** – Using a globally cached model speeds up execution
+        by avoiding re-initialization overhead.
+        ✅ **Fixes path compatibility issues** – Ensures `cache_folder` is passed
+        as a string (`str(HF_CACHE_DIR)`) to avoid Pylance/Pylint errors.
+
+        Instead of:
+            `self.sbert_model = SentenceTransformer(sbert_model_name)`
+
+        Use:
+            `self.sbert_model = get_model("sbert")`
         """
-        # Load BERT models and tokenizer
-        self.bert_model_attention = BertModel.from_pretrained(
-            bert_model_name, output_attentions=True, attn_implementation="eager"
-        )  # attn_implementation="eager" ->
-        # the code is future-proof for Transformers v5.0.0 & beyond (the default PyTorch
-        # implementation will no longer automatically fall back to the manual implementation.)
-        self.bert_model_hidden_states = BertModel.from_pretrained(
-            bert_model_name, output_hidden_states=True
+        #! Check if CUDA is available and set the device to use GPU (so you don't wait for eternity!)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"Using device: {self.device}")
+
+        # *Load BERT models and tokenizer
+        bert_cached = get_hf_model(
+            bert_model_name
+        )  # Load cached BERT model (returns {"model": ..., "tokenizer": ...})
+        self.bert_model = bert_cached["model"].to(self.device)
+        self.tokenizer = bert_cached["tokenizer"]  # Use the cached tokenizer
+
+        # * Modify the cached model dynamically instead of reloading
+        # Clone the model if necessary to avoid modifying the cached version
+        self.bert_model_attention = self.bert_model
+        self.bert_model_attention.config.output_attentions = True
+        self.bert_model_attention.config.attn_implementation = "eager"
+        # the code is future-proof for Transformers v5.0.0 & beyond
+        # (the default PyTorch implementation will no longer automatically fall back
+        # to the manual implementation.)
+
+        self.bert_model_hidden_states = self.bert_model
+        self.bert_model_hidden_states.config.output_hidden_states = (
+            True  # Modify the config
         )
-        self.tokenizer = BertTokenizer.from_pretrained(bert_model_name)
 
         # Load SBERT model
-        self.sbert_model = SentenceTransformer(sbert_model_name)
+        self.sbert_model = get_hf_model(sbert_model_name)
 
         # Load STS model
-        self.sts_model = SentenceTransformer(sts_model_name)
+        self.sts_model = get_hf_model(sts_model_name)
 
     def get_attention(
         self, input_text: str, context: Optional[str] = None
@@ -255,10 +296,11 @@ class TextSimilarity:
             attention1_flat = attention1_mean.view(-1)  # Flatten to a 1D tensor
             attention2_flat = attention2_mean.view(-1)  # Flatten to a 1D tensor
 
-            # Compute cosine similarity for the current layer
+            # Compute cosine similarity for the current layer (#* allow 1D/dim=0)
+            # pylint: disable=not-callable
             cosine_sim = F.cosine_similarity(
                 x1=attention1_flat, x2=attention2_flat, dim=0
-            )  # pylint: enable=not-callable
+            )
 
             layer_similarities.append(cosine_sim.item())
 
@@ -270,10 +312,33 @@ class TextSimilarity:
         self, text1: str, text2: str, context: Optional[str] = None
     ) -> torch.Tensor:
         """
-        Compute the cosine similarity between the attention matrices of two texts.
+        Compute the cosine similarity between the self-attention matrices of two texts.
 
-        This method compares the attention patterns between two sentences, which can
-        reveal syntactic similarities but may not fully capture semantic differences.
+        This method compares the self-attention patterns (from the last layer, averaged
+        across heads) of `text1` and `text2` independently, revealing syntactic or
+        structural similarities in how tokens within each text attend to each other.
+
+        * The attention matrices are padded to match sizes, flattened, and compared
+        * using cosine similarity.
+
+        ! It does *not* compute cross-attention between the two texts
+        ! (i.e., how `text1` attends to `text2`).
+
+        Args:
+            - text1 (str): First input text.
+            - text2 (str): Second input text.
+            - context (Optional[str]): Optional context to influence attention computation.
+
+        Returns:
+            torch.Tensor: Scalar cosine similarity value between the flattened self-attention
+            matrices.
+
+        Notes:
+            - Measures similarity of intra-text attention patterns, not semantic similarity
+            of text meanings.
+            - Averaging across heads may obscure head-specific differences;
+            flattening loses positional info.
+            - Padding with zeros may affect results if sequence lengths differ significantly.
         """
         # Get attentions for both texts
         attentions1 = self.get_attention(text1, context)
@@ -297,10 +362,13 @@ class TextSimilarity:
             attention1_flat.size() == attention2_flat.size()
         ), "Padded tensors must have the same size."
 
-        # Compute cosine similarity
+        # Compute cosine similarity (#* 1D is allowed)
+        # pylint: disable=not-callable
         cosine_sim = torch.nn.functional.cosine_similarity(
-            attention1_flat, attention2_flat, dim=0
-        )  # pylint: enable=not-callable
+            x1=attention1_flat,
+            x2=attention2_flat,
+            dim=0,
+        )
 
         return cosine_sim
 
@@ -345,7 +413,8 @@ class TextSimilarity:
         hidden1_flat = hidden1.view(-1)  # Flatten to a 1D tensor
         hidden2_flat = hidden2.view(-1)  # Flatten to a 1D tensor
 
-        # Compute cosine similarity
+        # Compute cosine similarity (allow 1D)
+        # pylint: disable=not-callable
         cosine_sim = F.cosine_similarity(hidden1_flat, hidden2_flat, dim=0)
         return cosine_sim
 
@@ -394,6 +463,7 @@ class TextSimilarity:
         cls2 = self.get_cls_embedding(text2, context)
 
         # Compute cosine similarity
+        # pylint: disable=not-callable
         cosine_sim = torch.nn.functional.cosine_similarity(x1=cls1, x2=cls2, dim=0)
 
         return cosine_sim
@@ -502,7 +572,7 @@ class AsymmetricTextSimilarity:
 
     Methods Overview:
 
-    1. **BERTScore Precision**:
+    *1. **BERTScore Precision**:
        - Computes BERTScore precision, which measures the overlap between the candidate's tokens
          and the reference's tokens using contextual embeddings generated by BERT.
        - BERTScore focuses on precision for asymmetric relationships: how much of the content in
@@ -511,7 +581,7 @@ class AsymmetricTextSimilarity:
          synonyms and contextual meanings.
        - Higher precision means more words in the candidate match those in the reference.
 
-    2. **Soft Similarity**:
+    *2. **Soft Similarity**:
        - Computes the cosine similarity between sentence embeddings generated by SBERT
        (Sentence-BERT).
        - SBERT fine-tunes BERT for semantic textual similarity, making it more effective
@@ -520,7 +590,7 @@ class AsymmetricTextSimilarity:
          exact word matches.
        - A higher score indicates closer semantic alignment between the candidate and reference.
 
-    3. **Word Mover's Distance (WMD)**:
+    *3. **Word Mover's Distance (WMD)**:
        - Computes the Word Mover's Distance between the candidate and reference texts.
        - WMD measures the "distance" the words in the candidate need to travel in
        the semantic space
@@ -530,7 +600,7 @@ class AsymmetricTextSimilarity:
        - Lower WMD indicates higher similarity; the method is useful for comparing overall
        text structures.
 
-    4. **NLI Entailment Score**:
+    *4. **NLI Entailment Score**:
        - Uses a Natural Language Inference (NLI) model to compute the entailment score between
        two texts.
        - The model outputs probabilities for entailment, contradiction, and neutrality.
@@ -542,10 +612,11 @@ class AsymmetricTextSimilarity:
        (Note: NLI entailment is commented out for now b/c the existing NLI model is not optimal
        - it needs finetuning.)
 
-    5. **DeBERTa Entailment Score**:
-        - Employs a variant of the BERT model, DeBERTa (Decoding-enhanced BERT with Disentangled
-        Attention), to compute the entailment score between two texts.
-        - The model outputs a probability distribution over entailment, contradiction, and neutrality,
+    *5. **DeBERTa Entailment Score**:
+        - Employs a variant of the BERT model, DeBERTa (Decoding-enhanced BERT with
+        Disentangled Attention), to compute the entailment score between two texts.
+        - The model outputs a probability distribution over entailment, contradiction,
+        and neutrality,
         indicating the degree of semantic entailment between the texts.
         - The method is asymmetric: it measures how much the candidate (hypothesis) is
         semantically entailed by the reference (premise), focusing on directional reasoning and
@@ -560,13 +631,14 @@ class AsymmetricTextSimilarity:
         the specifics.
         Resps -> specific evidence (premise) -> general skillsets -> requirments (hypothesis))
 
-    6. **Jaccard Similarity**:
+    *6. **Jaccard Similarity**:
        - Computes the Jaccard similarity, a set-based measure of the intersection over union
        of the tokens in both texts.
        - Jaccard similarity is symmetric: the order of the texts does not matter.
        - This metric is useful for partial coverage and exact word matches, focusing less on
        semantic meaning and more on the overlap of unique tokens.
-       - A higher Jaccard similarity indicates a higher proportion of shared tokens between the texts.
+       - A higher Jaccard similarity indicates a higher proportion of shared tokens
+       between the texts.
 
     Usage:
         To use this module:
@@ -577,28 +649,69 @@ class AsymmetricTextSimilarity:
 
     def __init__(
         self,
-        bert_model_name: str = "bert-base-uncased",
-        sbert_model_name: str = "all-MiniLM-L6-v2",
-        deberta_model_name: str = "microsoft/deberta-large-mnli",
-        # nli_model_name="roberta-large-mnli",
-        # There is something wrong with this model; I am swapping it out with deberta model for now!
+        bert_model_name: str = "bert",  # actual model name: "bert-base-uncased"
+        sbert_model_name: str = "sbert",  # actual model name: "all-MiniLM-L6-v2"
+        deberta_model_name: str = "deberta",  # actual model name: "microsoft/deberta-large-mnli"
+        # "roberta-large-mnli" is commented out for now - there is something wrong with this model
     ):
         """
         Initialize models and tokenizers for BERT, SBERT, and DeBERTa models and move them to
         GPU if available.
+
+        Instead of reloading models on each function call, we use the `get_hf_model()`
+        or 'get_sp_model' function from `model_loader.py` to ensure that models are
+        loaded only once and retrieved from a global cache.
+
+        This prevents redundant API calls to Hugging Face and speeds up execution.
+
+        Why use `get_model()` instead of initializing models directly?
+        -------------------------------------------------------------
+        ✅ **Avoids repeated downloads** – Ensures models are cached in `hf_cache`
+        at the project root level and only loaded once.
+        ✅ **Reduces Hugging Face API requests** – Prevents unnecessary `HEAD` requests
+        checking for updates each time a model is used.
+        ✅ **Improves performance** – Using a globally cached model speeds up execution
+        by avoiding re-initialization overhead.
+        ✅ **Fixes path compatibility issues** – Ensures `cache_folder` is passed
+        as a string (`str(HF_CACHE_DIR)`) to avoid Pylance/Pylint errors.
+
+        Instead of:
+            `self.sbert_model = SentenceTransformer(sbert_model_name)`
+
+        Use:
+            `self.sbert_model = get_model("sbert")`
         """
-        #! Check if CUDA is available and set the device to use GPU (so you don't wait for eternity!)
+        #! Check if CUDA is available and set the device to use GPU (so you don't wait
+        #! for eternity!)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {self.device}")
+        logger.info(f"Using device: {self.device}")
 
-        # Load BERT tokenizer and model
-        self.tokenizer = BertTokenizer.from_pretrained(bert_model_name)
-        self.bert_model = BertModel.from_pretrained(bert_model_name)
+        # *Load BERT models and tokenizer
 
-        # Load SBERT model for semantic similarity
-        self.sbert_model = SentenceTransformer(sbert_model_name)
+        # Load cached BERT model (returns {"model": ..., "tokenizer": ...})
+        bert_cached = get_hf_model(
+            bert_model_name
+        )  # Returns a dictionary with "model" and "tokenizer"
+        self.bert_model = bert_cached["model"].to(self.device)  # Move to GPU
+        self.bert_tokenizer = bert_cached["tokenizer"]
 
-        ### Swapping out for now
+        # * Load SBERT model for semantic similarity from cache
+        self.sbert_model = get_hf_model(sbert_model_name)
+
+        # * Load DeBERTa model for entailment detection from cache
+        deberta_cached = get_hf_model(deberta_model_name)
+        self.deberta_model = deberta_cached["model"].to(self.device)  # Move to GPU
+        self.deberta_tokenizer = deberta_cached["tokenizer"]  # Use cached tokenizer
+
+        # * Load BERTScore model for BERTScore Precision
+        bert_cached = get_hf_model("bert_score")  # ✅ Use cached model
+        self.bert_model = bert_cached("model")  # ✅ Use cached model
+        self.bert_tokenizer = bert_cached["tokenizer"]
+
+        # * Load spaCy
+        self.nlp = get_spacy_model("en_core_web_md")
+
+        ### todo: Swapping out for now/delete or fix later
         # Load NLI model for entailment detection
         # self.nli_model = AutoModelForSequenceClassification.from_pretrained(
         #     nli_model_name
@@ -606,14 +719,9 @@ class AsymmetricTextSimilarity:
         # self.nli_tokenizer = AutoTokenizer.from_pretrained(nli_model_name)
         ###
 
-        # Load DeBERTa model for entailment detection
-        self.deberta_model = AutoModelForSequenceClassification.from_pretrained(
-            deberta_model_name
-        )
-        self.deberta_tokenizer = AutoTokenizer.from_pretrained(deberta_model_name)
-        self.nlp = spacy.load("en_core_web_md")
-
-    def add_context(self, text1: str, text2: str, context: str) -> Tuple[str, str]:
+    def add_context(
+        self, text1: str, text2: str, context: Optional[str] = None
+    ) -> Tuple[str, str]:
         """Add context to each text if provided."""
         if context:
             text1 = f"{context} {text1}"
@@ -621,6 +729,7 @@ class AsymmetricTextSimilarity:
         return text1, text2
 
     def preprocess_text(self, text: str) -> str:
+        """Text process texts - cleaning/tokenization/etc."""
         doc = self.nlp(text.lower())  # Convert to lowercase
         # Remove stopwords, punctuation, and get lemmatized form
         tokens = [
@@ -636,6 +745,8 @@ class AsymmetricTextSimilarity:
         """
         Compute BERTScore precision between texts with an asymmetrical similarity relationship.
 
+        Compute BERTScore precision using the preloaded model.
+
         Args:
         - candidate (str): The text representing the responsibility or experience.
         - reference (str): The text representing the requirement.
@@ -648,8 +759,19 @@ class AsymmetricTextSimilarity:
         candidate, reference = self.add_context(candidate, reference, context)
 
         # Calculate BERTScore (precision, recall, f1) for candidate and reference paragraph
-        P, R, F1 = score([candidate], [reference], lang="en", verbose=True)
-        return P.mean().item()
+        # pylint: disable=unbalanced-tuple-unpacking
+        P, R, F1 = score(
+            [candidate],
+            [reference],
+            lang="en",
+            model_type="bert-base-uncased",
+            # * need to set to bert model & bert tokenizer (cached)
+            # * other wise it will default to roberta-large
+            verbose=True,
+            num_layers=9,
+        )
+
+        return torch.tensor(P).mean().item()  # Convert list to tensor first
 
     def deberta_entailment_score(
         self, premise: str, hypothesis: str, context: Optional[str] = None
@@ -660,7 +782,6 @@ class AsymmetricTextSimilarity:
         Args:
         - premise (str): The text representing the responsibility or experience.
         - hypothesis (str): The text representing the requirement.
-
         - context (str): Optional context to be added to both texts.
 
         Returns:
@@ -672,39 +793,22 @@ class AsymmetricTextSimilarity:
         # Encode premise (requirement) and hypothesis (responsibility)
         inputs = self.deberta_tokenizer.encode_plus(
             premise, hypothesis, return_tensors="pt", truncation=True
-        )
+        ).to(self.device)
 
-        # Get model predictions (logits) for the inputs
-        logits = self.deberta_model(**inputs).logits
-        probs = torch.softmax(logits, dim=1).tolist()[0]
-        entailment_score = probs[2]  # Probability for entailment
-        return entailment_score
+        self.deberta_model.to(self.device)
 
-    # def nli_entailment_score(self, hypothesis, premise, context=None):
-    #     """
-    #     Compute the entailment score between two texts using a Natural Language Inference (NLI) model.
+        try:
+            # Get model predictions (logits) for the inputs
+            logits = self.deberta_model(**inputs).logits
+            # * logits are the raw outputs from a neural network’s final layer before
+            # * applying an activation function
+            probs = torch.softmax(logits, dim=1).tolist()[0]
+            entailment_score = probs[2]  # Probability for entailment
 
-    #     Args:
-    #     - hypothesis (str): The text representing the responsibility or experience.
-    #     - premise (str): The text representing the requirement.
-    #     - context (str): Optional context to be added to both texts.
-
-    #     Returns:
-    #     - float: The probability that the hypothesis is entailed by the premise.
-    #     """
-    #     if context:
-    #         hypothesis, premise = self.add_context(hypothesis, premise, context)
-
-    #     # Encode premise (requirement) and hypothesis (responsibility)
-    #     inputs = self.nli_tokenizer.encode_plus(
-    #         premise, hypothesis, return_tensors="pt", truncation=True
-    #     )
-
-    #     # Get model predictions (logits) for the inputs
-    #     logits = self.nli_model(**inputs).logits
-    #     probs = torch.softmax(logits, dim=1).tolist()[0]
-    #     entailment_score = probs[2]  # Probability for entailment
-    #     return entailment_score
+            return float(entailment_score)
+        except Exception as e:
+            logger.error(f"❌ Error in DeBERTa Entailment Score")
+            return 0.0
 
     def jaccard_similarity(
         self, text1: str, text2: str, context: Optional[str] = None
@@ -786,41 +890,10 @@ class AsymmetricTextSimilarity:
         vector2 = doc2.vector
 
         # Calculate distance
-        distance = np.linalg.norm(vector1 - vector2)
+        distance = float(
+            np.linalg.norm(vector1 - vector2)
+        )  # need to explicitly converted to float
         return distance
-
-    # Swapped out this one b/c it was giving me errors.
-    # def word_movers_distance(self, candidate, reference, context=None):
-    #     """
-    #     Compute the Word Mover's Distance (WMD) between two texts.
-
-    #     Args:
-    #     - candidate (str): The text representing the responsibility or experience.
-    #     - reference (str): The text representing the requirement.
-    #     - context (str): Optional context to be added to both texts.
-
-    #     Returns:
-    #     - float: The Word Mover's Distance. A smaller distance indicates more similarity.
-    #     """
-    #     if context:
-    #         candidate, reference = self.add_context(candidate, reference, context)
-
-    #     # Compute Word Mover's Distance
-    #     # Use spaCy's stopwords
-    #     vectorizer = CountVectorizer(stop_words=list(spacy_stopwords)).fit(
-    #         [candidate, reference]
-    #     )
-
-    #     vector1 = vectorizer.transform([candidate])
-    #     vector2 = vectorizer.transform([reference])
-
-    #     # Convert the sparse matrices to dense format (numpy arrays)
-    #     vector1_dense = vector1.to_array()
-    #     vector2_dense = vector2.to_array()
-
-    #     # Calculate the Euclidean distance
-    #     distance = np.linalg.norm(vector1_dense - vector2_dense)
-    #     return distance
 
     def short_text_similarity_metrics(
         self, candidate: str, reference: str, context: Optional[str] = None
@@ -911,6 +984,66 @@ class AsymmetricTextSimilarity:
         )
 
         return similarities
+
+    # todo: Swapped out this one b/c it was giving me errors; delete soon
+    # def nli_entailment_score(self, hypothesis, premise, context=None):
+    #     """
+    #     Compute the entailment score between two texts using a Natural Language Inference (NLI) model.
+
+    #     Args:
+    #     - hypothesis (str): The text representing the responsibility or experience.
+    #     - premise (str): The text representing the requirement.
+    #     - context (str): Optional context to be added to both texts.
+
+    #     Returns:
+    #     - float: The probability that the hypothesis is entailed by the premise.
+    #     """
+    #     if context:
+    #         hypothesis, premise = self.add_context(hypothesis, premise, context)
+
+    #     # Encode premise (requirement) and hypothesis (responsibility)
+    #     inputs = self.nli_tokenizer.encode_plus(
+    #         premise, hypothesis, return_tensors="pt", truncation=True
+    #     )
+
+    #     # Get model predictions (logits) for the inputs
+    #     logits = self.nli_model(**inputs).logits
+    #     probs = torch.softmax(logits, dim=1).tolist()[0]
+    #     entailment_score = probs[2]  # Probability for entailment
+    #     return entailment_score
+
+    # todo: Swapped out this one b/c it was giving me errors; delete soon
+    # def word_movers_distance(self, candidate, reference, context=None):
+    #     """
+    #     Compute the Word Mover's Distance (WMD) between two texts.
+
+    #     Args:
+    #     - candidate (str): The text representing the responsibility or experience.
+    #     - reference (str): The text representing the requirement.
+    #     - context (str): Optional context to be added to both texts.
+
+    #     Returns:
+    #     - float: The Word Mover's Distance. A smaller distance indicates more similarity.
+    #     """
+    #     if context:
+    #         candidate, reference = self.add_context(candidate, reference, context)
+
+    #     # Compute Word Mover's Distance
+    #     # Use spaCy's stopwords
+    #     vectorizer = CountVectorizer(stop_words=list(spacy_stopwords)).fit(
+    #         [candidate, reference]
+    #     )
+
+    #     vector1 = vectorizer.transform([candidate])
+    #     vector2 = vectorizer.transform([reference])
+
+    #     # Convert the sparse matrices to dense format (numpy arrays)
+    #     vector1_dense = vector1.to_array()
+    #     vector2_dense = vector2.to_array()
+
+    #     # Calculate the Euclidean distance
+    #     distance = np.linalg.norm(vector1_dense - vector2_dense)
+    #     return distance
 
 
 def compute_bertscore_precision(

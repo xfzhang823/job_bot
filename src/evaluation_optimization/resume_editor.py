@@ -41,7 +41,7 @@ from models.llm_response_models import (
     NestedRequirements,
     RequirementsResponse,
 )
-
+from project_config import ANTHROPIC, OPENAI, GPT_35_TURBO, GPT_4_TURBO
 import logging_config
 
 
@@ -85,20 +85,20 @@ class TextEditor:
             the response.
         - validate_response(response_dict):
             Validates a response dictionary against a predefined JSON schema.
-        - edit_for_dp(target_text, source_text, text_id=None, model=None, temperature=None):
+        - edit_for_dp(target_text, source_text, text_id=None, model_id=None, temperature=None):
             Edits text to align with source text's dependency parsing (DP).
-        - edit_for_entailment(target_text, source_text, text_id=None, model=None, temperature=None):
+        - edit_for_entailment(target_text, source_text, text_id=None, model_id=None, temperature=None):
             Edits text based on semantic entailment.
-        - edit_for_semantics(target_text, source_text, text_id=None, model=None, temperature=None):
+        - edit_for_semantics(target_text, source_text, text_id=None, model_id=None, temperature=None):
             Edits text to align with source text's semantics.
-        - edit_for_semantics_and_entailment(candidate_text, reference_text, text_id=None, model=None,
+        - edit_for_semantics_and_entailment(candidate_text, reference_text, text_id=None, model_id=None,
         temperature=None):
             Edits text to align with source text's semantics and strengthen entailment relationships.
     """
 
     def __init__(
         self,
-        llm_provider: str = "openai",
+        llm_provider: str = OPENAI,
         model_id: str = "gpt-4-turbo",
         temperature: float = 0.7,
         max_tokens: int = 1056,

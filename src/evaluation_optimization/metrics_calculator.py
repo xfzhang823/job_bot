@@ -432,10 +432,12 @@ class SimilarityScoreCalculator:
       between experience/responsibilities and job requirements.
 
     Args:
-        responsibilities (dict of str, optional): Dictionary of flattened responsibilities from the resume.
-        requirements (dict of str, optional): Dictionary of flattened job requirements from the job posting.
-        combined_list (list of dict, optional): List of pre-matched responsibility and requirement pairs.
-        mode (str, optional): Specifies the operation mode.
+        - responsibilities (dict of str, optional): Dictionary of flattened responsibilities
+        from the resume.
+        - requirements (dict of str, optional): Dictionary of flattened job requirements from
+        the job posting.
+        - combined_list (list of dict, optional): List of pre-matched responsibility and requirement pairs.
+        - mode (str, optional): Specifies the operation mode.
                               - "many_to_many": Compares each responsibility to all requirements.
                               - "one_to_one": Compares pre-matched pairs in the combined_list.
 

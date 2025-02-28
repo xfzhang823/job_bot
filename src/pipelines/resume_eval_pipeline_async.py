@@ -7,6 +7,7 @@ and requirements.
 
 # Import dependencies
 from pathlib import Path
+import time
 from typing import Any, Callable, Coroutine, Optional, Union
 import json
 import logging
@@ -52,6 +53,7 @@ from utils.generic_utils_async import (
     save_df_to_csv_file_async,
     save_data_to_json_file_async,
 )
+
 
 # from config import job_descriptions_json_file
 from evaluation_optimization.evaluation_optimization_utils import (
@@ -333,11 +335,21 @@ async def generate_metrics_from_nested_json_async(
                     continue
 
                 # Step 4: Compute similarity metrics asynchronously
+
+                start_time = time.time()
+                logger.info(
+                    f"📝 Starting similarity computation for responsibility: {responsibility_key}, requirement: {requirement_key}"
+                )  # * debug
+
                 similarity_metrics = await asyncio.to_thread(
                     calculate_text_similarity_metrics,
                     responsibility_text,
                     requirement_text,
                 )
+                elapsed_time = time.time() - start_time
+                logger.info(
+                    f"✅ Similarity computation took {elapsed_time:.2f} seconds for responsibility {responsibility_key}, requirement {requirement_key}"
+                )  # * debug
 
                 # Step 5: Validate Using SimilarityMetrics Model
                 # * This is needed b/c it matches multiple responsibilities to multiple requirements
@@ -426,8 +438,8 @@ async def generate_metrics_from_nested_json_async(
 async def run_metrics_processing_pipeline_async(
     mapping_file: Path | str,
     generate_metrics: Callable = generate_metrics_from_flat_json_async,
-    batch_size: int = 10,  # Limit group size for batching (# of tasks/batch)
-    max_concurrent: int = 6,  # Limit number of concurrent tasks
+    batch_size: int = 6,  # Limit group size for batching (# of tasks/batch)
+    max_concurrent: int = 4,  # Limit number of concurrent tasks
 ) -> None:
     """
     * Asynchronous pipeline to process and create missing similarity metrics files
@@ -444,7 +456,7 @@ async def run_metrics_processing_pipeline_async(
     """
     strict_mode = False  # Set to False if you want to skip bad files
 
-    logger.info("Starting async metrics processing pipeline...")
+    logger.info("🚀 Starting async metrics processing pipeline...")
 
     # Ensure mapping_file is a Path object
     if not isinstance(mapping_file, Path):
@@ -508,7 +520,11 @@ async def run_metrics_processing_pipeline_async(
         )
 
         if not validated_requirements or not validated_responsibilities:
-            logger.error(f"Validation failed for {reqs_file} or {resps_file}.")
+            logger.error(
+                f"🚨 Validation failed for {url}.\n"
+                f"❌ Requirements file: {reqs_file} (Exists: {reqs_file.exists()})\n"
+                f"❌ Responsibilities file: {resps_file} (Exists: {resps_file.exists()})"
+            )  # logs which file is missing or corrupted.
 
             if strict_mode:  # If True, then stop the process...
                 raise ValueError(
@@ -519,8 +535,8 @@ async def run_metrics_processing_pipeline_async(
                 continue
 
         # Queue tasks after validation succeeds
-        tasks.append(
-            await generate_metrics(
+        task = asyncio.create_task(
+            generate_metrics(
                 reqs_file=reqs_file,
                 resps_file=resps_file,
                 sim_metrics_file=sim_metrics_file,
@@ -528,24 +544,35 @@ async def run_metrics_processing_pipeline_async(
                 semaphore=semaphore,
             )
         )
+        tasks.append(task)
+        task.add_done_callback(
+            lambda t: tasks.remove(t)
+        )  # ✅ Remove completed tasks (otherwise it can bloat memory)
+
         logger.info(f"📝 Queued metrics generation for {url} -> {sim_metrics_file}")
 
     # Step 4: Process tasks in batches
     for i in range(0, len(tasks), batch_size):
         batch = tasks[i : i + batch_size]
 
-        logger.info(
-            f"Starting batch {i // batch_size + 1} of {len(tasks) // batch_size + 1} "
-            f"({len(batch)} tasks in this batch)..."
-        )
+        logger.info(f"🚀 Starting batch {i // batch_size + 1} ({len(batch)} tasks)...")
 
         # Run the batch asynchronously and handle failures
-        results = await asyncio.gather(*batch, return_exceptions=True)
+        for task in batch:
+            logger.debug(f"Task: {task}")  # logs which task hangs in asyncio.gather
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*batch, return_exceptions=True), timeout=800
+            )  # 5 min timeout
+        except asyncio.TimeoutError:
+            logger.error("⏳ Batch processing timed out! Some tasks took too long.")
+            return
 
         # Log errors in the batch
-        for j, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Task {i + j} failed with error: {result}")
+        failed_tasks = sum(1 for result in results if isinstance(result, Exception))
+        if failed_tasks == len(batch):
+            logger.error("All tasks in this batch failed!")
 
     # Log completion with accurate task count
     logger.info(f"Successfully processed {len(tasks)} similarity metrics files.")
@@ -570,6 +597,8 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
     Raises:
         ValueError: If the mapping file does not exist.
     """
+    logger.info("🚀 Starting async multivariate indices processing pipeline...")
+
     mapping_file = Path(mapping_file)  # Ensure it's a Path object
     if not mapping_file.exists():
         raise ValueError(f"The file '{mapping_file}' does not exist.")
@@ -746,8 +775,8 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 async def run_metrics_re_processing_pipeline_async(
     mapping_file: Union[Path, str],
     generate_metrics: Callable = generate_metrics_from_nested_json_async,
-    batch_size: int = 10,
-    max_concurrent: int = 6,
+    batch_size: int = 4,
+    max_concurrent: int = 2,
 ) -> None:
     """
     * Re-run the pipeline asynchronously to process and create missing sim_metrics files
@@ -767,7 +796,9 @@ async def run_metrics_re_processing_pipeline_async(
     """
     strict_mode = False  # If True, fail pipeline on validation errors
 
-    logger.info("🚀 Starting re-processing pipeline for missing similarity metrics...")
+    logger.info(
+        "🚀 Starting re-processing pipeline for similarity metrics (for optimized responsibilities)..."
+    )
 
     # Step 1: Ensure mapping_file is a Path object (if it's a string, convert it)
     if not isinstance(mapping_file, Path):
@@ -866,6 +897,8 @@ async def run_metrics_re_processing_pipeline_async(
             )
         )
         tasks.append(task)
+        task.add_done_callback(lambda t: tasks.remove(t))  # ✅ Remove completed tasks
+
         logger.info(f"📝 Queued metrics generation for {url} -> {sim_metrics_file}")
 
     # Step 5: Process tasks in batches
@@ -880,7 +913,24 @@ async def run_metrics_re_processing_pipeline_async(
         )
 
         # Run the batch asynchronously and handle failures gracefully.
-        results = await asyncio.gather(*batch, return_exceptions=True)
+        try:
+            logger.info(f"🚀 Running {len(batch)} tasks in batch...")
+            for task in batch:
+                logger.debug(f"🔍 Task: {task}")  # log which task hangs (if)
+
+            start_time = time.time()
+            results = await asyncio.wait_for(
+                asyncio.gather(*batch, return_exceptions=True),
+                timeout=800,  # Increase timeout
+            )
+            elapsed_time = time.time() - start_time
+            logger.info(
+                f"✅ Batch completed in {elapsed_time:.2f} seconds"
+            )  # Log slow tasks
+
+        except asyncio.TimeoutError:
+            logger.error("⏳ Batch processing timed out! Some tasks took too long.")
+            return
 
         # Log errors encountered in the batch.
         for j, result in enumerate(results):

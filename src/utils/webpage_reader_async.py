@@ -27,7 +27,14 @@ from llm_providers.llm_api_utils_async import (
 )
 from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
 from models.llm_response_models import JobSiteResponse
-from project_config import GPT_4_TURBO, GPT_35_TURBO, CLAUDE_HAIKU, CLAUDE_SONNET
+from project_config import (
+    OPENAI,
+    ANTHROPIC,
+    GPT_4_TURBO,
+    GPT_35_TURBO,
+    CLAUDE_HAIKU,
+    CLAUDE_SONNET,
+)
 import logging_config
 
 # Set up logging
@@ -171,6 +178,7 @@ async def read_webpages_async(urls: List[str]) -> Tuple[Dict[str, str], List[str
 async def convert_to_json_with_gpt_async(
     input_text: str,
     model_id: str = GPT_35_TURBO,  # use cheapest - easy task
+    max_tokens: int = 2048,
     temperature: float = 0.3,
 ) -> Dict[str, Any]:
     """
@@ -206,7 +214,7 @@ async def convert_to_json_with_gpt_async(
         expected_res_type="json",
         json_type="job_site",
         temperature=temperature,
-        max_tokens=2000,
+        max_tokens=max_tokens,
     )
     logger.info(f"Validated LLM Response Model: {response_model}")
 
@@ -226,6 +234,7 @@ async def convert_to_json_with_gpt_async(
 async def convert_to_json_with_claude_async(
     input_text: str,
     model_id: str = CLAUDE_HAIKU,
+    max_tokens: int = 2048,
     temperature: float = 0.3,
 ) -> Dict[str, Any]:
     """
@@ -261,7 +270,7 @@ async def convert_to_json_with_claude_async(
         expected_res_type="json",
         json_type="job_site",
         temperature=temperature,
-        max_tokens=2000,
+        max_tokens=max_tokens,
     )
     logger.info(f"Validated LLM Response Model: {response_model}")
 
@@ -321,8 +330,10 @@ def save_webpage_content(
 # Function to orchestrate the entire process (to be called by pipeline functions)
 async def process_webpages_to_json_async(
     urls: Union[List[str], str],
-    llm_provider: str = "openai",
+    llm_provider: str = OPENAI,
     model_id: str = GPT_4_TURBO,
+    max_tokens: int = 2048,
+    temperature: float = 0.3,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Async operation that orchestrates the entire process of extracting, cleaning,
@@ -349,6 +360,8 @@ async def process_webpages_to_json_async(
         (default is "openai").
         - model_id (str, optional): The model ID to use for OpenAI or another provider
         (default is "gpt-4-turbo").
+        - max_tokens (int): The maximum number of tokens to generate. Defaults to 2048.
+        - temperature (float): The temperature value. Defaults to 0.3.
 
     Returns:
         Dict[str, Dict[str, Any]]: A dictionary where each key is a URL, and
@@ -374,11 +387,14 @@ async def process_webpages_to_json_async(
     json_results = {}  # create a holder
 
     # Iterate w/t OpenAI or Anthropic LLM API
-    if llm_provider.lower() == "openai":
+    if llm_provider.lower() == OPENAI:
         for url, content in webpages_content.items():
             try:
                 json_result = await convert_to_json_with_gpt_async(
-                    input_text=content, model_id=model_id
+                    input_text=content,
+                    model_id=model_id,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
                 )
                 logger.info(f"Successfully converted content from {url} to JSON.")
                 json_results[url] = json_result
@@ -389,11 +405,14 @@ async def process_webpages_to_json_async(
         if failed_urls:
             logger.info(f"URLs failed to process:\n{failed_urls}")
 
-    if llm_provider.lower() == "anthropic" or "claude":
+    if llm_provider.lower() == ANTHROPIC:
         for url, content in webpages_content.items():
             try:
                 json_result = await convert_to_json_with_claude_async(
-                    input_text=content, model_id=model_id
+                    input_text=content,
+                    model_id=model_id,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
                 )
                 logger.info(f"Successfully converted content from {url} to JSON.")
                 json_results[url] = json_result
