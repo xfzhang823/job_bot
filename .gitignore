@@ -16,6 +16,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Cached models
+hf_cache/
+sp_cache/
+
 # Python packages
 *.egg
 *.egg-info

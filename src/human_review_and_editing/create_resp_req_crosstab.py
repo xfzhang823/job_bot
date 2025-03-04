@@ -4,7 +4,7 @@ from pathlib import Path
 import logging
 from typing import Dict, List
 import pandas as pd
-
+import uuid  # Generate unique test file names
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -29,6 +29,22 @@ def create_resp_req_crosstab(file_path: Path | str, score_threshold: float = 0.0
         "composite_score",
     ]
     df = pd.read_csv(file_path, usecols=needed_cols)
+
+    # ✅ Log shape and column details
+    logger.info(f"✅ DataFrame Loaded: Shape {df.shape}")
+    logger.info(f"📝 Column Names: {df.columns.tolist()}")
+
+    # ✅ Log row count for each column
+    row_counts = df.count()
+    logger.info(f"📊 Row Counts per Column:\n{row_counts}")
+
+    # ✅ Check if any column has missing values
+    missing_counts = df.isna().sum()
+    logger.info(f"🚨 Missing Value Counts per Column:\n{missing_counts}")
+
+    # 🚨 If row counts are inconsistent, we have an issue
+    if len(set(row_counts.values)) > 1:
+        raise ValueError(f"🚨 Inconsistent row counts detected in {file_path}")
 
     # Get unique keys
     resp_keys = df["responsibility_key"].unique()
@@ -94,17 +110,13 @@ def create_resp_req_crosstab(file_path: Path | str, score_threshold: float = 0.0
     return result_df
 
 
-import pandas as pd
-from pathlib import Path
-
-
 def save_crosstab(
     df: pd.DataFrame, output_path: Path | str, file_format: str = "csv"
 ) -> None:
     """
     Saves the cross-tabulation DataFrame to a file in either CSV or Excel format.
 
-    This function ensures:
+    Ensures:
     - The output directory exists.
     - Write permissions are checked before saving.
     - Numeric values remain numbers in Excel.
@@ -118,16 +130,20 @@ def save_crosstab(
         PermissionError: If the directory cannot be written to.
         ValueError: If an unsupported file format is provided.
     """
-    # Ensure `output_path` is a `Path` object
-    if isinstance(output_path, str):
-        output_path = Path(output_path)
+    # ✅ Check if the file already exists and skip
+    output_path = Path(output_path) if isinstance(output_path, str) else output_path
+    if output_path.exists():
+        logger.info(f"⏭️ File already exists, skipping: {output_path}")
+        return
 
+    output_path = Path(output_path)
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
 
-    # Check write permission using `Path`
+    # ✅ Use a unique test file to avoid conflicts in parallel processes
+    test_file = output_dir / f"write_test_{uuid.uuid4().hex}.tmp"
+
     try:
-        test_file = output_dir / "write_test.tmp"
         test_file.touch(exist_ok=False)  # ✅ Try creating a temp file
         test_file.unlink()  # ✅ Remove test file immediately
     except Exception as e:
@@ -147,17 +163,4 @@ def save_crosstab(
             f"❌ Unsupported file format: {file_format}. Use 'csv' or 'excel'."
         )
 
-    print(f"File saved successfully: {output_path}")
-
-    # todo: comment out for now.
-    # # Configure Excel writer to adjust column widths
-    # with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-    #     df.to_excel(writer, index=False, sheet_name="Crosstab")
-    #     worksheet = writer.sheets["Crosstab"]
-
-    #     # Adjust column widths
-    #     for idx, col in enumerate(df.columns):
-    #         max_length = max(df[col].astype(str).apply(len).max(), len(str(col)))
-    #         # Limit max width to avoid extremely wide columns
-    #         adjusted_width = min(max_length + 2, 100)
-    #         worksheet.column_dimensions[chr(65 + idx)].width = adjusted_width
+    logger.info(f"✅ Crosstab saved: {output_path}")

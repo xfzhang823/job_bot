@@ -327,7 +327,7 @@ async def generate_metrics_from_nested_json_async(
                 # Fetch matching requirement text
                 requirement_text = validated_reqs_data.requirements.get(
                     requirement_key, None
-                )
+                )  # type: ignore
                 if not requirement_text:
                     logger.warning(
                         f"No matching requirement found for requirement_key: {requirement_key}"
