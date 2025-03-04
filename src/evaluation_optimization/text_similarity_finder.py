@@ -704,12 +704,18 @@ class AsymmetricTextSimilarity:
         self.deberta_tokenizer = deberta_cached["tokenizer"]  # Use cached tokenizer
 
         # * Load BERTScore model for BERTScore Precision
-        bert_cached = get_hf_model("bert_score")  # ✅ Use cached model
-        self.bert_model = bert_cached("model")  # ✅ Use cached model
-        self.bert_tokenizer = bert_cached["tokenizer"]
+        # bert_cached = get_hf_model("bert_score")  # ✅ Use cached model
+        # self.bert_model = bert_cached("model")  # ✅ Use cached model
+        # self.bert_tokenizer = bert_cached["tokenizer"]
 
         # * Load spaCy
+        logger.debug("Loading spaCy model...")  # todo: debug; delete later
         self.nlp = get_spacy_model("en_core_web_md")
+        logger.debug("spaCy model loaded successfully.")  # todo: debug; delete later
+
+        logger.debug(
+            f"Finished loading models in AsymmetricTextSimilarity. Type of self.bert_model: {type(self.bert_model)}"
+        )
 
         ### todo: Swapping out for now/delete or fix later
         # Load NLI model for entailment detection
@@ -770,8 +776,13 @@ class AsymmetricTextSimilarity:
             verbose=True,
             num_layers=9,
         )
+        precision = torch.tensor(P).mean().item()  # Convert list to tensor first
 
-        return torch.tensor(P).mean().item()  # Convert list to tensor first
+        logger.info(
+            f"BERTScrore precision computed: {precision}"
+        )  # todo: debug; delete later
+
+        return precision
 
     def deberta_entailment_score(
         self, premise: str, hypothesis: str, context: Optional[str] = None
@@ -902,8 +913,6 @@ class AsymmetricTextSimilarity:
         Compute all similarity metrics for a given pair of shorter texts
         - suited for segment to segment comparisons.
 
-
-
         Args:
         - candidate (str): The text representing the responsibility or experience.
         - reference (str): The text representing the requirement.
@@ -915,12 +924,19 @@ class AsymmetricTextSimilarity:
         similarities = {}
 
         try:
+            logger.debug(
+                f"Type of self.bert_model before BERTScore: {type(self.bert_model)}"
+            )
             similarities["bert_score_precision"] = self.bert_score_precision(
                 candidate, reference, context
             )
         except Exception as e:
             logger.error(f"Error in BERTScore precision: {e}")
             similarities["bert_score_precision"] = None
+
+        logger.debug(
+            f"Type of self.sbert_model before SBERT similarity: {type(self.sbert_model)}"
+        )  # todo: debug; delete later
 
         try:
             similarities["soft_similarity"] = self.soft_similarity(

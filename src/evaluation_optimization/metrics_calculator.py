@@ -214,6 +214,10 @@ def calculate_text_similarity_metrics(
     text_similarity = AsymmetricTextSimilarity()
 
     # Calculate the similarity metrics
+    logger.debug(
+        "✅ Entering calculate_text_similarity_metrics"
+    )  # todo: debug; delete later
+
     similarity_scores = text_similarity.short_text_similarity_metrics(
         optimized_text, requirement_text
     )
@@ -269,7 +273,8 @@ def calculate_many_to_many_similarity_metrices(
 ) -> pd.DataFrame:
     """
     Calculate text similarity metrics between EACH resume responsibility and EACH job requirement,
-    leveraging the AsymmetricTextSimilarity class due to the asymmetrical relationship between experience/responsibilities and job requirements.
+    leveraging the AsymmetricTextSimilarity class due to the asymmetrical relationship between
+    experience/responsibilities and job requirements.
 
     Args:
         responsibilities (Dict[str, str]): Dictionary of flattened responsibilities from the resume.
@@ -279,6 +284,9 @@ def calculate_many_to_many_similarity_metrices(
         pd.DataFrame: DataFrame containing similarity metrics.
     """
     text_similarity = AsymmetricTextSimilarity()
+
+    logger.info("text_similarity instantiated")  # todo: debug; delete later
+
     similarity_results = []
 
     # Log the number of responsibilities and requirements

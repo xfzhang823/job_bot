@@ -1,7 +1,16 @@
+import sys
+
+sys.path.insert(0, "../src")
+
 from transformers import AutoModel, AutoTokenizer
-from utils.find_project_root import find_project_root
+
 import logging
 from pathlib import Path
+
+
+from utils.find_project_root import (
+    find_project_root,
+)
 
 # Define cache directory
 project_dir = find_project_root()
