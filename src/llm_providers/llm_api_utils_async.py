@@ -1,7 +1,7 @@
 """Async version of llm_api_utils_async.py
 
-This module provides asynchronous utility functions for interacting with various LLM APIs, 
-including OpenAI, Anthropic, and Llama3. It handles API calls, validates responses, 
+This module provides asynchronous utility functions for interacting with various LLM APIs,
+including OpenAI, Anthropic, and Llama3. It handles API calls, validates responses,
 and manages provider-specific nuances such as single-block versus multi-block responses.
 
 Key Features:
@@ -19,19 +19,20 @@ Modules and Methods:
 - Validation utilities (e.g., `validate_response_type`, `validate_json_type`).
 
 Usage:
-This module is intended for applications that require efficient and modular integration 
+This module is intended for applications that require efficient and modular integration
 with multiple LLM providers.
 """
 
 # Built-in & External libraries
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Union, Optional, cast
 import json
 import logging
 from pydantic import ValidationError
-import time
 import httpx
+from random import uniform
 
 # LLM imports
 from openai import AsyncOpenAI
@@ -100,9 +101,9 @@ async def with_rate_limit_and_retry(api_func):
     """
     global last_request_time
 
-    min_interval = 0.5  # Ensure at least 500ms between requests
-    max_retries = 5  # Allow up to 5 retries
-    base_delay = 1  # Initial backoff delay (1 sec, 2 sec, 3 sec...)
+    min_interval = 1.5  # Ensure at least 1500ms between requests
+    max_retries = 6  # Allow up to 6 retries
+    base_delay = 2  # Initial backoff delay (1 sec, 2 sec, 3 sec...)
 
     for attempt in range(max_retries):
         async with rate_limit_lock:  # Prevent multiple requests at the same time
@@ -118,14 +119,18 @@ async def with_rate_limit_and_retry(api_func):
                 return result
 
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429 and attempt < max_retries - 1:
+                if e.response.status_code in [429, 529] and attempt < max_retries - 1:
                     retry_after = int(
                         e.response.headers.get("Retry-After", base_delay + attempt)
                     )
+                    wait_time = min(30, retry_after + (attempt * base_delay))
+                    jitter = wait_time * 0.1 * (1 + uniform(-1, 1))  # Add jitter
+                    total_wait = wait_time + jitter
+
                     logger.warning(
-                        f"Rate limit hit, retrying in {retry_after} seconds..."
+                        f"Rate limit hit, retrying in {total_wait:.2f} seconds..."
                     )
-                    await asyncio.sleep(min(10, retry_after))  # Limit max wait time
+                    await asyncio.sleep(total_wait)
                     continue  # Retry after delay
                 raise  # Stop retrying if max retries exceeded
 

@@ -16,7 +16,8 @@ from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
 from evaluation_optimization.resume_editor_async import TextEditorAsync
-from utils.generic_utils import save_to_json_file
+
+# from utils.generic_utils import save_to_json_file
 from llm_providers.llm_api_utils import get_openai_api_key, get_anthropic_api_key
 from models.resume_job_description_io_models import (
     OptimizedText,

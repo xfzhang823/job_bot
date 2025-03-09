@@ -1,7 +1,7 @@
 """
 Filename: resume_eval_pipeline_async.py
 
-Async version of pipelines to create matching metrics between responsibilities 
+Async version of pipelines to create matching metrics between responsibilities
 and requirements.
 """
 
@@ -438,8 +438,8 @@ async def generate_metrics_from_nested_json_async(
 async def run_metrics_processing_pipeline_async(
     mapping_file: Path | str,
     generate_metrics: Callable = generate_metrics_from_flat_json_async,
-    batch_size: int = 6,  # Limit group size for batching (# of tasks/batch)
-    max_concurrent: int = 4,  # Limit number of concurrent tasks
+    batch_size: int = 4,  # Limit group size for batching (# of tasks/batch)
+    max_concurrent: int = 2,  # Limit number of concurrent tasks
 ) -> None:
     """
     * Asynchronous pipeline to process and create missing similarity metrics files
@@ -448,9 +448,30 @@ async def run_metrics_processing_pipeline_async(
     Args:
         - mapping_file (str | Path): Path to the JSON mapping file.
         - generate_metrics (Callable): Function to generate the metrics CSV file.
-        - batch_size (int): Number of tasks to process concurrently.
-        - max_concurrent (int): Number of concurrent tasks.
+        *- batch_size (int): Number of tasks grouped into a batch for sequential execution.
+          - A higher value means more tasks are processed at once, increasing throughput.
+          - A lower value reduces resource contention but may slow down processing.
+        *- max_concurrent (int): Maximum number of tasks running in parallel at any given time.
+          - This controls how many tasks can be actively running at the same time.
+          - A higher value improves speed but may lead to resource contention and timeouts.
+          - A lower value prevents overloading the system but slows down execution.
 
+    ? How `batch_size` and `max_concurrent` work together:
+      - `batch_size` determines how many tasks are grouped and executed in one round.
+      - `max_concurrent` sets the cap on the number of tasks executing at the same time.
+      - If `batch_size` is large but `max_concurrent` is small,
+      the pipeline will process large batches but execute fewer at a time.
+      - If both values are high, more tasks run in parallel,
+      speeding up execution but increasing the risk of API rate limits or timeouts.
+      - If both values are low, processing is slow but avoids performance issues.
+
+    ? To speed up execution:
+      - Increase `batch_size` to process more tasks per round.
+      - Increase `max_concurrent` to allow more tasks to run at the same time.
+
+    ? To prevent resource issues:
+      - Reduce `batch_size` if memory usage is too high.
+      - Reduce `max_concurrent` if there are rate limits or timeouts.
     Returns:
         None
     """
@@ -788,8 +809,33 @@ async def run_metrics_re_processing_pipeline_async(
         optional):
             Asynchronous function to generate the metrics CSV file.
             Defaults to generate_metrics_from_nested_json_async.
-        - batch_size (int): Number of tasks to process concurrently.
-        - max_concurrent (int): Number of concurrent tasks allowed.
+        *- batch_size (int): Number of tasks grouped into a batch for sequential execution.
+          - A higher value means more tasks are processed at once, increasing throughput.
+          - A lower value reduces resource contention but may slow down processing.
+        *- max_concurrent (int): Maximum number of tasks running in parallel at any given time.
+          - This controls how many tasks can be actively running at the same time.
+          - A higher value improves speed but may lead to resource contention and timeouts.
+          - A lower value prevents overloading the system but slows down execution.
+
+    ? How `batch_size` and `max_concurrent` work together:
+      - `batch_size` determines how many tasks are grouped and executed in one round.
+      - `max_concurrent` sets the cap on the number of tasks executing at the same time.
+      - If `batch_size` is large but `max_concurrent` is small,
+      the pipeline will process large batches but execute fewer at a time.
+      - If both values are high, more tasks run in parallel,
+      speeding up execution but increasing the risk of API rate limits or timeouts.
+      - If both values are low, processing is slow but avoids performance issues.
+
+    ? To speed up execution:
+      - Increase `batch_size` to process more tasks per round.
+      - Increase `max_concurrent` to allow more tasks to run at the same time.
+
+    ? To prevent resource issues:
+      - Reduce `batch_size` if memory usage is too high.
+      - Reduce `max_concurrent` if there are rate limits or timeouts.
+
+    Returns:
+        None
 
     Returns:
         None

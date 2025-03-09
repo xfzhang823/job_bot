@@ -1,36 +1,53 @@
 """
 Filename: main.py
 
-This module serves as the entry point for executing various pipeline processes. 
-It dynamically selects and executes a specific pipeline based on the given pipeline ID. 
+This module serves as the entry point for executing various pipeline processes.
+It dynamically selects and executes a specific pipeline based on the given pipeline ID.
 
 Key Steps:
-1. **main.py**: The entry point of the execution. It calls the `execute_pipeline` function 
+1. **main.py**: The entry point of the execution. It calls the `execute_pipeline` function
    to start the process.
 
-2. **execute_pipeline**: This function dynamically selects the appropriate pipeline 
+2. **execute_pipeline**: This function dynamically selects the appropriate pipeline
    to run based on the `pipeline_id` passed to it.
 
-3. **run_pipeline**: This function retrieves the pipeline configuration from 
-'pipeline_config.py' and maps it to the corresponding function 
+3. **run_pipeline**: This function retrieves the pipeline configuration from
+'pipeline_config.py' and maps it to the corresponding function
 (e.g., 'run_preprocessing_pipeline').
 
-4. **pipeline_config.py**: This file contains the configuration that maps pipeline IDs to 
-   specific functions and input/output files, defining how the data flows and is processed 
+4. **pipeline_config.py**: This file contains the configuration that maps pipeline IDs to
+   specific functions and input/output files, defining how the data flows and is processed
    through various stages.
 
-5. **Run each individual function pipeline**: 
-   - For example, `run_preprocessing_pipeline`: This pipeline processes job posting URLs, 
+5. **Run each individual function pipeline**:
+   - For example, `run_preprocessing_pipeline`: This pipeline processes job posting URLs,
      checks for new URLs, and extracts job descriptions.
 
-6. **Move onto the next step**: Once the pipeline finishes, it proceeds to the next stage 
+6. **Move onto the next step**: Once the pipeline finishes, it proceeds to the next stage
 as defined in the pipeline configuration.
 
-This structure allows for easy expansion of new pipelines with minimal code changes, 
+This structure allows for easy expansion of new pipelines with minimal code changes,
 facilitating modular, reusable code for various stages of the process.
 """
 
 # Dependencies
+import os
+
+# * ✅ Force Transformers & BERTScore to use local cache
+
+# Setting environment variables for Transformers to force the library to work entirely
+# from the local cache only!
+os.environ["TRANSFORMERS_CACHE"] = r"C:\github\job_bot\hf_cache"
+os.environ["BERT_SCORE_CACHE"] = r"C:\github\job_bot\hf_cache\bert_score"
+
+# * ✅ Prevent Hugging Face & BERTScore from downloading anything online
+# TRANSFORMERS_OFFLINE, HF_HUB_OFFLINE, and BERT_SCORE_OFFLINE are environment variables
+# used by the Hugging Face transformers and bert-score library to prevent downloading
+# anything online.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["BERT_SCORE_OFFLINE"] = "1"
+
 import logging
 import asyncio  # Add this line to import asyncio
 import matplotlib
@@ -41,13 +58,24 @@ from pipelines.run_pipelines import (
     run_pipeline_async,
 )
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-from project_config import OPENAI, ANTHROPIC, CLAUDE_SONNET, GPT_4_TURBO, CLAUDE_HAIKU
+from project_config import (
+    OPENAI,
+    ANTHROPIC,
+    CLAUDE_SONNET,
+    GPT_35_TURBO,
+    GPT_4_TURBO,
+    CLAUDE_HAIKU,
+)
 
-# Set up logger
-logger = logging.getLogger(__name__)
+from pipelines.filter_job_posting_urls_mini_pipeline import (
+    run_filtering_job_posting_urls_mini_pipe_line,
+)
 
 
 matplotlib.use("Agg")  # Prevent interactive mode
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 # High level function to call the run_pipeline functions (sync and async)
@@ -66,8 +94,7 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
     `execute_pipeline` uses the `_async` suffix in `pipeline_id` to determine
     whether a pipeline is asynchronous:
     - If `is_async` is `True`, the function calls `run_pipeline_async`,
-    wrapped in `asyncio.run()` to handle the
-    event loop.
+    wrapped in `asyncio.run()` to handle the event loop.
     - Otherwise, it calls `run_pipeline` directly for synchronous execution.
 
     Organization:
@@ -102,6 +129,8 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
         To execute an asynchronous pipeline with ID "3d_async" and Claude as the provider:
             execute_pipeline("3d_async", llm_provider="claude")
     """
+    logger.info(f"Starting execution for pipeline: {pipeline_id}")
+
     config = PIPELINE_CONFIG.get(pipeline_id)
     if config is None:
         logger.error(f"No pipeline configuration found for ID: {pipeline_id}")
@@ -114,23 +143,30 @@ def execute_pipeline(pipeline_id, llm_provider="openai", model_id=None):
     is_async = "_async" in pipeline_id
 
     logger.info(
-        f"Executing Pipeline ID '{pipeline_id}' - {description} with provider \
-'{llm_provider}' and model ID '{model_id}'"
+        f"Executing Pipeline ID '{pipeline_id}' - {description} with provider '{llm_provider}' and model ID '{model_id}'"
     )
 
     # Run the appropriate pipeline function based on async/sync type
-    if is_async:
-        asyncio.run(
-            run_pipeline_async(
-                pipeline_id, llm_provider=llm_provider, model_id=model_id
+    try:
+        if is_async:
+            asyncio.run(
+                run_pipeline_async(
+                    pipeline_id, llm_provider=llm_provider, model_id=model_id
+                )
             )
-        )
-    else:
-        run_pipeline(pipeline_id, llm_provider=llm_provider, model_id=model_id)
+        else:
+            run_pipeline(pipeline_id, llm_provider=llm_provider, model_id=model_id)
+    except Exception as e:
+        logger.error(f"Error executing pipeline '{pipeline_id}': {e}", exc_info=True)
+
+    logger.info(f"Finished execution for pipeline: {pipeline_id}")
 
 
 def main_anthropic():
     """Executing the pipeline using Anthropic models (e.g., Claude)"""
+
+    #! ☑️ Step 0: Masking/Filter URLs to run a small batch (temporary step)
+    run_filtering_job_posting_urls_mini_pipe_line()
 
     # Define default Anthropic model
     model_id = CLAUDE_HAIKU
@@ -182,8 +218,11 @@ def main_openai():
     # Define default OpenAI model
     model_id = GPT_4_TURBO
 
+    #! ☑️ Step 0: Masking/Filter URLs to run a small batch (temporary step)
+    run_filtering_job_posting_urls_mini_pipe_line()
+
     # ✅ Step 1: Preprocessing job posting webpages
-    execute_pipeline("1_async", llm_provider=OPENAI, model_id=model_id)
+    execute_pipeline("1_async", llm_provider=OPENAI, model_id=GPT_35_TURBO)
 
     # ✅ Step 2: Creating/updating mapping file for iteration 0
     execute_pipeline("2a", llm_provider=OPENAI)
@@ -203,23 +242,25 @@ def main_openai():
     # ✅ Step 7: Copy & Prune Responsibilities
     execute_pipeline("2f", llm_provider=OPENAI)
 
-    # ✅ Step 8: Iteration 1 - Modify Responsibilities Based on Requirements
-    execute_pipeline("3a", llm_provider=OPENAI)
-    execute_pipeline("3b_async", llm_provider=OPENAI, model_id=model_id)
+    # # ✅ Step 8: Iteration 1 - Modify Responsibilities Based on Requirements
+    # execute_pipeline("3a", llm_provider=OPENAI)
+    # execute_pipeline("3b_async", llm_provider=OPENAI, model_id=model_id)
 
-    # ✅ Step 9: Copy Requirements from Iteration 0 to Iteration 1
-    execute_pipeline("3c", llm_provider=OPENAI)
+    # # ✅ Step 9: Copy Requirements from Iteration 0 to Iteration 1
+    # execute_pipeline("3c", llm_provider=OPENAI)
 
-    # ✅ Step 10: Async Resume Evaluation in Iteration 1
-    execute_pipeline("3d_async", llm_provider=OPENAI, model_id=model_id)
+    # # ✅ Step 10: Async Resume Evaluation in Iteration 1
+    # execute_pipeline("3d_async", llm_provider=OPENAI, model_id=model_id)
 
-    # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
-    execute_pipeline("3e_asyc", llm_provider=OPENAI, model_id=model_id)
+    # # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
+    # execute_pipeline("3e_asyc", llm_provider=OPENAI, model_id=model_id)
 
-    # ✅ Step 12: Clean Metrics Files in Iteration 1
-    execute_pipeline("3f", llm_provider=OPENAI, model_id=model_id)
+    # # ✅ Step 12: Clean Metrics Files in Iteration 1
+    # execute_pipeline("3f", llm_provider=OPENAI, model_id=model_id)
 
 
 if __name__ == "__main__":
-    # main_openai()  # Execute the OpenAI pipeline by calling main_openai
-    main_anthropic()
+
+    # main_openai()  # * Execute the OpenAI pipeline by calling main_openai
+
+    main_anthropic()  # * Execute the OpenAI pipeline by calling anthropic

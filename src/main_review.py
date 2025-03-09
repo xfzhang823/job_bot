@@ -39,12 +39,22 @@ def main():
 
     try:
         mapping_file = ITERATE_1_ANTHROPIC_DIR / mapping_file_name
+        original_mapping_file = ITERATE_0_ANTHROPIC_DIR / mapping_file_name
+
+        logger.info(f"mapping file: {mapping_file}")
+        logger.info(f"original mapping file: {original_mapping_file}")
 
         if not mapping_file.exists():
             logger.error(f"❌ Mapping file not found: {mapping_file}")
             return
 
-        asyncio.run(run_resps_reqs_crosstab_pipeline_async(mapping_file=mapping_file))
+        asyncio.run(
+            run_resps_reqs_crosstab_pipeline_async(
+                mapping_file=mapping_file,
+                score_threshold=0,
+                original_mapping_file=original_mapping_file,
+            )
+        )
 
         logger.info("✅ Finished running pipeline to generate cross-tab files.")
 
@@ -80,4 +90,5 @@ def main_iter0():
 
 
 if __name__ == "__main__":
-    main_iter0()
+    main()
+    # main_iter0()

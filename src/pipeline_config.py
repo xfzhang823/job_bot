@@ -1,21 +1,21 @@
 """
 pipeline_config.py
 
-This module defines the configuration for various pipeline stages, including preprocessing, 
-evaluation, and editing. It specifies the functions, file paths, and LLM providers (OpenAI or 
-Anthropic) for each stage of the pipeline. The configurations are stored in the `PIPELINE_CONFIG` 
+This module defines the configuration for various pipeline stages, including preprocessing,
+evaluation, and editing. It specifies the functions, file paths, and LLM providers (OpenAI or
+Anthropic) for each stage of the pipeline. The configurations are stored in the `PIPELINE_CONFIG`
 dictionary and are used to determine how data is processed at each stage.
 
-The `PipelineStage` enum defines the stages of the pipeline (PREPROCESSING, EVALUATION, EDITING). 
+The `PipelineStage` enum defines the stages of the pipeline (PREPROCESSING, EVALUATION, EDITING).
 Each pipeline configuration includes:
 - `description`: A brief explanation of the pipeline's purpose.
 - `function`: The function to execute for the pipeline (e.g., `run_preprocessing_pipeline`).
 - `io`: Input and output file mappings for different LLM providers (OpenAI or Anthropic).
 
-This configuration is used by the `run_pipeline` function to dynamically select 
-and execute the appropriate pipeline based on the `pipeline_id`. The `run_pipeline` function 
-accesses these configurations to determine the function to call, the required files, 
-and the LLM provider, ensuring the correct processing 
+This configuration is used by the `run_pipeline` function to dynamically select
+and execute the appropriate pipeline based on the `pipeline_id`. The `run_pipeline` function
+accesses these configurations to determine the function to call, the required files,
+and the LLM provider, ensuring the correct processing
 steps are followed for each pipeline.
 """
 
@@ -87,6 +87,7 @@ from pipelines.copying_reqs_to_next_iter_mini_pipeline import (
 from project_config import (
     RESUME_JSON_FILE,
     JOB_POSTING_URLS_FILE,
+    JOB_POSTING_URLS_FILTERED_FILE,
     JOB_DESCRIPTIONS_JSON_FILE,
     JOB_REQUIREMENTS_JSON_FILE,
     mapping_file_name,
@@ -177,12 +178,14 @@ PIPELINE_CONFIG = {
         "function": run_preprocessing_pipeline_async,  # Async function to call
         "io": {
             "openai": {
-                "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
+                # "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
+                "job_posting_urls_file": JOB_POSTING_URLS_FILTERED_FILE,  # todo: use filtered urls file for now (temp) / change back later
                 "job_descriptions_json_file": JOB_DESCRIPTIONS_JSON_FILE,  # * scraped/cleaned descriptions
                 "job_requirements_json_file": JOB_REQUIREMENTS_JSON_FILE,  # * extract requirements
             },
             "anthropic": {
-                "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
+                # "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
+                "job_posting_urls_file": JOB_POSTING_URLS_FILTERED_FILE,  # todo: use filtered urls file for now (temp) / change back later
                 "job_descriptions_json_file": JOB_DESCRIPTIONS_JSON_FILE,  # * scraped/cleaned descriptions
                 "job_requirements_json_file": JOB_REQUIREMENTS_JSON_FILE,  # * extract requirements
             },

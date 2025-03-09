@@ -1,10 +1,10 @@
 """
 Module: model_loader.py
 
-Utility module for managing multiple SentenceTransformer and Transformer-based 
+Utility module for managing multiple SentenceTransformer and Transformer-based
 models efficiently.
 
-This module provides globally cached functions to ensure models are loaded 
+This module provides globally cached functions to ensure models are loaded
 only once, preventing redundant API calls and improving performance.
 
 Pretrained Models Used:
@@ -64,14 +64,14 @@ SP_CACHE_DIR = PROJECT_ROOT / "sp_cache"
 # Cache dictionary for loaded models
 MODEL_CACHE = {}
 
-# List of models to cache
-PRETRAINED_MODELS = {
-    "sbert": "sentence-transformers/all-MiniLM-L6-v2",  # Corrected full model name
-    "bert": "bert-base-uncased",
-    "sts": "sentence-transformers/stsb-roberta-base",  # Corrected full model name
-    "deberta": "microsoft/deberta-large-mnli",
-    "bert_score": "bert-base-uncased",
-}
+# # List of models to cache
+# PRETRAINED_MODELS = {
+#     "sbert": "sentence-transformers/all-MiniLM-L6-v2",  # Corrected full model name
+#     "bert": "bert-base-uncased",
+#     "sts": "sentence-transformers/stsb-roberta-base",  # Corrected full model name
+#     "deberta": "microsoft/deberta-large-mnli",
+#     "bert_score": "bert-base-uncased",
+# }
 
 
 def debug_model_loading(model_name):
@@ -90,68 +90,46 @@ def get_hf_model(model_name: str):
     Load and return a cached transformer model.
 
     Args:
-        model_name (str): Key name for the model from PRETRAINED_MODELS.
+        model_name (str): Full Hugging Face model name.
 
     Returns:
         Transformer model instance.
     """
     global MODEL_CACHE
 
-    if model_name not in PRETRAINED_MODELS:
-        raise KeyError(
-            f"❌ Model '{model_name}' not found in PRETRAINED_MODELS. Available: {list(PRETRAINED_MODELS.keys())}"
-        )
-
     if model_name not in MODEL_CACHE:
-        model_path = PRETRAINED_MODELS[model_name]
-
-        # Ensure HF cache directory exists before downloading
-        HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
+        HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)  # Ensure cache exists
         logger.info(f"📥 Loading model '{model_name}' from cache...")
 
         try:
-            if model_name in ["sbert", "sts"]:
-                debug_model_loading(model_path)  # Track unexpected calls
+            if "sentence-transformers" in model_name:  # SBERT or STS models
                 MODEL_CACHE[model_name] = SentenceTransformer(
-                    model_path, cache_folder=str(HF_CACHE_DIR), local_files_only=True
+                    model_name, cache_folder=str(HF_CACHE_DIR), local_files_only=True
                 )
-            elif model_name == "bert":
-                debug_model_loading(model_path)  # Track unexpected calls
-                MODEL_CACHE[model_name] = {
-                    "tokenizer": BertTokenizer.from_pretrained(
-                        model_path, cache_dir=str(HF_CACHE_DIR), local_files_only=True
-                    ),
-                    "model": BertModel.from_pretrained(
-                        model_path, cache_dir=str(HF_CACHE_DIR), local_files_only=True
-                    ),
-                }
-            elif model_name == "deberta":
-                debug_model_loading(model_path)  # Track unexpected calls
+            elif "deberta" in model_name:  # DeBERTa entailment model
                 MODEL_CACHE[model_name] = {
                     "tokenizer": AutoTokenizer.from_pretrained(
-                        model_path, cache_dir=str(HF_CACHE_DIR), local_files_only=True
+                        model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
                     ),
                     "model": AutoModelForSequenceClassification.from_pretrained(
-                        model_path, cache_dir=str(HF_CACHE_DIR), local_files_only=True
+                        model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
                     ),
                 }
-            elif model_name == "bert_score":
-                debug_model_loading(model_path)  # Track unexpected calls
+            else:  # Default for BERT-based models
                 MODEL_CACHE[model_name] = {
                     "tokenizer": AutoTokenizer.from_pretrained(
-                        model_path, cache_dir=str(HF_CACHE_DIR), local_files_only=True
+                        model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
                     ),
                     "model": AutoModel.from_pretrained(
-                        model_path, cache_dir=str(HF_CACHE_DIR), local_files_only=True
+                        model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
                     ),
                 }
 
             logger.info(f"✅ Model '{model_name}' loaded successfully from cache.")
 
         except Exception as e:
-            logger.error(f"❌ Error loading '{model_name}': {e}")
-            traceback.print_exc()  # 🔍 Print the full error traceback
+            logger.exception(f"❌ Error loading '{model_name}'")
+            raise e
 
     return MODEL_CACHE[model_name]
 

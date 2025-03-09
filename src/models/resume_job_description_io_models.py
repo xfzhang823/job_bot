@@ -10,6 +10,7 @@ from pydantic import (
     BaseModel,
     Field,
     HttpUrl,
+    field_serializer,
     field_validator,
     DirectoryPath,
     RootModel,
@@ -284,7 +285,8 @@ class NestedResponsibilities(BaseModel):
     )
     responsibilities: Dict[
         str, ResponsibilityMatch
-    ]  # ✅ Simulates ResponsibilityMatches (direct ResponsibilityMatches creates an unwanted "wrapper")
+    ]  # ✅ Simulates ResponsibilityMatches (direct ResponsibilityMatches creates
+    # an unwanted "wrapper")
 
     @field_validator("url", mode="before")  # Ensures URLs are always strings
     def coerce_url_to_str(cls, v):  # pylint: disable=no-self-argument
@@ -297,6 +299,14 @@ class NestedResponsibilities(BaseModel):
         if isinstance(v, Url):
             return str(v)
         return v  # Leave strings or other types as they are
+
+    @field_serializer("url")
+    def serialize_url(self, v: str | HttpUrl) -> str:
+        """
+        Serializer ensures that when calling model_dump() or model.json(),
+        the URL field is converted to a string.
+        """
+        return str(v)
 
 
 # Model to validate requirement input

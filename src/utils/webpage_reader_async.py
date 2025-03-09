@@ -17,6 +17,7 @@ This module facilitates a two-step process:
 import re
 from pathlib import Path
 import logging
+import time
 import json
 from typing import Any, Dict, List, Literal, Tuple, Union
 import asyncio
@@ -76,6 +77,49 @@ def clean_webpage_text(content):
     return content
 
 
+async def handle_cookie_banner(page):
+    """Func to handle cookie acceptance banner dynamically."""
+    try:
+        # Get the domain from the current URL
+        url = page.url
+        domain = url.split("/")[
+            2
+        ]  # Extracts "example.com" from "https://example.com/page"
+
+        # Attempt to accept cookies first
+        accept_button = await page.query_selector("button:has-text('Accept')")
+        reject_button = await page.query_selector("button:has-text('Reject')")
+        close_button = await page.query_selector("button:has-text('×')")
+
+        if accept_button:
+            await accept_button.click()
+            logger.info(f"Accepted cookies on {domain}")
+        elif reject_button:
+            await reject_button.click()
+            logger.info(f"Rejected cookies on {domain}")
+        elif close_button:
+            await close_button.click()
+            logger.info(f"Closed cookie banner on {domain}")
+        else:
+            logger.info(f"No cookie banner found on {domain}")
+
+        # ✅ Properly set the cookie using the extracted domain
+        await page.context.add_cookies(
+            [
+                {
+                    "name": "cookie_consent",
+                    "value": "accepted",
+                    "domain": domain,
+                    "path": "/",
+                }
+            ]
+        )
+        logger.info(f"Manually set cookie consent for {domain}")
+
+    except Exception as e:
+        logger.error(f"Error handling cookie banner on {domain}: {e}", exc_info=True)
+
+
 # Function to load webpage content using Playwright
 async def load_webpages_with_playwright_async(
     urls: List[str],
@@ -109,10 +153,29 @@ async def load_webpages_with_playwright_async(
                 logger.info(
                     f"Attempting to load content with Playwright for URL: {url}"
                 )
-                await page.goto(url)
 
-                # Wait for network to be idle
-                await page.wait_for_load_state("networkidle")
+                start_time = time.time()  # Start tracking time
+                try:
+                    await page.goto(url, timeout=5000)
+                except Exception as e:
+                    logger.error(
+                        f"Timeout error for {url} after {time.time() - start_time:.2f} seconds: {e}"
+                    )
+                    failed_urls.append(url)
+                    continue  # ✅ Move to the next page immediately
+
+                logger.info(
+                    f"Successfully loaded {url} in {time.time() - start_time:.2f} seconds"
+                )
+
+                await handle_cookie_banner(page)  # ✅ Accepts cookies
+
+                # * Wait for network to be idle
+                # * "networkidle" waits for all page resources to finish loading,
+                # * while "domcontentloaded" waits only for the initial HTML document to be loaded and parsed.
+
+                # await page.wait_for_load_state("networkidle")
+                await page.wait_for_load_state("domcontentloaded")
 
                 # *page.text_content() vs page.evaluate (page.text_content is used in most tutorials)
                 # *The page.text_content("body") extracts everything, including all the HTML
@@ -120,6 +183,8 @@ async def load_webpages_with_playwright_async(
                 # *page.evaluate() directly access the text content via JavaScript.
                 # *Here, evaluate is better, b/c it has a more "how readers see it" format,
                 # *which is cleaner
+
+                logger.info(f"Extracting content from {url}")  # debugging
                 content = await page.evaluate("document.body.innerText")
                 logger.debug(f"Extracted content: {content}")
 
@@ -136,15 +201,20 @@ async def load_webpages_with_playwright_async(
                     )
 
                 else:
-                    logger.error(f"No content extracted for {url}\n")
-                    failed_urls.append(url)
+                    logger.error(f"No content extracted for {url}, skipping.")
+                    failed_urls.append(url)  # ✅ Marks failed URL but continues
 
             except Exception as e:
                 logger.error(f"Error occurred while fetching content for {url}: {e}")
                 logger.debug(f"Failed URL: {url}")
-                failed_urls.append(url)  # Mark the URL as failed
+                failed_urls.append(
+                    url
+                )  # ✅ Mark the URL as failed (failed_url triggers it to "move on")
 
         await browser.close()
+
+    if failed_urls:
+        logger.warning(f"Failed URLs: {failed_urls}")
 
     return content_dict, failed_urls  # Return both the content and the failed URLs
 
@@ -238,18 +308,22 @@ async def convert_to_json_with_claude_async(
     temperature: float = 0.3,
 ) -> Dict[str, Any]:
     """
-    Parse and convert job posting content to JSON format using Anthropic API asynchronously.
+    Parse and convert job posting content to JSON format using Anthropic API
+    asynchronously.
 
     Args:
         - input_text (str): The cleaned text to convert to JSON.
-        - model_id (str, optional): The model ID to use for OpenAI (default is "gpt-4-turbo").
-        - temperature (float, optional): temperature for the model (default is 0.3).
+        - model_id (str, optional): The model ID to use for OpenAI
+        (default is "gpt-4-turbo").
+        - temperature (float, optional): temperature for the model
+        (default is 0.3).
 
     Returns:
         Dict[str, Any]: A dictionary representation of the extracted JSON content.
 
     Raises:
-        ValueError: If the input text is empty or the response is not in the expected format.
+        ValueError: If the input text is empty or the response is not in
+        the expected format.
 
     Logs:
         Information about the prompt and raw response.
