@@ -186,6 +186,8 @@ async def run_pipeline_async(
     Returns:
         None
     """
+    logger.info(f"Starting async pipeline: {pipeline_id}")
+
     # Step 1: Retrieve pipeline config
     config = PIPELINE_CONFIG.get(pipeline_id)
     if not config:

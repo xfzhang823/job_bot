@@ -1,4 +1,4 @@
-""" Data Input/Output dir/file configuration 
+"""Data Input/Output dir/file configuration
 
 # example_usagage (from modules)
 
@@ -60,10 +60,22 @@ if not BASE_DIR or not BASE_DIR.exists():
 INPUT_OUTPUT_DIR = BASE_DIR / "input_output"  # input/output data folder
 INPUT_DIR = INPUT_OUTPUT_DIR / "input"
 
-# * Resume file in JSON format
+
 # resume_json_file = INPUT_DIR / "Resume_Xiaofei_Zhang_2024_template_for_LLM.json"
-RESUME_JSON_FILE = INPUT_DIR / "Resume_Xiaofei_Zhang_2025_template_for_LLM.json"
-JOB_POSTING_URLS_FILE = INPUT_DIR / "job_posting_urls.json"
+RESUME_JSON_FILE = (
+    INPUT_DIR / "Resume_Xiaofei_Zhang_2025_template_for_LLM.json"
+)  # * Resume file in JSON format
+
+JOB_POSTING_URLS_FILE = (
+    INPUT_DIR / "job_posting_urls.json"
+)  # * Job posting urls in JSON format
+JOB_POSTING_URLS_TO_EXCLUDE_FILE = (
+    INPUT_DIR / "job_posting_urls_to_exclude.json"
+)  # * Job posting urls to exclude in JSON format
+JOB_POSTING_URLS_FILTERED_FILE = (
+    INPUT_DIR / "job_posting_urls_filtered.json"
+)  # * Job posting urls to exclude in JSON format
+
 RESUME_DOCX_FILE = INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.docx"
 # resume_json_file_temp = (
 #     INPUT_DIR / "Resume Xiao-Fei Zhang 2024_Mkt_Intel.json"
@@ -112,7 +124,7 @@ PRUNED_RESPS_FILES_ITERATE_0_OPENAI_DIR = (
 SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR = (
     ITERATE_0_OPENAI_DIR / similarity_metrics_dir_name
 )
-url_to_file_mapping_file_iterate_0_openai = ITERATE_0_OPENAI_DIR / mapping_file_name
+URL_TO_FILE_MAPPING_FILE_ITERATE_0_OPENAI = ITERATE_0_OPENAI_DIR / mapping_file_name
 
 REQS_FILES_ITERATE_1_OPENAI_DIR = ITERATE_1_OPENAI_DIR / requirements_dir_name
 RESPS_FILES_ITERATE_1_OPENAI_DIR = ITERATE_1_OPENAI_DIR / responsibilities_dir_name

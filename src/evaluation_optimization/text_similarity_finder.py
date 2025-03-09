@@ -3,9 +3,9 @@ File: text_similarity_finder
 Author: XF Zhang
 Last updated on: 2525 Feb
 
-text_similarity_finder module provides `TextSimilarity` classes that compute text similarity 
+text_similarity_finder module provides `TextSimilarity` classes that compute text similarity
 using methods from models including:
-    - BERT (Bidirectional Encoder Representations from Transformers) and 
+    - BERT (Bidirectional Encoder Representations from Transformers) and
     - SBERT (Sentence-BERT).
 
     BERT's architecture:
@@ -53,6 +53,7 @@ def convert_dict_to_array(similarity_dict: Dict[str, float]) -> List[float]:
     return list(similarity_dict.values())
 
 
+# TODO: not updated; update later or delete; Asymmetric version is the primary class to use
 class TextSimilarity:
     """
     TextSimilarity class computes text similarities using the following methods:
@@ -649,10 +650,12 @@ class AsymmetricTextSimilarity:
 
     def __init__(
         self,
-        bert_model_name: str = "bert",  # actual model name: "bert-base-uncased"
-        sbert_model_name: str = "sbert",  # actual model name: "all-MiniLM-L6-v2"
-        deberta_model_name: str = "deberta",  # actual model name: "microsoft/deberta-large-mnli"
-        # "roberta-large-mnli" is commented out for now - there is something wrong with this model
+        bert_model_name: str = "bert-base-uncased",
+        sbert_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        deberta_model_name: str = "microsoft/deberta-large-mnli",
+        # bert_model_name: str = "bert",  # actual model name: "bert-base-uncased"
+        # sbert_model_name: str = "sbert",  # actual model name: "all-MiniLM-L6-v2"
+        # deberta_model_name: str = "deberta",  # actual model name: "microsoft/deberta-large-mnli"
     ):
         """
         Initialize models and tokenizers for BERT, SBERT, and DeBERTa models and move them to
@@ -686,8 +689,11 @@ class AsymmetricTextSimilarity:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
 
-        # *Load BERT models and tokenizer
+        self.bert_model_name = bert_model_name
+        self.sbert_model_name = sbert_model_name
+        self.deberta_model_name = deberta_model_name
 
+        # *Load BERT models and tokenizer
         # Load cached BERT model (returns {"model": ..., "tokenizer": ...})
         bert_cached = get_hf_model(
             bert_model_name
@@ -703,11 +709,6 @@ class AsymmetricTextSimilarity:
         self.deberta_model = deberta_cached["model"].to(self.device)  # Move to GPU
         self.deberta_tokenizer = deberta_cached["tokenizer"]  # Use cached tokenizer
 
-        # * Load BERTScore model for BERTScore Precision
-        # bert_cached = get_hf_model("bert_score")  # ✅ Use cached model
-        # self.bert_model = bert_cached("model")  # ✅ Use cached model
-        # self.bert_tokenizer = bert_cached["tokenizer"]
-
         # * Load spaCy
         logger.debug("Loading spaCy model...")  # todo: debug; delete later
         self.nlp = get_spacy_model("en_core_web_md")
@@ -716,14 +717,6 @@ class AsymmetricTextSimilarity:
         logger.debug(
             f"Finished loading models in AsymmetricTextSimilarity. Type of self.bert_model: {type(self.bert_model)}"
         )
-
-        ### todo: Swapping out for now/delete or fix later
-        # Load NLI model for entailment detection
-        # self.nli_model = AutoModelForSequenceClassification.from_pretrained(
-        #     nli_model_name
-        # )
-        # self.nli_tokenizer = AutoTokenizer.from_pretrained(nli_model_name)
-        ###
 
     def add_context(
         self, text1: str, text2: str, context: Optional[str] = None
@@ -770,17 +763,13 @@ class AsymmetricTextSimilarity:
             [candidate],
             [reference],
             lang="en",
-            model_type="bert-base-uncased",
+            model_type=self.bert_model_name,
             # * need to set to bert model & bert tokenizer (cached)
             # * other wise it will default to roberta-large
             verbose=True,
             num_layers=9,
         )
         precision = torch.tensor(P).mean().item()  # Convert list to tensor first
-
-        logger.info(
-            f"BERTScrore precision computed: {precision}"
-        )  # todo: debug; delete later
 
         return precision
 
@@ -804,22 +793,26 @@ class AsymmetricTextSimilarity:
         # Encode premise (requirement) and hypothesis (responsibility)
         inputs = self.deberta_tokenizer.encode_plus(
             premise, hypothesis, return_tensors="pt", truncation=True
-        ).to(self.device)
-
-        self.deberta_model.to(self.device)
+        ).to(
+            self.device
+        )  # ✅ Move inputs to GPU if available
 
         try:
             # Get model predictions (logits) for the inputs
             logits = self.deberta_model(**inputs).logits
             # * logits are the raw outputs from a neural network’s final layer before
             # * applying an activation function
+
+            # ✅ Convert logits to probabilities
             probs = torch.softmax(logits, dim=1).tolist()[0]
-            entailment_score = probs[2]  # Probability for entailment
+
+            entailment_score = probs[2]  # ✅ Extract probability for entailment
 
             return float(entailment_score)
+
         except Exception as e:
-            logger.error(f"❌ Error in DeBERTa Entailment Score")
-            return 0.0
+            logger.error(f"❌ Error in DeBERTa Entailment Score: {e}", exc_info=True)
+            return 0.0  # ✅ Return 0.0 to avoid crashes
 
     def jaccard_similarity(
         self, text1: str, text2: str, context: Optional[str] = None
@@ -839,8 +832,12 @@ class AsymmetricTextSimilarity:
             text1, text2 = self.add_context(text1, text2, context)
 
         # Tokenize using spaCy and compute similarity metric
-        tokens1 = set(token.text.lower() for token in self.nlp(text1))
-        tokens2 = set(token.text.lower() for token in self.nlp(text2))
+        tokens1 = set(
+            token.text.lower() for token in self.nlp(text1) if not token.is_stop
+        )
+        tokens2 = set(
+            token.text.lower() for token in self.nlp(text2) if not token.is_stop
+        )
 
         intersection = tokens1.intersection(tokens2)
         union = tokens1.union(tokens2)
@@ -924,43 +921,47 @@ class AsymmetricTextSimilarity:
         similarities = {}
 
         try:
-            logger.debug(
-                f"Type of self.bert_model before BERTScore: {type(self.bert_model)}"
-            )
             similarities["bert_score_precision"] = self.bert_score_precision(
                 candidate, reference, context
             )
         except Exception as e:
-            logger.error(f"Error in BERTScore precision: {e}")
-            similarities["bert_score_precision"] = None
-
-        logger.debug(
-            f"Type of self.sbert_model before SBERT similarity: {type(self.sbert_model)}"
-        )  # todo: debug; delete later
+            logger.error(f"❌ Error in BERTScore precision: {e}", exc_info=True)
+            similarities["bert_score_precision"] = 0.0  # ✅ Return 0.0 instead of None
 
         try:
             similarities["soft_similarity"] = self.soft_similarity(
                 candidate, reference, context
             )
         except Exception as e:
-            logger.error(f"Error in Soft Similarity: {e}")
-            similarities["soft_similarity"] = None
+            logger.error(f"❌ Error in Soft Similarity: {e}", exc_info=True)
+            similarities["soft_similarity"] = 0.0  # ✅ Return 0.0 instead of None
 
         try:
             similarities["word_movers_distance"] = self.word_movers_distance(
                 candidate, reference, context
             )
         except Exception as e:
-            logger.error(f"Error in Word Mover's Distance: {e}")
-            similarities["word_movers_distance"] = None
+            logger.error(f"❌ Error in Word Mover's Distance: {e}", exc_info=True)
+            similarities["word_movers_distance"] = 0.0  # ✅ Return 0.0 instead of None
 
         try:
             similarities["deberta_entailment_score"] = self.deberta_entailment_score(
                 candidate, reference, context
             )
         except Exception as e:
-            logger.error(f"Error in DeBERTa Entailment Score: {e}")
-            similarities["deberta_entailment_score"] = None
+            logger.error(f"❌ Error in DeBERTa Entailment Score: {e}", exc_info=True)
+            similarities["deberta_entailment_score"] = (
+                0.0  # ✅ Return 0.0 instead of None
+            )
+
+        # ✅ Missing Jaccard Similarity Fix
+        try:
+            similarities["jaccard_similarity"] = self.jaccard_similarity(
+                candidate, reference, context
+            )
+        except Exception as e:
+            logger.error(f"❌ Error in Jaccard Similarity: {e}", exc_info=True)
+            similarities["jaccard_similarity"] = 0.0  # ✅ Return 0.0 instead of None
 
         return similarities
 
@@ -1000,66 +1001,6 @@ class AsymmetricTextSimilarity:
         )
 
         return similarities
-
-    # todo: Swapped out this one b/c it was giving me errors; delete soon
-    # def nli_entailment_score(self, hypothesis, premise, context=None):
-    #     """
-    #     Compute the entailment score between two texts using a Natural Language Inference (NLI) model.
-
-    #     Args:
-    #     - hypothesis (str): The text representing the responsibility or experience.
-    #     - premise (str): The text representing the requirement.
-    #     - context (str): Optional context to be added to both texts.
-
-    #     Returns:
-    #     - float: The probability that the hypothesis is entailed by the premise.
-    #     """
-    #     if context:
-    #         hypothesis, premise = self.add_context(hypothesis, premise, context)
-
-    #     # Encode premise (requirement) and hypothesis (responsibility)
-    #     inputs = self.nli_tokenizer.encode_plus(
-    #         premise, hypothesis, return_tensors="pt", truncation=True
-    #     )
-
-    #     # Get model predictions (logits) for the inputs
-    #     logits = self.nli_model(**inputs).logits
-    #     probs = torch.softmax(logits, dim=1).tolist()[0]
-    #     entailment_score = probs[2]  # Probability for entailment
-    #     return entailment_score
-
-    # todo: Swapped out this one b/c it was giving me errors; delete soon
-    # def word_movers_distance(self, candidate, reference, context=None):
-    #     """
-    #     Compute the Word Mover's Distance (WMD) between two texts.
-
-    #     Args:
-    #     - candidate (str): The text representing the responsibility or experience.
-    #     - reference (str): The text representing the requirement.
-    #     - context (str): Optional context to be added to both texts.
-
-    #     Returns:
-    #     - float: The Word Mover's Distance. A smaller distance indicates more similarity.
-    #     """
-    #     if context:
-    #         candidate, reference = self.add_context(candidate, reference, context)
-
-    #     # Compute Word Mover's Distance
-    #     # Use spaCy's stopwords
-    #     vectorizer = CountVectorizer(stop_words=list(spacy_stopwords)).fit(
-    #         [candidate, reference]
-    #     )
-
-    #     vector1 = vectorizer.transform([candidate])
-    #     vector2 = vectorizer.transform([reference])
-
-    #     # Convert the sparse matrices to dense format (numpy arrays)
-    #     vector1_dense = vector1.to_array()
-    #     vector2_dense = vector2.to_array()
-
-    #     # Calculate the Euclidean distance
-    #     distance = np.linalg.norm(vector1_dense - vector2_dense)
-    #     return distance
 
 
 def compute_bertscore_precision(
