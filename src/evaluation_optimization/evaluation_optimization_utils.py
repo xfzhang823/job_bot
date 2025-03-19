@@ -211,6 +211,7 @@ def get_files_wo_multivariate_indices(
         indices = [
             "scaled_bert_score_precision",
             "scaled_deberta_entailment_score",
+            "scaled_roberta_entailment_score",
             "scaled_soft_similarity",
             "scaled_word_movers_distance",
             "composite_score",
@@ -218,23 +219,26 @@ def get_files_wo_multivariate_indices(
         ]
 
     if isinstance(data_sources, (str, Path)):
-        # Treat data_sources as a directory path and check if it exists
         data_directory = Path(data_sources)
         if not data_directory.exists():
             raise ValueError(
                 f"The provided directory '{data_directory}' does not exist."
             )
-
-        # Get all CSV files in the directory
-        file_list = get_file_names(
-            directory_path=data_directory,
-            full_path=True,
-            recursive=True,
-            file_types=[".csv"],
-        )
-    else:
-        # Ensure each item in the list is converted to a Path
+        file_list = [
+            Path(file)
+            for file in get_file_names(
+                directory_path=data_directory,
+                full_path=True,
+                recursive=True,
+                file_types=[".csv"],
+            )
+        ]
+    elif isinstance(data_sources, list):
         file_list = [Path(file) for file in data_sources]
+    else:
+        raise ValueError(
+            "Invalid input type for data_sources. Must be a path or list of paths."
+        )
 
     files_without_indices = []
 

@@ -651,11 +651,11 @@ class AsymmetricTextSimilarity:
     def __init__(
         self,
         bert_model_name: str = "bert-base-uncased",
-        # sbert_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        # # switch out the MiniLM to RoBERTa model
-        sbert_model_name: str = "sentence-transformers/stsb-roberta-base",
+        sbert_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         deberta_model_name: str = "microsoft/deberta-large-mnli",
-        roberta_model_name: str = "roberta-large-mnli",
+        # bert_model_name: str = "bert",  # actual model name: "bert-base-uncased"
+        # sbert_model_name: str = "sbert",  # actual model name: "all-MiniLM-L6-v2"
+        # deberta_model_name: str = "deberta",  # actual model name: "microsoft/deberta-large-mnli"
     ):
         """
         Initialize models and tokenizers for BERT, SBERT, and DeBERTa models and move them to
@@ -692,7 +692,6 @@ class AsymmetricTextSimilarity:
         self.bert_model_name = bert_model_name
         self.sbert_model_name = sbert_model_name
         self.deberta_model_name = deberta_model_name
-        self.roberta_model_name = roberta_model_name
 
         # *Load BERT models and tokenizer
         # Load cached BERT model (returns {"model": ..., "tokenizer": ...})
@@ -709,11 +708,6 @@ class AsymmetricTextSimilarity:
         deberta_cached = get_hf_model(deberta_model_name)
         self.deberta_model = deberta_cached["model"].to(self.device)  # Move to GPU
         self.deberta_tokenizer = deberta_cached["tokenizer"]  # Use cached tokenizer
-
-        # * Load RoBERTa model for entailment detection from cache
-        roberta_cached = get_hf_model(roberta_model_name)
-        self.roberta_model = roberta_cached["model"].to(self.device)  # Move to GPU
-        self.roberta_tokenizer = roberta_cached["tokenizer"]  # Use cached tokenizer
 
         # * Load spaCy
         logger.debug("Loading spaCy model...")  # todo: debug; delete later
@@ -819,28 +813,6 @@ class AsymmetricTextSimilarity:
         except Exception as e:
             logger.error(f"❌ Error in DeBERTa Entailment Score: {e}", exc_info=True)
             return 0.0  # ✅ Return 0.0 to avoid crashes
-
-    def roberta_entailment_score(
-        self, premise: str, hypothesis: str, context: Optional[str] = None
-    ) -> float:
-        """Compute entailment score using RoBERTa-large-MNLI."""
-        if context:
-            hypothesis, premise = self.add_context(hypothesis, premise, context)
-
-        inputs = self.roberta_tokenizer.encode_plus(
-            premise, hypothesis, return_tensors="pt", truncation=True
-        ).to(
-            self.device
-        )  # ✅ encode_plus in Hugging Face's tokenizer API convert text into numerical token IDs
-
-        try:
-            logits = self.roberta_model(**inputs).logits
-            probs = torch.softmax(logits, dim=1).tolist()[0]
-            entailment_score = probs[2]  # Extract entailment probability
-            return float(entailment_score)
-        except Exception as e:
-            logger.error(f"❌ Error in RoBERTa Entailment Score: {e}", exc_info=True)
-            return 0.0
 
     def jaccard_similarity(
         self, text1: str, text2: str, context: Optional[str] = None
@@ -982,16 +954,7 @@ class AsymmetricTextSimilarity:
                 0.0  # ✅ Return 0.0 instead of None
             )
 
-        try:
-            similarities["roberta_entailment_score"] = self.roberta_entailment_score(
-                candidate, reference, context
-            )
-        except Exception as e:
-            logger.error(f"❌ Error in RoBERTa Entailment Score: {e}", exc_info=True)
-            similarities["roberta_entailment_score"] = (
-                0.0  # ✅ Return 0.0 instead of None
-            )
-
+        # ✅ Missing Jaccard Similarity Fix
         try:
             similarities["jaccard_similarity"] = self.jaccard_similarity(
                 candidate, reference, context
@@ -1017,7 +980,6 @@ class AsymmetricTextSimilarity:
             dict: A dictionary containing all computed similarity scores.
         """
         similarities = {}
-
         similarities["bert_score_precision"] = self.bert_score_precision(
             candidate, reference, context
         )

@@ -289,6 +289,9 @@ def generate_metrics_from_nested_json(
                     deberta_entailment_score_cat=similarity_metrics.get(
                         "deberta_entailment_score_cat"
                     ),
+                    roberta_entailment_score_cat=similarity_metrics.get(
+                        "roberta_entailment_score_cat"
+                    ),
                     scaled_bert_score_precision=similarity_metrics.get(
                         "scaled_bert_score_precision"
                     ),

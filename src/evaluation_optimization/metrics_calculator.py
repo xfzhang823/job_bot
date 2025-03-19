@@ -55,6 +55,12 @@ STANDARD_METRIC_CRITERIA = {
         "high_threshold": 0.8,
         "low_threshold": 0.4,
     },
+    # "RoBERTa Entailment Score"
+    "roberta_entailment_score": {
+        "range": (0, 1),
+        "high_threshold": 0.8,
+        "low_threshold": 0.4,
+    },
 }
 
 # Define a more custom metric criteria in a dictionary
@@ -80,6 +86,12 @@ METRIC_CRITERIA = {
     },
     # "DeBERTa Entailment Score"
     "deberta_entailment_score": {
+        "range": (0, 1),
+        "high_threshold": 0.70,
+        "low_threshold": 0.20,
+    },
+    # "RoBeBERTa Entailment Score"
+    "roberta_entailment_score": {
         "range": (0, 1),
         "high_threshold": 0.70,
         "low_threshold": 0.20,
@@ -186,6 +198,7 @@ def categorize_scores_for_df(df, metrics=None):
             "soft_similarity",
             "word_movers_distance",
             "deberta_entailment_score",
+            "roberta_entailment_score",
         ]
 
     # Step 1: Rename columns (if necessary)
@@ -227,6 +240,7 @@ def calculate_text_similarity_metrics(
         "soft_similarity": similarity_scores["soft_similarity"],
         "word_movers_distance": similarity_scores["word_movers_distance"],
         "deberta_entailment_score": similarity_scores["deberta_entailment_score"],
+        "roberta_entailment_score": similarity_scores["roberta_entailment_score"],
     }
 
 
@@ -315,119 +329,25 @@ def calculate_many_to_many_similarity_metrices(
                     "deberta_entailment_score": similarity_dict[
                         "deberta_entailment_score"
                     ],
+                    "roberta_entailment_score": similarity_dict[
+                        "roberta_entailment_score"
+                    ],
                 }
             )
 
     # Convert results to DataFrame
     df_results = pd.DataFrame(similarity_results)
 
+    logger.debug(f"df_results type: {type(df_results)}")  # todo: debug; delete later
+
     # Clean DataFrame - remove newline characters in string fields
-    df_results = df_results.applymap(
-        lambda x: str(x).replace("\n", " ") if isinstance(x, str) else x
+    df_results = df_results.apply(
+        lambda col: col.map(
+            lambda x: str(x).replace("\n", " ") if isinstance(x, str) else x
+        )
     )
 
     logger.info("Similarity metrics calculation completed.")
-    return df_results
-
-
-def calculate_resps_reqs_bscore_precisions(resps_flat, job_reqs_str):
-    """
-    Calculate the BERTScore (precision only) between:
-    - Each resume responsibility.
-    - Job requirements as a whole.
-
-    Args:
-        - resps_flat (dict): Dictionary of flattened responsibilities from the resume,
-        where the key is an identifier and the value is the responsibility text.
-        - job_reqs_str (str): Flattened job requirements string.
-
-    Returns:
-        pd.DataFrame: DataFrame containing BERTScore precision metrics for
-        each responsibility against the job requirements.
-    """
-    bscore_p_results = []  # Corrected typo in variable name
-
-    # Calculate similarity for each responsibility against the job requirements
-    for key, value in resps_flat.items():
-        print(f"Calculating BERTScore for: {value}")
-        candidate_sent = value
-        ref_parag = job_reqs_str
-
-        # Debugging
-        print(f"Candidate sententce: {candidate_sent}")
-        print(f"Reference paragraph: {ref_parag}")
-
-        # Compute BERTScore precision using the provided function
-        bscore_p = compute_bertscore_precision(
-            candidate_sent, ref_parag, candidate_context=None, reference_context=None
-        )
-
-        # Append results to the list
-        bscore_p_results.append(
-            {"responsibility": value, "BERTScore Precision": bscore_p}
-        )
-
-    # Convert list to a DataFrame
-    df_bscore_p = pd.DataFrame(bscore_p_results)
-    return df_bscore_p
-
-
-def calculate_segment_resp_bscore_precisions(
-    responsibilities: list[str], requirements: list[str]
-):
-    """
-    Calculate BERTScore Precision for each responsibility against each job requirement.
-
-    Args:
-        responsibilities (list of str): List of flattened responsibilities from the resume.
-        requirements (list of str): List of flattened job requirements from the job posting.
-
-    Returns:
-        pd.DataFrame: DataFrame containing similarity scores for each responsibility and requirement pair.
-    """
-    results = []
-
-    # Debugging: Check length of responsibilities and requirements
-    print(f"Number of responsibilities: {len(responsibilities)}")
-    print(f"Number of requirements: {len(requirements)}")
-
-    # Expected number of combinations
-    print(
-        f"Expected number of comparisons: {len(responsibilities) * len(requirements)}"
-    )
-
-    # Enumerate over responsibilities to capture both index and value
-    for resp_key, resp in responsibilities.items():
-        # Enumerate over requirements to capture both index and value
-        for req_key, req in requirements.items():
-
-            # Debugging
-            print(f"Comparing responsibility: {resp} \nwith requirement: {req}")
-
-            # Compute BERTScore Precision (assuming compute_bertscore_precision is defined)
-            bscore_p = compute_bertscore_precision(resp, req)
-
-            # Append results with responsibility index and value, and requirement index and value
-            results.append(
-                {
-                    "responsibility_key": resp_key,
-                    "responsibility": resp,
-                    "requirement_key": req_key,
-                    "requirement": req,
-                    "BERTScore Precision": bscore_p,
-                }
-            )
-
-            # Debugging: Check BERTScore output
-            print(f"BERTScore Precision: {bscore_p}")
-
-    # Convert results to DataFrame for easy analysis
-    df_results = pd.DataFrame(results)
-
-    # Display the full DataFrame content for debugging purposes
-    print("Complete DataFrame:")
-    print(df_results)
-
     return df_results
 
 
@@ -504,15 +424,16 @@ class SimilarityScoreCalculator:
                     {
                         "responsibility_key": resp_key,
                         "responsibility": resp,
-                        "requirement_key": req_key,
+                        "requirement_key": req_key,  # also changed key name to lower-case
                         "requirement": req,
-                        "BERTScore Precision": similarity_dict["bert_score_precision"],
-                        "Soft Similarity": similarity_dict["soft_similarity"],
-                        "Word Mover's Distance": similarity_dict[
-                            "word_movers_distance"
-                        ],
-                        "Deberta Entailment Score": similarity_dict[
+                        "bert_score_precision": similarity_dict["bert_score_precision"],
+                        "soft_similarity": similarity_dict["soft_similarity"],
+                        "word_movers_distance": similarity_dict["word_movers_distance"],
+                        "deberta_entailment_score": similarity_dict[
                             "deberta_entailment_score"
+                        ],
+                        "roberta_entailment_score": similarity_dict[
+                            "roberta_entailment_score"
                         ],
                     }
                 )
@@ -560,6 +481,9 @@ class SimilarityScoreCalculator:
                     "Deberta Entailment Score": similarity_dict[
                         "deberta_entailment_score"
                     ],
+                    "Roberta Entailment Score": similarity_dict[
+                        "roberta_entailment_score"
+                    ],
                 }
             )
 
@@ -579,12 +503,14 @@ class SimilarityScoreCalculator:
         df_results = pd.DataFrame(results)
 
         # Clean dataframe
-        df_results = df_results.applymap(
-            lambda x: str(x).replace("\n", " ") if isinstance(x, str) else x
+        df_results = df_results.apply(
+            lambda col: col.map(
+                lambda x: str(x).replace("\n", " ") if isinstance(x, str) else x
+            )
         )
 
-        print("Complete DataFrame:")
-        print(df_results)
+        logger.info("Complete DataFrame:")
+        logger.info(df_results)
 
         return df_results
 
@@ -598,6 +524,7 @@ if __name__ == "__main__":
         "nli_entailment_score": 0.2,
         "jaccard_similarity": 0.6,
         "deberta_entailment_score": 0.75,
+        "roberta_entailment_score": 0.65,
     }
 
     categorized = categorize_scores(example_scores)

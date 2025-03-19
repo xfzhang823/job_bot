@@ -224,6 +224,7 @@ async def run_resume_editing_pipeline_async(
     mapping_file_curr: Union[str, Path],
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_TURBO,
+    no_of_concurrent_workers: int = 3,
 ) -> None:
     """
     Run the pipeline to modify responsibilities based on the previous and current
@@ -309,7 +310,7 @@ async def run_resume_editing_pipeline_async(
             requirements=validated_requirements.requirements,
             llm_provider=llm_provider,
             model_id=model_id,
-            no_of_concurrent_workers=4,  # If running multiple urls, then dial this down to be safe
+            no_of_concurrent_workers=no_of_concurrent_workers,  # If running multiple urls, then dial this down to be safe
         )  # returns model ResponsibilityMatches
 
         logger.info(

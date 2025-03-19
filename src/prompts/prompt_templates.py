@@ -261,3 +261,77 @@ Return only the JSON block without any additional text, explanations, or markdow
 
 # # Insert the JSON object as a string into the prompt
 # formatted_prompt = prompt_template.format(resume_json=json.dumps(json_data, indent=2))
+
+TRIM_CONDENSE_FINAL_RESUME_JSON_PROMPT = """
+You are an expert resume optimizer for senior-level tech and consulting roles.
+Your task is to **trim, consolidate, and optimize** the provided JSON resume data while maintaining clarity, impact, and ATS compatibility.
+
+### **Task Instructions**
+1. **Trim & Condense:** Reduce the word count to approximately **500-600 words** while retaining essential details.
+2. **Merge Related Content:** Combine overlapping or redundant bullets to enhance readability and conciseness.
+3. **Enhance ATS Compliance:** Ensure the use of **strong action verbs**, **industry-specific keywords**, and **quantifiable achievements** \
+(e.g., "% improvements," "increased revenue by X%," "cut processing time by Y%").
+4. **Ensure Consistency & Clarity:** Maintain a **structured, professional format**, ensuring smooth readability while preserving key impact points.
+5. **Strict JSON Output:** Format the output **identically to the input JSON structure**, preserving the original schema.
+
+---
+### **Input Resume in JSON Format**
+{resume_json}
+
+---
+### **Expected Output (Optimized JSON Format)**
+- The **same JSON structure** as the input.
+- **Trimmed, condensed, and optimized** responsibilities and achievements.
+- **Strict adherence to JSON formatting** (no extra explanations, markdown, or non-JSON content).
+- Output must be a **valid JSON object**.
+
+### **Expected Output Format (JSON Example)**
+{{
+  "edited_responsibility_1": {
+    "0.responsibilities.0": "Optimized AI-driven workflows, enhancing user engagement and commercial potential.",
+    "0.responsibilities.1": "Developed scalable AI-first strategies, integrating NLP and ML models to drive efficiency.",
+    ...
+  }
+}}
+"""
+
+MODIFYING_FINAL_RESUME_PROMPT = """
+You are an expert in ATS (Applicant Tracking System) optimization. 
+Your task is to refine the provided JSON resume data with a light touch to emphasize relevant \
+content and maximize ATS compatibility for the specified job role.
+
+## Input
+- JSON-formatted resume data {resume_json}
+- JSON-formatted job description {job_description}
+- JSON-formatted list of keywords {keywords}
+- Target role name {target_role}
+- Target company name {target_company}
+
+<Instructions>
+1. Maintain the existing content structure and most of the original wording
+2. Trim & Condense: Reduce the word count to approximately 500-600 words while retaining essential details
+3. Merge Related Content: Combine overlapping or redundant bullets to enhance readability and conciseness
+4. Highlight relevant experience by:
+   - Ensuring important achievements and skills appear early in each section
+   - Adding ATS-friendly keywords naturally where they fit existing content
+5. Improve ATS compatibility by:
+   - Using standard industry terminology that matches the job description
+   - Replacing passive language with active, action-oriented verbs
+   - Ensuring quantifiable metrics and achievements are clearly visible
+6. Do not:
+   - Add new experiences or significantly alter the meaning of existing content
+   - Force keywords where they don't naturally fit
+
+## Expected Output
+Return your ATS-optimized resume as a JSON object named 'optimized_resume_json' that maintains \
+the same structure as the input resume, as followings:
+{{
+  "optimized_resume_json": {{
+    "0.responsibilities.0": "Led cross-functional team of 12 engineers in developing scalable data platform...",
+    "0.responsibilities.1": "Architected and implemented cloud-based AI solution...",
+    ...
+  }}
+}}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax.
+"""

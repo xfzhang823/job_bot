@@ -40,6 +40,7 @@ from models.llm_response_models import (
     CodeResponse,
     RequirementsResponse,
 )
+from project_config import OPENAI, ANTHROPIC
 
 # logging
 logger = logging.getLogger(__name__)
@@ -75,19 +76,25 @@ class TextEditorAsync:
 
     Methods:
         - generate_text_id(text_id=None): Generates a unique text ID using UUID.
-        - format_prompt(prompt_template, content_1, content_2): Formats the prompt using a provided template.
+        - format_prompt(prompt_template, content_1, content_2): Formats the prompt using
+        a provided template.
         - call_llm_async(prompt, llm_provider=None, temperature=None):
-            Calls the specified LLM API (OpenAI, Anthropic, or LLaMA3) with the given prompt and returns
-            the response.
-        - validate_response(response_dict): Validates a response dictionary against a predefined JSON schema.
+            Calls the specified LLM API (OpenAI, Anthropic, or LLaMA3) with the given prompt
+            and returns the response.
+        - validate_response(response_dict): Validates a response dictionary against a predefined
+        JSON schema.
         - edit_for_dp(target_text, source_text, text_id=None, llm_provider=None, temperature=None):
             Edits text to align with source text's dependency parsing (DP).
-        - edit_for_entailment(target_text, source_text, text_id=None, llm_provider=None, temperature=None):
+        - edit_for_entailment(target_text, source_text, text_id=None, llm_provider=None,
+        temperature=None):
             Edits text based on semantic entailment.
-        - edit_for_semantics(target_text, source_text, text_id=None, llm_provider=None, temperature=None):
+        - edit_for_semantics(target_text, source_text, text_id=None, llm_provider=None,
+        temperature=None):
             Edits text to align with source text's semantics.
-        - edit_for_semantics_and_entailment(candidate_text, reference_text, text_id=None, llm_provider=None,
-          temperature=None): Edits text to align with source text's semantics and strengthen entailment relationships.
+        - edit_for_semantics_and_entailment(candidate_text, reference_text, text_id=None,
+        llm_provider=None,
+          temperature=None): Edits text to align with source text's semantics and
+          strengthen entailment relationships.
     """
 
     def __init__(
@@ -104,17 +111,27 @@ class TextEditorAsync:
         self.max_tokens = max_tokens
         self.client = client  # Store the passed client
 
-        # Conditionally initialize the client based on model
-        if self.llm_provider == "openai" and not self.client:
-            # Initialize OpenAI API client if it's not provided
-            api_key = get_openai_api_key()  # Fetch the API key
-            self.client = OpenAI(api_key=api_key)  # Instantiate OpenAI API client
-        elif self.llm_provider == "llama3":
-            # If using LLaMA3, no OpenAI client initialization is needed
-            # You may initialize LLaMA3-specific settings here if needed
-            logger.info("Using LLaMA3 model for text editing.")
-        elif not self.client:
-            raise ValueError(f"Unsupported model: {self.llm_provider}")
+        # Use global clients by default if not provided
+        # Check for mismatches if client is provided
+        if self.client is not None:
+            if self.llm_provider == OPENAI and not isinstance(self.client, AsyncOpenAI):
+                raise ValueError(
+                    f"Client must be AsyncOpenAI for provider 'openai', got {type(self.client)}"
+                )
+            elif self.llm_provider == ANTHROPIC and not isinstance(
+                self.client, AsyncAnthropic
+            ):
+                raise ValueError(
+                    f"Client must be AsyncAnthropic for provider 'anthropic', got {type(self.client)}"
+                )
+            elif self.llm_provider == "llama3" and self.client is not None:
+                raise ValueError(
+                    "Llama3 does not require a client, but one was provided"
+                )
+
+        logger.info(
+            f"TextEditor initialized with provider: {self.llm_provider}, model: {self.model_id}, client: {'None' if self.client is None else type(self.client).__name__}"
+        )
 
     def generate_text_id(self, text_id=None):
         """Generate a unique text_id using UUID if not provided."""
@@ -131,7 +148,7 @@ class TextEditorAsync:
     async def call_llm_async(
         self,
         prompt: str,
-        llm_provider: str = "openai",
+        llm_provider: str = OPENAI,
         temperature: Optional[float] = None,
     ) -> Union[
         JSONResponse,
@@ -149,14 +166,16 @@ class TextEditorAsync:
         and return the response.
 
         Args:
-            prompt (str): The formatted prompt to send to the LLM API.
-            llm_provider (str): The llm provider to use for the API call ('openai', 'claude', or 'llama3').
-            temperature (float, optional): Temperature setting for this specific API call.
+            - prompt (str): The formatted prompt to send to the LLM API.
+            - llm_provider (str): The llm provider to use for the API call ('openai', 'claude',
+            or 'llama3').
+            - temperature (float, optional): Temperature setting for this specific API call.
                                            If None, uses the class-level temperature.
 
         Returns:
-            Union[JSONResponse, TabularResponse, TextResponse, CodeResponse, EditingResponseModel, JobSiteResponseModel]:
-            The structured response from the API, validated if it passes JSON schema requirements.
+            Union[JSONResponse, TabularResponse, TextResponse, CodeResponse, EditingResponseModel,
+            JobSiteResponseModel]:
+                The structured response from the API, validated if it passes JSON schema requirements.
         """
         temperature = temperature if temperature is not None else self.temperature
         # Choose the appropriate LLM API
@@ -168,7 +187,7 @@ class TextEditorAsync:
                 json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
-                client=self.client if isinstance(self.client, AsyncOpenAI) else None,
+                client=self.client,  # pylint: disable=redefined-outer-name
             )
         elif llm_provider.lower() == "anthropic":
             response_model = await call_anthropic_api_async(
@@ -178,7 +197,7 @@ class TextEditorAsync:
                 json_type="editing",
                 temperature=temperature,
                 max_tokens=self.max_tokens,
-                client=self.client if isinstance(self.client, AsyncAnthropic) else None,
+                client=self.client,
             )
         elif llm_provider.lower() == "llama3":
             response_model = await call_llama3_async(

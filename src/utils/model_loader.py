@@ -115,6 +115,15 @@ def get_hf_model(model_name: str):
                         model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
                     ),
                 }
+            elif "roberta" in model_name:  # Roberta-large entailment
+                MODEL_CACHE[model_name] = {
+                    "tokenizer": AutoTokenizer.from_pretrained(
+                        model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
+                    ),
+                    "model": AutoModelForSequenceClassification.from_pretrained(
+                        model_name, cache_dir=str(HF_CACHE_DIR), local_files_only=True
+                    ),
+                }
             else:  # Default for BERT-based models
                 MODEL_CACHE[model_name] = {
                     "tokenizer": AutoTokenizer.from_pretrained(

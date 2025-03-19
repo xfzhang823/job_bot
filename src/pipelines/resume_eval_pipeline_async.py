@@ -1,14 +1,76 @@
 """
 Filename: resume_eval_pipeline_async.py
 
-Async version of pipelines to create matching metrics between responsibilities
-and requirements.
+* Overview:
+This module implements an **asynchronous pipeline** for evaluating resumes by computing
+similarity and entailment metrics between **job responsibilities (from resumes) and
+job requirements (from job descriptions)**.
+
+It reads structured job requirement and resume responsibility data, computes similarity
+metrics using multiple methods (e.g., BERT-based similarity, DeBERTa entailment,
+Word Mover’s Distance, etc.), and saves the results as structured **CSV files** for
+further analysis.
+
+---
+
+* 🚀 Key Concept: Batching vs. Concurrency
+This pipeline **separates** **batching** and **concurrent execution** for efficiency:
+
+1. **Batching (Controlled at the Pipeline Level)**:
+   - Handled in `run_metrics_processing_pipeline_async`
+   - Determines how many jobs get **queued** and **processed** per batch.
+   - Controlled via the `batch_size` parameter.
+
+2. **Concurrency (Controlled at the Metric Computation Level)**:
+   - Managed within `generate_metrics_from_flat_json_async` or `generate_metrics_from_nested_json_async`
+   - Determines how many jobs **run in parallel at the same time**.
+   - Controlled via the `max_concurrent` parameter using `asyncio.Semaphore`.
+
+🚨 **Why Separate Batching & Concurrency?**
+- **Prevents resource exhaustion** (limits simultaneous API calls and memory usage).
+- **Ensures smooth execution** even if some jobs are slow.
+- **Allows gradual scaling** without breaking the pipeline.
+
+---
+
+* 🔄 Workflow: How the Pipeline Executes
+1️⃣ **Read the Job-Resume Mapping File** (`mapping.json`)
+   - Loads job postings, their corresponding resume responsibilities, and expected output paths.
+
+2️⃣ **Identify Missing Similarity Metrics Files**
+   - Checks which jobs are **not yet processed** (i.e., missing similarity CSV files).
+
+3️⃣ **Queue Jobs in Batches (`batch_size`)**
+   - Groups jobs into smaller **batches** to process in sequential rounds.
+
+4️⃣ **Process Jobs with Concurrency (`max_concurrent`)**
+   - Uses `asyncio.Semaphore(max_concurrent)` to **limit parallel execution**.
+   - Ensures that at most `max_concurrent` jobs run **at the same time**.
+   - Each job is independently **validated**, **processed**, and **saved**.
+
+5️⃣ **Save Results as CSV**
+   - Each processed job outputs a structured CSV file with **multiple similarity metrics**.
+
+6️⃣ **Continue Processing Until All Jobs Are Completed**
+
+---
+
+📌 Example Scenarios
+
+* Scenario 1: Full Parallel Mode
+await run_metrics_processing_pipeline_async(batch_size=6, max_concurrent=3)
+
+* Scenario 2: Safe Mode (Debugging)
+await run_metrics_processing_pipeline_async(batch_size=1, max_concurrent=1)
+
+* Scenario 3: Balanced Mode
+await run_metrics_processing_pipeline_async(batch_size=4, max_concurrent=2)
 """
 
 # Import dependencies
 from pathlib import Path
 import time
-from typing import Any, Callable, Coroutine, Optional, Union
+from typing import Callable, Union
 import json
 import logging
 import asyncio
@@ -116,7 +178,8 @@ async def generate_metrics_from_flat_json_async(
         does not match the expected format.
         - FileNotFoundError: If any required input file is missing.
         - ValueError: If input data is not structured as a dictionary.
-        - Exception: Catches and logs any unexpected errors encountered during execution.
+        - Exception: Catches and logs any unexpected errors encountered during
+        execution.
 
     **Example Usage:**
     ```python
@@ -438,8 +501,8 @@ async def generate_metrics_from_nested_json_async(
 async def run_metrics_processing_pipeline_async(
     mapping_file: Path | str,
     generate_metrics: Callable = generate_metrics_from_flat_json_async,
-    batch_size: int = 4,  # Limit group size for batching (# of tasks/batch)
-    max_concurrent: int = 2,  # Limit number of concurrent tasks
+    batch_size: int = 2,  # Limit group size for batching (# of tasks/batch)
+    max_concurrent: int = 1,  # Limit number of concurrent tasks
 ) -> None:
     """
     * Asynchronous pipeline to process and create missing similarity metrics files
@@ -573,27 +636,38 @@ async def run_metrics_processing_pipeline_async(
         logger.info(f"📝 Queued metrics generation for {url} -> {sim_metrics_file}")
 
     # Step 4: Process tasks in batches
+    # 🚀 Process tasks in batches
     for i in range(0, len(tasks), batch_size):
         batch = tasks[i : i + batch_size]
 
+        if not batch:  # ✅ Skip empty batches
+            continue
+
         logger.info(f"🚀 Starting batch {i // batch_size + 1} ({len(batch)} tasks)...")
 
-        # Run the batch asynchronously and handle failures
-        for task in batch:
-            logger.debug(f"Task: {task}")  # logs which task hangs in asyncio.gather
-
         try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*batch, return_exceptions=True), timeout=800
-            )  # 5 min timeout
+            results = await asyncio.gather(
+                *[asyncio.wait_for(task, timeout=300) for task in batch],
+                return_exceptions=True,
+            )
         except asyncio.TimeoutError:
-            logger.error("⏳ Batch processing timed out! Some tasks took too long.")
-            return
+            logger.error(
+                "⏳ Entire batch timed out! But some tasks might have completed."
+            )
+            continue  # Move to next batch instead of failing everything
 
-        # Log errors in the batch
-        failed_tasks = sum(1 for result in results if isinstance(result, Exception))
-        if failed_tasks == len(batch):
-            logger.error("All tasks in this batch failed!")
+        # 🚨 Log individual failures with correct URL references
+        for j, result in enumerate(results):
+            if isinstance(result, asyncio.TimeoutError):
+                logger.error(
+                    f"⚠️ Task {i + j} TIMED OUT after 300s! Job URL: {list(missing_metrics.keys())[j]}"
+                )
+            elif isinstance(result, Exception):
+                logger.error(
+                    f"❌ Task {i + j} FAILED! Job URL: {list(missing_metrics.keys())[j]}, Error: {result}"
+                )
+            else:
+                logger.info(f"✅ Task {i + j} completed successfully.")
 
     # Log completion with accurate task count
     logger.info(f"Successfully processed {len(tasks)} similarity metrics files.")
@@ -691,6 +765,7 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
                 "soft_similarity",
                 "word_movers_distance",
                 "deberta_entailment_score",
+                "roberta_entailment_score",
             }
             missing_cols = required_columns - set(df.columns)
             if missing_cols:
@@ -797,7 +872,7 @@ async def run_metrics_re_processing_pipeline_async(
     mapping_file: Union[Path, str],
     generate_metrics: Callable = generate_metrics_from_nested_json_async,
     batch_size: int = 4,
-    max_concurrent: int = 2,
+    max_concurrent: int = 3,
 ) -> None:
     """
     * Re-run the pipeline asynchronously to process and create missing sim_metrics files
