@@ -5,6 +5,8 @@ including OpenAI, Anthropic, and Llama3. It handles API calls, validates respons
 and manages provider-specific nuances such as single-block versus multi-block responses.
 
 Key Features:
+# * - API clients are default to global to control for rate limit based on
+# * LLM provider specific rate limits to keep from overloading!
 - Asynchronous support for OpenAI and Anthropic APIs.
 - Compatibility with synchronous Llama3 API via an async executor.
 - Validation and structuring of responses into Pydantic models.
@@ -15,7 +17,8 @@ Modules and Methods:
 - `call_anthropic_api_async`: Asynchronously interacts with the Anthropic API.
 - `call_llama3_async`: Asynchronously interacts with the Llama3 API using a synchronous executor.
 - `call_api_async`: Unified async function for handling API calls with validation.
-- `run_in_executor_async`: Executes synchronous functions in an async context.
+#* - `run_in_executor_async`: Executes synchronous functions in an async context.
+#* (Optional - for future use)
 - Validation utilities (e.g., `validate_response_type`, `validate_json_type`).
 
 Usage:
@@ -33,6 +36,7 @@ import logging
 from pydantic import ValidationError
 import httpx
 from random import uniform
+from aiolimiter import AsyncLimiter
 
 # LLM imports
 from openai import AsyncOpenAI
@@ -72,7 +76,23 @@ from project_config import (
 
 logger = logging.getLogger(__name__)
 
+# Global clients (instantiated once at module load)
+OPENAI_CLIENT = AsyncOpenAI(api_key=get_openai_api_key(), timeout=httpx.Timeout(10.0))
+ANTHROPIC_CLIENT = AsyncAnthropic(
+    api_key=get_anthropic_api_key(), timeout=httpx.Timeout(10.0)
+)
 
+# Provider-specific rate limiters (requests per minute)
+# Adjust based on your OpenAI tier and Anthropic plan
+RATE_LIMITERS = {
+    OPENAI: AsyncLimiter(max_rate=1000, time_period=60),
+    ANTHROPIC: AsyncLimiter(
+        max_rate=50, time_period=60
+    ),  # e.g., Anthropic free tier: 50 RPM
+}
+
+
+# Todo: keep this function for now to run local LLMs
 # Helper function to run synchronous API calls in an executor
 async def run_in_executor_async(func, *args):
     """
@@ -90,49 +110,29 @@ async def run_in_executor_async(func, *args):
         return await loop.run_in_executor(pool, func, *args)
 
 
-# Global variables for rate limiting
-last_request_time = 0
-rate_limit_lock = asyncio.Lock()
-
-
-async def with_rate_limit_and_retry(api_func):
-    """
-    Wrapper to apply rate limiting, retries, and exponential backoff for any API call.
-    """
-    global last_request_time
-
-    min_interval = 1.5  # Ensure at least 1500ms between requests
-    max_retries = 6  # Allow up to 6 retries
-    base_delay = 2  # Initial backoff delay (1 sec, 2 sec, 3 sec...)
-
-    for attempt in range(max_retries):
-        async with rate_limit_lock:  # Prevent multiple requests at the same time
-            current_time = time.time()
-            time_since_last = current_time - last_request_time
-
-            if time_since_last < min_interval:
-                await asyncio.sleep(min_interval - time_since_last)
-
+async def with_rate_limit_and_retry(api_func, llm_provider: str):
+    """Apply rate limiting and retries with exponential backoff."""
+    async with RATE_LIMITERS[llm_provider]:
+        max_retries = 5
+        base_delay = 1
+        for attempt in range(max_retries):
             try:
-                result = await api_func()  # Execute API function
-                last_request_time = time.time()  # Update only after success
-                return result
-
+                return await api_func()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code in [429, 529] and attempt < max_retries - 1:
-                    retry_after = int(
-                        e.response.headers.get("Retry-After", base_delay + attempt)
+                    retry_after = int(e.response.headers.get("Retry-After", base_delay))
+                    wait_time = min(
+                        10, retry_after + (attempt * base_delay) + uniform(0, 1)
                     )
-                    wait_time = min(30, retry_after + (attempt * base_delay))
-                    jitter = wait_time * 0.1 * (1 + uniform(-1, 1))  # Add jitter
-                    total_wait = wait_time + jitter
-
                     logger.warning(
-                        f"Rate limit hit, retrying in {total_wait:.2f} seconds..."
+                        f"Rate limit hit for {llm_provider}, retrying in {wait_time:.2f}s..."
                     )
-                    await asyncio.sleep(total_wait)
-                    continue  # Retry after delay
-                raise  # Stop retrying if max retries exceeded
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+            except httpx.TimeoutException as e:
+                logger.error(f"Timeout for {llm_provider}: {e}")
+                raise
 
 
 # Unified async API calling function
@@ -163,27 +163,27 @@ async def call_api_async(
     Also inclues automatic rate limiting and retry logic to handle API restrictions.
 
     Args:
-        client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]):
+        - client (Optional[Union[AsyncOpenAI, AsyncAnthropic]]):
             The API client instance for the respective provider.
             If None, a new client is instantiated.
-        model_id (str):
+        - model_id (str):
             The model ID to use for the API call (e.g., "gpt-4-turbo" for OpenAI).
-        prompt (str):
+        - prompt (str):
             The input prompt for the LLM.
-        expected_res_type (str):
+        - expected_res_type (str):
             The expected type of response (e.g., "json", "tabular", "str", "code").
-        json_type (str):
+        - json_type (str):
             Specifies the type of JSON model for validation (e.g., "job_site", "editing").
-        temperature (float):
+        - temperature (float):
             Sampling temperature for the LLM.
-        max_tokens (int):
+        - max_tokens (int):
             Maximum number of tokens for the response.
-        llm_provider (str):
+        - llm_provider (str):
             The name of the LLM provider ("openai", "anthropic", or "llama3").
 
     Returns:
-        Union[JSONResponse, TabularResponse, CodeResponse, TextResponse, EditingResponseModel,
-        JobSiteResponseModel]:
+        Union[JSONResponse, TabularResponse, CodeResponse, TextResponse,
+        EditingResponseModel, JobSiteResponseModel]:
             The validated and structured response.
 
     Raises:
@@ -215,7 +215,7 @@ async def call_api_async(
         logger.info(f"Making API call with expected response type: {expected_res_type}")
         response_content = ""
 
-        if llm_provider.lower() == "openai":
+        if llm_provider.lower() == OPENAI:
             openai_client = cast(AsyncOpenAI, client)
 
             async def openai_request():
@@ -229,7 +229,7 @@ async def call_api_async(
                     max_tokens=max_tokens,
                 )
 
-            response = await with_rate_limit_and_retry(openai_request)
+            response = await with_rate_limit_and_retry(openai_request, llm_provider)
 
             # Handle cases where response or choices is None
             if not response or not response.choices:
@@ -237,7 +237,7 @@ async def call_api_async(
 
             response_content = response.choices[0].message.content
 
-        elif llm_provider.lower() == "anthropic":
+        elif llm_provider.lower() == ANTHROPIC:
             anthropic_client = cast(AsyncAnthropic, client)
             system_instruction = (
                 "You are a helpful assistant who adheres to instructions."
@@ -251,7 +251,7 @@ async def call_api_async(
                     temperature=temperature,
                 )
 
-            response = await with_rate_limit_and_retry(anthropic_request)
+            response = await with_rate_limit_and_retry(anthropic_request, llm_provider)
 
             # *Add an extra step to extract content from response object's TextBlocks
             # *(Unlike GPT and LlaMA, Anthropic uses multi-blocks in its responses:
@@ -270,12 +270,6 @@ async def call_api_async(
 
             if not response_content:
                 raise ValueError("Empty content in response from Anthropic API")
-
-            # response_content = (
-            #     response.content[0].text
-            #     if hasattr(response.content[0], "text")
-            #     else str(response.content[0])
-            # )
 
         elif llm_provider.lower() == "llama3":
             # Llama3 remains synchronous, so run it in an executor
@@ -335,7 +329,7 @@ async def call_openai_api_async(
     json_type: str = "",
     temperature: float = 0.4,
     max_tokens: int = 1056,
-    client: Optional[AsyncOpenAI] = None,
+    client: Optional[AsyncOpenAI] = None,  # Default to global client
 ) -> Union[
     JSONResponse,
     TabularResponse,
@@ -345,11 +339,16 @@ async def call_openai_api_async(
     JobSiteResponse,
     RequirementsResponse,
 ]:
-    """Asynchronously calls OpenAI API and parses the response."""
-    openai_client = client or AsyncOpenAI(api_key=get_openai_api_key())
+    """
+    * Asynchronously calls OpenAI API using the global client.
+    """
+    if client is None:
+        client = OPENAI_CLIENT
+
     logger.info("OpenAI client ready for async API call.")
+
     return await call_api_async(
-        client=openai_client,
+        client=client,
         model_id=model_id,
         prompt=prompt,
         expected_res_type=expected_res_type,
@@ -378,11 +377,15 @@ async def call_anthropic_api_async(
     JobSiteResponse,
     RequirementsResponse,
 ]:
-    """Asynchronously calls the Anthropic API to generate responses based on a given prompt."""
-    anthropic_client = client or AsyncAnthropic(api_key=get_anthropic_api_key())
+    """
+    * Asynchronously calls Anthropic API using the global client.
+    """
+    if client is None:
+        client = ANTHROPIC_CLIENT
+
     logger.info("Anthropic client ready for async API call.")
     return await call_api_async(
-        client=anthropic_client,
+        client=client,
         model_id=model_id,
         prompt=prompt,
         expected_res_type=expected_res_type,
@@ -408,6 +411,7 @@ async def call_llama3_async(
     CodeResponse,
     EditingResponse,
     JobSiteResponse,
+    RequirementsResponse,
 ]:
     """Asynchronously calls the Llama 3 API and parses the response."""
     return await call_api_async(
@@ -420,3 +424,47 @@ async def call_llama3_async(
         max_tokens=max_tokens,
         llm_provider="llama3",
     )
+
+
+# todo: comment out for now; delete later once the other function works out fine
+# async def with_rate_limit_and_retry(api_func):
+#     """Apply rate limiting and retries with exponential backoff."""
+#     global last_request_time
+
+#     min_interval = 1.5  # Ensure at least 1500ms between requests
+#     max_retries = 6  # Allow up to 6 retries
+#     base_delay = 2  # Initial backoff delay (1 sec, 2 sec, 3 sec...)
+
+#     for attempt in range(max_retries):
+#         async with rate_limit_lock:  # Prevent multiple requests at the same time
+#             current_time = time.time()
+#             time_since_last = current_time - last_request_time
+
+#             if time_since_last < min_interval:
+#                 await asyncio.sleep(min_interval - time_since_last)
+
+#             try:
+#                 result = await api_func()  # Execute API function
+#                 last_request_time = time.time()  # Update only after success
+#                 return result
+
+#             except httpx.HTTPStatusError as e:
+#                 if e.response.status_code in [429, 529] and attempt < max_retries - 1:
+#                     retry_after = int(
+#                         e.response.headers.get("Retry-After", base_delay + attempt)
+#                     )
+#                     wait_time = min(30, retry_after + (attempt * base_delay))
+#                     jitter = wait_time * 0.1 * (1 + uniform(-1, 1))  # Add jitter
+#                     total_wait = wait_time + jitter
+
+#                     logger.warning(
+#                         f"Rate limit hit, retrying in {total_wait:.2f} seconds..."
+#                     )
+#                     await asyncio.sleep(total_wait)
+#                     continue  # Retry after delay
+#                 raise  # Stop retrying if max retries exceeded
+
+
+# Global variables for rate limiting
+# last_request_time = 0
+# rate_limit_lock = asyncio.Lock()

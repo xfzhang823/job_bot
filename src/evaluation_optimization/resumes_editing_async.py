@@ -102,13 +102,11 @@ async def modify_resp_based_on_reqs_async(
 
     # Initialize the client based on llm_provider if needed
     if llm_provider == OPENAI:
-        openai_api_key = get_openai_api_key()
-        client = AsyncOpenAI(api_key=openai_api_key)
+        client = None  # * don't instantiate here; use global client in lower-level
         logger.info("OpenAI API initialized.")
 
     elif llm_provider == ANTHROPIC:
-        claude_api_key = get_anthropic_api_key()
-        client = AsyncAnthropic(api_key=claude_api_key)
+        client = None  # * don't instantiate here; use global client in lower-level
         logger.info("Claude API initialized.")
 
     elif llm_provider == "llama3":

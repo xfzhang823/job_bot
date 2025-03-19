@@ -31,22 +31,16 @@ facilitating modular, reusable code for various stages of the process.
 """
 
 # Dependencies
-import os
+from pipelines.hf_cache_refresh_and_lock_pipeline import (
+    run_hf_cache_refresh_and_lock_pipeline,
+)
 
 # * ✅ Force Transformers & BERTScore to use local cache
 
 # Setting environment variables for Transformers to force the library to work entirely
 # from the local cache only!
-os.environ["TRANSFORMERS_CACHE"] = r"C:\github\job_bot\hf_cache"
-os.environ["BERT_SCORE_CACHE"] = r"C:\github\job_bot\hf_cache\bert_score"
+run_hf_cache_refresh_and_lock_pipeline(refresh_cache=False)
 
-# * ✅ Prevent Hugging Face & BERTScore from downloading anything online
-# TRANSFORMERS_OFFLINE, HF_HUB_OFFLINE, and BERT_SCORE_OFFLINE are environment variables
-# used by the Hugging Face transformers and bert-score library to prevent downloading
-# anything online.
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["BERT_SCORE_OFFLINE"] = "1"
 
 import logging
 import asyncio  # Add this line to import asyncio
@@ -219,48 +213,51 @@ def main_openai():
     model_id = GPT_4_TURBO
 
     #! ☑️ Step 0: Masking/Filter URLs to run a small batch (temporary step)
-    run_filtering_job_posting_urls_mini_pipe_line()
+    # run_filtering_job_posting_urls_mini_pipe_line()
 
-    # ✅ Step 1: Preprocessing job posting webpages
-    execute_pipeline("1_async", llm_provider=OPENAI, model_id=GPT_35_TURBO)
+    # # ✅ Step 1: Preprocessing job posting webpages
+    # execute_pipeline("1_async", llm_provider=OPENAI, model_id=GPT_35_TURBO)
 
-    # ✅ Step 2: Creating/updating mapping file for iteration 0
-    execute_pipeline("2a", llm_provider=OPENAI)
+    # # ✅ Step 2: Creating/updating mapping file for iteration 0
+    # execute_pipeline("2a", llm_provider=OPENAI)
 
-    # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
-    execute_pipeline("2b", llm_provider=OPENAI)
+    # # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
+    # execute_pipeline("2b", llm_provider=OPENAI)
 
-    # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
-    execute_pipeline("2c_async", llm_provider=OPENAI)
+    # # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
+    # execute_pipeline("2c_async", llm_provider=OPENAI)
 
-    # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
-    execute_pipeline("2d_async", llm_provider=OPENAI)
+    # # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
+    # execute_pipeline("2d_async", llm_provider=OPENAI)
 
-    # ✅ Step 6: Clean Up Sim Metrics CSV Files (Removing Empty Rows)
-    execute_pipeline("2e", llm_provider=OPENAI)
+    # # ✅ Step 6: Clean Up Sim Metrics CSV Files (Removing Empty Rows)
+    # execute_pipeline("2e", llm_provider=OPENAI)
 
-    # ✅ Step 7: Copy & Prune Responsibilities
-    execute_pipeline("2f", llm_provider=OPENAI)
+    # # ✅ Step 7: Copy & Prune Responsibilities
+    # execute_pipeline("2f", llm_provider=OPENAI)
 
-    # # ✅ Step 8: Iteration 1 - Modify Responsibilities Based on Requirements
+    # # ✅ Step 8: Creating/updating mapping file for iteration 1
     # execute_pipeline("3a", llm_provider=OPENAI)
+
+    # # ✅ Step 9: Modify Responsibilities Based on Requirements from Iter 0
+    # # & Save to Iter 1
     # execute_pipeline("3b_async", llm_provider=OPENAI, model_id=model_id)
 
-    # # ✅ Step 9: Copy Requirements from Iteration 0 to Iteration 1
+    # # ✅ Step 10: Copy Requirements from Iteration 0 to Iteration 1
     # execute_pipeline("3c", llm_provider=OPENAI)
 
-    # # ✅ Step 10: Async Resume Evaluation in Iteration 1
+    # # ✅ Step 11: Async Resume Evaluation in Iteration 1
     # execute_pipeline("3d_async", llm_provider=OPENAI, model_id=model_id)
 
-    # # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
-    # execute_pipeline("3e_asyc", llm_provider=OPENAI, model_id=model_id)
+    # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
+    execute_pipeline("3e_async", llm_provider=OPENAI, model_id=model_id)
 
-    # # ✅ Step 12: Clean Metrics Files in Iteration 1
-    # execute_pipeline("3f", llm_provider=OPENAI, model_id=model_id)
+    # ✅ Step 12: Clean Metrics Files in Iteration 1
+    execute_pipeline("3f", llm_provider=OPENAI, model_id=model_id)
 
 
 if __name__ == "__main__":
 
-    # main_openai()  # * Execute the OpenAI pipeline by calling main_openai
+    main_openai()  # * Execute the OpenAI pipeline by calling main_openai
 
-    main_anthropic()  # * Execute the OpenAI pipeline by calling anthropic
+    # main_anthropic()  # * Execute the OpenAI pipeline by calling anthropic

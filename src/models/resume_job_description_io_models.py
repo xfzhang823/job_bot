@@ -411,6 +411,7 @@ class SimilarityMetrics(BaseModel):
                 soft_similarity_cat=row.get('soft_similarity_cat'),
                 word_movers_distance_cat=row.get('word_movers_distance_cat'),
                 deberta_entailment_score_cat=row.get('deberta_entailment_score_cat'),
+                roberta_entailment_score_cat=row.get('roberta_entailment_score_cat'),
                 scaled_bert_score_precision=row.get('scaled_bert_score_precision'),
                 scaled_deberta_entailment_score=row.get('scaled_deberta_entailment_score'),
                 scaled_soft_similarity=row.get('scaled_soft_similarity'),
@@ -438,6 +439,7 @@ class SimilarityMetrics(BaseModel):
     soft_similarity: float = Field(..., description="Soft similarity")
     word_movers_distance: float = Field(..., description="Word Mover's Distance")
     deberta_entailment_score: float = Field(..., description="Deberta entailment score")
+    roberta_entailment_score: float = Field(..., description="Roberta entailment score")
 
     # Optional fields
     bert_score_precision_cat: Optional[str] = Field(
@@ -451,6 +453,9 @@ class SimilarityMetrics(BaseModel):
     )
     deberta_entailment_score_cat: Optional[str] = Field(
         None, description="Deberta entailment score category"
+    )
+    roberta_entailment_score_cat: Optional[str] = Field(
+        None, description="Roberta entailment score category"
     )
     scaled_bert_score_precision: Optional[float] = Field(
         None, description="Scaled BERT score"

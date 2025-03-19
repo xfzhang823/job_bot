@@ -257,6 +257,11 @@ async def process_file_async(
             original_resps_dict=original_resps_dict,
         )
 
+        # 🔍 Debugging: Log the lengths of each DataFrame column
+        for col in result_df.columns:
+            col_length = len(result_df[col])
+            logger.debug(f"Column '{col}' length: {col_length}")
+
         # ✅ Save to Excel
         await asyncio.to_thread(
             save_crosstab, result_df, output_file, file_format="excel"

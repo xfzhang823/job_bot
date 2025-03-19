@@ -1,7 +1,7 @@
 """
 Filename: multivariate_indexer.py
 Author: Xiao-Fei Zhang
-Last updated on: 
+Last updated on:
 """
 
 import pandas as pd
@@ -15,17 +15,44 @@ import logging_config
 logger = logging.getLogger(__name__)
 
 DEFAULT_COMPOSITE_WEIGHT = {
-    "deberta_entailment_score": 0.45,  # Match with the metric name
-    "soft_similarity": 0.35,  # Match with the metric name
-    "word_movers_distance": 0.15,  # Match with the metric name
+    "roberta_entailment_score": 0.30,  # Added to simulate ATS system (more conservative)
+    "deberta_entailment_score": 0.15,  # Match with the metric name
+    "soft_similarity": 0.40,  # Match with the metric name
+    "word_movers_distance": 0.10,  # Match with the metric name
     "bert_score_precision": 0.05,  # Match with the metric name
 }
 
 DEFAULT_COMPOSITE_METRICS = [
-    "bert_score_precision",
+    "roberta_entailment_score",
     "deberta_entailment_score",
     "soft_similarity",
     "word_movers_distance",
+    "bert_score_precision",
+]
+
+DEFAULT_COLUMN_ORDER = [
+    "job_posting_url",
+    "responsibility_key",
+    "responsibility",
+    "requirement_key",
+    "requirement",
+    "bert_score_precision",
+    "soft_similarity",
+    "word_movers_distance",
+    "deberta_entailment_score",
+    "roberta_entailment_score",
+    "bert_score_precision_cat",
+    "soft_similarity_cat",
+    "word_movers_distance_cat",
+    "deberta_entailment_score_cat",
+    "roberta_entailment_score_cat",
+    "scaled_bert_score_precision",
+    "scaled_soft_similarity",
+    "scaled_word_movers_distance",
+    "scaled_deberta_entailment_score",
+    "scaled_roberta_entailment_score",
+    "composite_score",
+    "pca_score",
 ]
 
 
@@ -44,18 +71,21 @@ class MultivariateIndexer:
     df: pd.DataFrame
         The input DataFrame containing data for a single iteration of analysis.
     resp_key : str
-        Column name representing the unique key for responsibilities (default is "responsibility_key").
+        Column name representing the unique key for responsibilities 
+        (default is "responsibility_key").
     req_key : str
-        Column name representing the unique key for requirements (default is "requirement_key").
+        Column name representing the unique key for requirements 
+        (default is "requirement_key").
     metrics : list
         List of metric column names to analyze. If not provided, default metrics are used.
     max_word_movers : float
         Maximum value for normalizing the word movers distance metric (default is 1.0).
     composite_weights : dict
-        Dictionary specifying the weights to be used for calculating a weighted composite score.
+        Dictionary specifying the weights to be used for calculating a weighted 
+        composite score.
     scaler : object
-        The scaler (e.g., MinMaxScaler or StandardScaler) used for normalizing metrics before PCA or \
-            composite calculations.
+        The scaler (e.g., MinMaxScaler or StandardScaler) used for normalizing metrics 
+        before PCA or composite calculations.
 
     Methods:
     --------
@@ -154,6 +184,10 @@ class MultivariateIndexer:
 
         logger.info("Metrics scaled.")
 
+        logger.info(
+            f"scaled columns added: {scaled_df.columns}"
+        )  # todo: debug; delete later
+
     def calculate_composite_score(self, row):
         """
         Calculate the composite score based on weighted contributions from scaled metrics.
@@ -164,6 +198,7 @@ class MultivariateIndexer:
         Returns:
         - Composite score (float)
         """
+        roberta_entailment = row["scaled_roberta_entailment_score"]
         deberta_entailment = row["scaled_deberta_entailment_score"]
         soft_similarity = row["scaled_soft_similarity"]
         word_movers = row["scaled_word_movers_distance"]
@@ -171,7 +206,8 @@ class MultivariateIndexer:
 
         # Calculate the composite score using scaled and weighted values
         composite_score = (
-            deberta_entailment * self.composite_weights["deberta_entailment_score"]
+            roberta_entailment * self.composite_weights["roberta_entailment_score"]
+            + deberta_entailment * self.composite_weights["deberta_entailment_score"]
             + soft_similarity * self.composite_weights["soft_similarity"]
             + word_movers
             * self.composite_weights[
@@ -208,7 +244,7 @@ class MultivariateIndexer:
         - DataFrame with the PCA score added.
         """
         # Ensure all metrics are scaled using StandardScaler
-        scaler = StandardScaler()
+        # scaler = StandardScaler()
 
         # Reverse polarity for word movers distance (lower score -> higher similarity)
         if "word_movers_distance" in self.df.columns:
@@ -217,7 +253,7 @@ class MultivariateIndexer:
             )
 
         # Apply scaling to the rest of the metrics
-        scaled_values = scaler.fit_transform(self.df[self.metrics])
+        scaled_values = self.scaler.fit_transform(self.df[self.metrics])
 
         # Apply PCA to the scaled metrics
         pca = PCA(n_components=1)
@@ -227,13 +263,54 @@ class MultivariateIndexer:
 
         return self.df
 
-    def add_multivariate_indices_to_df(self):
+    def clean_and_reorder_columns(
+        self, desired_col_order: Optional[list[str]] = None
+    ) -> None:
+        """
+        Drops 'Unnamed' columns and reorders columns based on the desired order list.
+        Modifies self.df in place.
+
+        Args:
+            desired_col_order (list[str], optional):
+                - A list of column names in the exact order you want them.
+                - Columns not in self.df are ignored, and columns not in desired_order
+                remain at the end.
+                - If None, no reordering is performed.
+        """
+        # 1. Drop columns that start with 'Unnamed'
+        self.df = self.df.loc[:, ~self.df.columns.str.startswith("Unnamed")]
+
+        # 2. Drop columns that are entirely empty (all NaN)
+        self.df.dropna(axis=1, how="all", inplace=True)
+
+        # 3. Reorder columns if a desired order is provided
+        if desired_col_order is not None:
+            valid_order = [col for col in desired_col_order if col in self.df.columns]
+            self.df = self.df.reindex(
+                columns=valid_order
+                + [c for c in self.df.columns if c not in valid_order]
+            )
+
+        # 4. Log final column order for debugging
+        logging.info("After cleaning & reordering, columns are:")
+        logging.info(self.df.columns.tolist())
+
+    def add_multivariate_indices_to_df(
+        self, desired_col_order: Optional[List[str]] = None
+    ):
         """
         Return the DataFrame after applying metric calculations.
 
         Returns:
-        - DataFrame with composite score and PCA score added.
+            DataFrame with composite score and PCA score added.
         """
         self.calculate_add_composite_scores_to_df()
         self.calculate_add_pca_scores_to_df()
+
+        # Reorder and clean columns as specified by desired_col_order
+        if desired_col_order is None:
+            desired_col_order = DEFAULT_COLUMN_ORDER
+
+        self.clean_and_reorder_columns(desired_col_order)
+
         return self.df
