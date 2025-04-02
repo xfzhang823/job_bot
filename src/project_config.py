@@ -214,7 +214,17 @@ URL_TO_FILE_MAPPING_FILE_ITERATE_2_ANTHROPIC = (
 
 # Human Review Directory
 HUMAN_REVIEW_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "human_review"
-RESPS_REQS_MATCHING_DIR = HUMAN_REVIEW_INPUT_OUTPUT_DIR / "resps_reqs_matching"
+
+RESPS_REQS_MATCHINGS_DIR = (
+    HUMAN_REVIEW_INPUT_OUTPUT_DIR / "resps_reqs_matchings"
+)  # Contains raw matching crosstab excel files
+REVIEWED_MATCHINGS_DIR = (
+    HUMAN_REVIEW_INPUT_OUTPUT_DIR / "resps_reqs_matchings_reviewed"
+)  # Contains reviewed matching crosstab excel files
+TRIMMED_MATCHINGS_DIR = (
+    HUMAN_REVIEW_INPUT_OUTPUT_DIR / "resps_reqs_matchings_trimmed"
+)  # Contains trimmed final json files (trimmed by LLMs)
+# "C:\github\job_bot\input_output\human_review\resps_reqs_matching\reviewed_matchings"
 
 # * Data File Configuration
 DATA_FILES_CONFIG = {

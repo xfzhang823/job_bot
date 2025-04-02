@@ -43,15 +43,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ✅ Define URL Lists (Easier Selection)
-CUSTOM_URLS_1: List[str] = [
+
+
+CUSTOM_URLS: List[str] = [
     # "https://job-boards.greenhouse.io/airtable/jobs/7603873002?gh_src=aef790d02us",
     # "https://www.accenture.com/us-en/careers/jobdetails?id=R00251798_en&src=LINKEDINJP",
-]
-
-CUSTOM_URLS_2: List[str] = [
     # "https://advisor360.breezy.hr/p/2e1636328c7d-senior-product-manager-ai-analytics-insights",
     # "https://jobs.smartrecruiters.com/Blend360/744000042638791-director-ai-strategy?trid=2d92f286-613b-4daf-9dfa-6340ffbecf73",
-    "https://boards.greenhouse.io/gleanwork/jobs/4425502005?source=LinkedIn"
+    # "https://boards.greenhouse.io/gleanwork/jobs/4425502005?source=LinkedIn",
+    "https://advisor360.breezy.hr/p/2e1636328c7d-senior-product-manager-ai-analytics-insights",
+    "https://careers.veeva.com/job/365ff44c-8e0a-42b4-a117-27b409a77753/director-crossix-analytics-services-boston-ma/?lever-source=Linkedin",
 ]
 
 
@@ -89,7 +90,7 @@ async def compute_similarity_metrics(
     llm_provider: str,
     pipeline_type: str = "flat",
     batch_size: int = 4,
-    max_concurrent: int = 2,
+    max_concurrent: int = 3,
 ):
     """
     Runs the similarity metrics computation pipeline with strict filtering.
@@ -213,7 +214,7 @@ def main():
     """
     start_time = time.time()
     custom_urls: List[str] = (
-        CUSTOM_URLS_2  # Choose between CUSTOM_URLS_1 or CUSTOM_URLS_2
+        CUSTOM_URLS  # Choose between CUSTOM_URLS_1 or CUSTOM_URLS_2
     )
 
     llm_provider = OPENAI  # Change to "anthropic" if needed

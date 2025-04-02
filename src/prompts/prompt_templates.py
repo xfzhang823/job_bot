@@ -262,7 +262,7 @@ Return only the JSON block without any additional text, explanations, or markdow
 # # Insert the JSON object as a string into the prompt
 # formatted_prompt = prompt_template.format(resume_json=json.dumps(json_data, indent=2))
 
-TRIM_CONDENSE_FINAL_RESUME_JSON_PROMPT = """
+TRIM_CONDENSE_FINAL_RESUME_PROMPT = """
 You are an expert resume optimizer for senior-level tech and consulting roles.
 Your task is to **trim, consolidate, and optimize** the provided JSON resume data while maintaining clarity, impact, and ATS compatibility.
 
@@ -293,8 +293,54 @@ Your task is to **trim, consolidate, and optimize** the provided JSON resume dat
     ...
   }
 }}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
 
+TRIM_CONDENSE_FINAL_RESUME_WITH_JOB_DESC_PROMPT = """
+You are an expert resume optimizer for senior-level tech and consulting roles.
+Your task is to **trim, consolidate, and optimize** the provided JSON resume data while ensuring alignment \
+with the job description provided.
+
+### **Task Instructions**
+1. **Trim & Condense:** Reduce the resume word count to approximately **500-600 words** while retaining essential details.
+2. **Merge Related Content:** Combine overlapping or redundant bullets to enhance readability and conciseness.
+3. **Enhance ATS Compliance:** Ensure the use of **strong action verbs**, **industry-specific keywords**, and **quantifiable achievements** \
+(e.g., "% improvements," "increased revenue by X%," "cut processing time by Y%").
+4. **Align with Job Description:** Ensure the resume highlights **key skills, experience, and qualifications** relevant to the job description.
+5. **Ensure Consistency & Clarity:** Maintain a **structured, professional format**, ensuring smooth readability while preserving key impact points.
+6. **Strict JSON Output:** Format the output **identically to the input JSON structure**, preserving the original schema.
+
+---
+### **Input Resume in JSON Format**
+{resume_json}
+
+---
+### **Input Job Description in JSON Format**
+{job_description_json}
+
+---
+### **Expected Output (Optimized JSON Format)**
+- The **same JSON structure** as the input.
+- **Trimmed, condensed, and optimized** responsibilities and achievements.
+- **Alignment with job description** to enhance relevance.
+- **Strict adherence to JSON formatting** (no extra explanations, markdown, or non-JSON content).
+- Output must be a **valid JSON object**.
+
+### **Expected Output Format (JSON Example)**
+{{
+  "edited_responsibility_1": {{
+    "0.responsibilities.0": "Optimized AI-driven workflows, enhancing user engagement and commercial potential.",
+    "0.responsibilities.1": "Developed scalable AI-first strategies, integrating NLP and ML models to drive efficiency.",
+    ...
+  }}
+}}
+
+Return only the JSON block without any additional text, explanations, or markdown syntax. 
+"""
+
+
+# Todo: for later; do not use it now!
 MODIFYING_FINAL_RESUME_PROMPT = """
 You are an expert in ATS (Applicant Tracking System) optimization. 
 Your task is to refine the provided JSON resume data with a light touch to emphasize relevant \

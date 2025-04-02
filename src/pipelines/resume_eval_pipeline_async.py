@@ -645,9 +645,12 @@ async def run_metrics_processing_pipeline_async(
 
         logger.info(f"🚀 Starting batch {i // batch_size + 1} ({len(batch)} tasks)...")
 
+        # .gather(.wait_for(task, timeout) means that each task is given its own separate
+        # xxx-sec timeout. Each task must complete within 800 seconds on its own; if not,
+        # it will immediately raise a TimeoutError for that task.
         try:
             results = await asyncio.gather(
-                *[asyncio.wait_for(task, timeout=300) for task in batch],
+                *[asyncio.wait_for(task, timeout=800) for task in batch],
                 return_exceptions=True,
             )
         except asyncio.TimeoutError:

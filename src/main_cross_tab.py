@@ -27,7 +27,7 @@ from project_config import (
     mapping_file_name,
     ITERATE_0_OPENAI_DIR,
     ITERATE_1_OPENAI_DIR,
-    RESPS_REQS_MATCHING_DIR,
+    RESPS_REQS_MATCHINGS_DIR,
 )
 import logging_config
 
@@ -72,7 +72,7 @@ def main():
             logger.error(f"❌ Mapping file not found: {mapping_file_openai}")
             return
 
-        output_dir = RESPS_REQS_MATCHING_DIR / "openai_processed"
+        output_dir = RESPS_REQS_MATCHINGS_DIR / "openai_processed"
         logger.info(f"output directory: {output_dir}")
 
         if not output_dir.exists():
@@ -108,7 +108,7 @@ def main_iter0():
             return
 
         cross_tab_output_dir = Path(
-            r"C:\github\job_bot\input_output\human_review\resps_reqs_matching_pre_edit"
+            r"C:\github\job_bot\input_output\human_review\resps_reqs_matchings_pre_edit"
         )
 
         asyncio.run(
@@ -124,5 +124,5 @@ def main_iter0():
 
 
 if __name__ == "__main__":
-    main()
-    # main_iter0()
+    # main()
+    main_iter0()

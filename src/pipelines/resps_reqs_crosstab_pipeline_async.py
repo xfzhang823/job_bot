@@ -45,7 +45,7 @@ from human_review_and_editing.create_resp_req_crosstab import (
     save_crosstab,
 )
 from project_config import (
-    RESPS_REQS_MATCHING_DIR,
+    RESPS_REQS_MATCHINGS_DIR,
     JOB_POSTING_URLS_FILE,
 )
 
@@ -275,7 +275,7 @@ async def process_file_async(
 ### ✅ Main Async Pipeline ###
 async def run_resps_reqs_crosstab_pipeline_async(
     mapping_file: Path,
-    cross_tab_output_dir: Path = RESPS_REQS_MATCHING_DIR,
+    cross_tab_output_dir: Path = RESPS_REQS_MATCHINGS_DIR,
     score_threshold: float = 0,
     original_mapping_file: Optional[Path] = None,
 ) -> None:

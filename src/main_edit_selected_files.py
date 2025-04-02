@@ -36,6 +36,18 @@ def get_mapping_file_and_dirs(llm_provider: str) -> Tuple[Path, Path]:
         raise ValueError(f"Unsupported LLM provider: {llm_provider}")
 
 
+def create_filtered_mapping(
+    original_mapping: Dict[str, Dict], custom_urls: List[str]
+) -> Dict[str, Dict]:
+    """
+    Filter the original mapping dictionary so that only entries with keys in custom_urls
+    are retained.
+    """
+    return {
+        url: original_mapping[url] for url in custom_urls if url in original_mapping
+    }
+
+
 async def edit_selected_files(
     custom_urls: List[str],
     mapping_file_prev: Path,
@@ -53,44 +65,70 @@ async def edit_selected_files(
         llm_provider (str): The LLM provider to use.
         model_id (str): The specific model ID.
     """
-    logger.info(f"Loading mapping file: {mapping_file_prev}")
-    file_mapping_model = load_mappings_model_from_json(mapping_file_prev)
-
-    if file_mapping_model is None:
+    # Load previous iteration's mappping file
+    logger.info(f"Loading previous mapping file: {mapping_file_prev}")
+    file_mapping_prev = load_mappings_model_from_json(mapping_file_prev)
+    if file_mapping_prev is None:
         logger.error(f"Failed to load mapping file {mapping_file_prev}")
         return
 
-    # Convert HttpUrl keys to str and JobFilePaths (Pydantic model) to dict
-    mapping_dict: Dict[str, Dict] = {
-        str(url): job_file_paths.model_dump()
-        for url, job_file_paths in file_mapping_model.root.items()
-    }
-
-    logger.info(
-        f"Available URLs in mapping file: {list(mapping_dict.keys())[:5]}"
-    )  # Debugging
-
-    # Normalize URLs and filter for matches
-    selected_mappings: Dict[str, Dict] = {
-        url: mapping_dict[url] for url in custom_urls if url in mapping_dict
-    }
-
-    if not selected_mappings:
-        logger.warning("No matching URLs found in the mapping file. Exiting.")
+    # Load current mapping file
+    logger.info(f"Loading current mapping file: {mapping_file_curr}")
+    file_mapping_curr = load_mappings_model_from_json(mapping_file_curr)
+    if file_mapping_curr is None:
+        logger.error(f"Failed to load mapping file {mapping_file_curr}")
         return
 
-    # Save filtered mapping to a temporary file
-    temp_mapping_file = Path("filtered_mapping.json")
-    with open(temp_mapping_file, "w") as f:
-        json.dump({"root": selected_mappings}, f, indent=2)
+    # Convert each mapping file into dictionaries with URL keys
+    mapping_dict_prev: Dict[str, Dict] = {
+        str(url): job_file_paths.model_dump()
+        for url, job_file_paths in file_mapping_prev.root.items()
+    }
+    mapping_dict_curr: Dict[str, Dict] = {
+        str(url): job_file_paths.model_dump()
+        for url, job_file_paths in file_mapping_curr.root.items()
+    }
 
-    logger.info(f"Filtered mapping saved to {temp_mapping_file}")
+    # Debug
+    logger.info(
+        f"Available URLs in previous mapping: {list(mapping_dict_prev.keys())[:5]}"
+    )
+    logger.info(
+        f"Available URLs in current mapping: {list(mapping_dict_curr.keys())[:5]}"
+    )
 
-    # Run the async editing pipeline
-    logger.info(f"Starting editing process with {llm_provider} ({model_id})...")
+    # Filter the mappings for only the custom URLs
+    filtered_mapping_prev = create_filtered_mapping(mapping_dict_prev, custom_urls)
+    filtered_mapping_curr = create_filtered_mapping(mapping_dict_curr, custom_urls)
+
+    if not filtered_mapping_prev or not filtered_mapping_curr:
+        logger.warning("No matching URLs found in one of the mapping files. Exiting.")
+        return
+    # # Normalize URLs and filter for matches
+    # selected_mappings: Dict[str, Dict] = {
+    #     url: mapping_dict[url] for url in custom_urls if url in mapping_dict
+    # }
+
+    # Create two temporary filtered mapping files: previous, current iterations
+    temp_prev_mapping_file = Path(mapping_file_prev)
+    temp_curr_mapping_file = Path(mapping_file_curr)
+
+    # Save the filtered mappings (wrapped under "root") into both temporary files
+    with open(temp_prev_mapping_file, "w") as f:
+        json.dump({"root": filtered_mapping_prev}, f, indent=2)
+    logger.info(f"Filtered previous mapping saved to {temp_prev_mapping_file}")
+
+    with open(temp_curr_mapping_file, "w") as f:
+        json.dump({"root": filtered_mapping_curr}, f, indent=2)
+    logger.info(f"Filtered current mapping saved to {temp_curr_mapping_file}")
+
+    # Run the async editing pipeline using the simulated mapping files
+    logger.info(
+        f"Starting editing process with {llm_provider} ({model_id}) using filtered mappings..."
+    )
     await run_resume_editing_pipeline_async(
-        mapping_file_prev=mapping_file_prev,
-        mapping_file_curr=mapping_file_curr,
+        mapping_file_prev=temp_prev_mapping_file,
+        mapping_file_curr=temp_curr_mapping_file,
         llm_provider=llm_provider,
         model_id=model_id,
     )
@@ -107,12 +145,19 @@ def main() -> None:
     ]
 
     custom_urls_2: List[str] = [
-        "https://advisor360.breezy.hr/p/2e1636328c7d-senior-product-manager-ai-analytics-insights",
-        "https://jobs.smartrecruiters.com/Blend360/744000042638791-director-ai-strategy?trid=2d92f286-613b-4daf-9dfa-6340ffbecf73",
+        # "https://advisor360.breezy.hr/p/2e1636328c7d-senior-product-manager-ai-analytics-insights",
+        # "https://careers.veeva.com/job/365ff44c-8e0a-42b4-a117-27b409a77753/director-crossix-analytics-services-boston-ma/?lever-source=Linkedin",
+        # "https://jobs.smartrecruiters.com/Blend360/744000042638791-director-ai-strategy?trid=2d92f286-613b-4daf-9dfa-6340ffbecf73",
+        # "https://jobs.us.pwc.com/job/-/-/932/76741173104?utm_source=linkedin.com&utm_campaign=core_media&utm_medium=social_media&utm_content=job_posting&ss=paid&dclid=CjgKEAjwy46_BhD8-aeS9rzGtzsSJAAuE6pojXgWgT7LeiCns3H71Hqcb3dqchcqskpnFxz8njxwwPD_BwE",
+        # "https://zendesk.wd1.myworkdayjobs.com/en-US/zendesk/job/San-Francisco-California-United-States-of-America/Competitive-Intelligence-Manager_R30346?source=LinkedIn",
+        "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/California---San-Francisco/Vice-President--Product-Research---Insights_JR279859?source=LinkedIn_Jobs",
+        # "https://careers.thomsonreuters.com/us/en/job/THTTRUUSJREQ188456EXTERNALENUS/Director-of-AI-Content-Innovation?utm_source=linkedin&utm_medium=phenom-feeds",
+        # "https://careers.spglobal.com/jobs/310832?lang=en-us&utm_source=linkedin",
+        # "https://bostonscientific.eightfold.ai/careers/job/563602800464180?domain=bostonscientific.com",
     ]
 
     # Choose which URL list to process
-    custom_urls: List[str] = custom_urls_1  # Change to custom_urls_2 if needed
+    custom_urls: List[str] = custom_urls_2  # Change to custom_urls_2 if needed
 
     # LLM settings
     llm_provider: str = OPENAI  # Change to "anthropic" if needed

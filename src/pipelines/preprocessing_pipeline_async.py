@@ -1,4 +1,4 @@
-""" 
+"""
 The pipeline module contains all high-level functions.
 
 This module is to be called by main.py.
@@ -67,7 +67,7 @@ async def process_single_url_async(
 ) -> None:
     """
     Asynchronously processes a single job posting URL, fetches the job description
-    (with or without web scraping), and extracts job requirements using GPT.
+    (with or without web scraping), and extracts job requirements using GPT or other LLMs.
 
     Args:
         - job_description_url (str): The job description URL to process.
@@ -81,7 +81,7 @@ async def process_single_url_async(
         - model_id (str): The model ID to use for GPT (default is "gpt-4-turbo").
         - max_tokens (int): The maximum number of tokens to generate. Defaults to 2048.
         - temperature (float): The temperature value. Defaults to 0.3.
-        - scrape_content (bool): Flag to control whether to scrape the content or not.
+        - web_scrape (bool): Flag to control whether to scrape the content or not.
 
     Returns:
         None
@@ -102,19 +102,27 @@ async def process_single_url_async(
             )  # Returns a dict: Dict[str, Dict[str, Any]]
             logger.info(f"Job description fetched for URL: {job_description_url}")
         else:
-            # Step 1b: If not scraping, read existing  data from the job_description_url
+            # Step 1b: If not scraping, read existing data from the job_description_url
             # (assumed to be available)
             job_description_dict = read_from_json_file(job_descriptions_json_file).get(
                 job_description_url, {}
             )
             logger.info(f"Job description fetched for URL: {job_description_url}")
 
-        logger.info(job_description_dict)
+        logger.info(job_description_dict)  # debug
+
+        # Gatekeeper: if no meaningful content was extracted, skip further processing.
+        data_section = job_description_dict.get("data", {})
+        content = data_section.get("content")
+        if not content:
+            logger.error(f"No content found for URL: {job_description_url}, skipping.")
+            return
+        #! Early return (do not save or continute to extract requirements)
 
         #! According to OpenAI, you shouldn't passing JSON str into LLM;
         #! howeever, according to Anthropic and DeepSeek, JSON input is fine.
         # Step 2: Converst job_description from dict to json string
-        job_description_json = json.dumps(job_description_dict, indent=2)
+        job_description_json = json.dumps(data_section, indent=2)
 
         # Extract job requirements using openai or anthropic
         if llm_provider.lower() == OPENAI:
@@ -239,7 +247,7 @@ async def run_preprocessing_pipeline_async(
             f"Job posting URLs file not found: {job_posting_urls_file}"
         )
 
-    # * Step 1:Load job descriptions & requirements and find new URLs
+    # * Step 1: Load job descriptions & requirements and find new URLs
     new_urls, missing_requirements_urls = find_new_urls(
         job_posting_urls_file=job_posting_urls_file,
         job_descriptions_file=job_descriptions_json_file,
