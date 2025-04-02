@@ -6,11 +6,11 @@ Description: Utilities functions to read and/or summarize webpage(s).
 
 This module facilitates a two-step process:
 1. Extract content from webpages using Playwright.
-   - Fetches everything visible on the page, cleans the text, and identifies URLs 
+   - Fetches everything visible on the page, cleans the text, and identifies URLs
    that fail to load.
 
 2. Transform the extracted content into structured JSON format using an LLM (OpenAI API).
-   - Converts raw webpage content into JSON representations suitable for specific use cases, 
+   - Converts raw webpage content into JSON representations suitable for specific use cases,
    such as job postings.
 """
 
@@ -479,7 +479,7 @@ async def process_webpages_to_json_async(
         if failed_urls:
             logger.info(f"URLs failed to process:\n{failed_urls}")
 
-    if llm_provider.lower() == ANTHROPIC:
+    elif llm_provider.lower() == ANTHROPIC:
         for url, content in webpages_content.items():
             try:
                 json_result = await convert_to_json_with_claude_async(
