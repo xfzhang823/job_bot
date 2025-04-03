@@ -1,22 +1,8 @@
 {
-  "root": {
-    "https://jobs.us.pwc.com/job/-/-/932/76741173104?utm_source=linkedin.com&utm_campaign=core_media&utm_medium=social_media&utm_content=job_posting&ss=paid&dclid=CjgKEAjwy46_BhD8-aeS9rzGtzsSJAAuE6pojXgWgT7LeiCns3H71Hqcb3dqchcqskpnFxz8njxwwPD_BwE": {
-      "reqs": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\requirements\\PwC_Data___Analytics-_Senior_Manager_reqs_flat_iter0.json",
-      "resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\responsibilities\\PwC_Data___Analytics-_Senior_Manager_resps_flat_iter0.json",
-      "sim_metrics": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\similarity_metrics\\PwC_Data___Analytics-_Senior_Manager_sim_metrics_iter0.csv",
-      "pruned_resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\pruned_responsibilities\\PwC_Data___Analytics-_Senior_Manager_pruned_resps_flat_iter0.json"
-    },
-    "https://zendesk.wd1.myworkdayjobs.com/en-US/zendesk/job/San-Francisco-California-United-States-of-America/Competitive-Intelligence-Manager_R30346?source=LinkedIn": {
-      "reqs": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\requirements\\Zendesk_Competitive_Intelligence_Manager_reqs_flat_iter0.json",
-      "resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\responsibilities\\Zendesk_Competitive_Intelligence_Manager_resps_flat_iter0.json",
-      "sim_metrics": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\similarity_metrics\\Zendesk_Competitive_Intelligence_Manager_sim_metrics_iter0.csv",
-      "pruned_resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\pruned_responsibilities\\Zendesk_Competitive_Intelligence_Manager_pruned_resps_flat_iter0.json"
-    },
-    "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/California---San-Francisco/Vice-President--Product-Research---Insights_JR279859?source=LinkedIn_Jobs": {
-      "reqs": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\requirements\\Salesforce_Vice_President__Product_Research___Insights_reqs_flat_iter0.json",
-      "resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\responsibilities\\Salesforce_Vice_President__Product_Research___Insights_resps_flat_iter0.json",
-      "sim_metrics": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\similarity_metrics\\Salesforce_Vice_President__Product_Research___Insights_sim_metrics_iter0.csv",
-      "pruned_resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_0\\pruned_responsibilities\\Salesforce_Vice_President__Product_Research___Insights_pruned_resps_flat_iter0.json"
-    }
+  "https://zendesk.wd1.myworkdayjobs.com/en-US/zendesk/job/San-Francisco-California-United-States-of-America/Competitive-Intelligence-Manager_R30346?source=LinkedIn": {
+    "reqs": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\requirements\\Zendesk_Competitive_Intelligence_Manager_reqs_flat_iter1.json",
+    "resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\responsibilities\\Zendesk_Competitive_Intelligence_Manager_resps_nested_iter1.json",
+    "sim_metrics": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\similarity_metrics\\Zendesk_Competitive_Intelligence_Manager_sim_metrics_iter1.csv",
+    "pruned_resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\pruned_responsibilities\\Zendesk_Competitive_Intelligence_Manager_pruned_resps_flat_iter1.json"
   }
 }

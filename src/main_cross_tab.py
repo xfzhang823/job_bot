@@ -36,7 +36,7 @@ import logging_config
 logger = logging.getLogger(__name__)
 
 
-def main():
+def main_iter1():
     """Run pipeline to create cross-tab reporting files."""
     logger.info("🚀 Start running pipeline to generate cross-tab files...")
 
@@ -124,5 +124,5 @@ def main_iter0():
 
 
 if __name__ == "__main__":
-    # main()
-    main_iter0()
+    main_iter1()
+    # main_iter0()

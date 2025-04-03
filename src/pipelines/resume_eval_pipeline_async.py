@@ -503,6 +503,7 @@ async def run_metrics_processing_pipeline_async(
     generate_metrics: Callable = generate_metrics_from_flat_json_async,
     batch_size: int = 2,  # Limit group size for batching (# of tasks/batch)
     max_concurrent: int = 1,  # Limit number of concurrent tasks
+    filter_keys: list[str] | None = None,  # ✅ New: selected list of urls only!
 ) -> None:
     """
     * Asynchronous pipeline to process and create missing similarity metrics files
@@ -518,6 +519,9 @@ async def run_metrics_processing_pipeline_async(
           - This controls how many tasks can be actively running at the same time.
           - A higher value improves speed but may lead to resource contention and timeouts.
           - A lower value prevents overloading the system but slows down execution.
+        *- filter_keys (list[str] | None): ✅ (new) Optional list of job URLs to include.
+          - If provided, only jobs matching the listed keys will be processed.
+          - Defaults to None (process all).
 
     ? How `batch_size` and `max_concurrent` work together:
       - `batch_size` determines how many tasks are grouped and executed in one round.
@@ -566,6 +570,9 @@ async def run_metrics_processing_pipeline_async(
         str(url): Path(job_paths.sim_metrics)  # Convert to Path directly
         for url, job_paths in file_mapping_model.root.items()
         if not Path(job_paths.sim_metrics).exists()
+        and (
+            not filter_keys or str(url) in filter_keys
+        )  # ✅ New: only include matching keys
     }
 
     if not missing_metrics:
@@ -876,6 +883,7 @@ async def run_metrics_re_processing_pipeline_async(
     generate_metrics: Callable = generate_metrics_from_nested_json_async,
     batch_size: int = 4,
     max_concurrent: int = 3,
+    filter_keys: list[str] | None = None,  # ✅ New: selected list of urls only!
 ) -> None:
     """
     * Re-run the pipeline asynchronously to process and create missing sim_metrics files
@@ -894,6 +902,10 @@ async def run_metrics_re_processing_pipeline_async(
           - This controls how many tasks can be actively running at the same time.
           - A higher value improves speed but may lead to resource contention and timeouts.
           - A lower value prevents overloading the system but slows down execution.
+        *- filter_keys (list[str] | None): ✅ (new)  A list of job posting URLs to
+        * selectively process.
+          - If provided, only jobs matching the listed keys will be processed.
+          - Defaults to None (process all).
 
     ? How `batch_size` and `max_concurrent` work together:
       - `batch_size` determines how many tasks are grouped and executed in one round.
@@ -951,9 +963,10 @@ async def run_metrics_re_processing_pipeline_async(
             job_paths.sim_metrics
         )  # Convert sim_metrics path directly to Path object
         for url, job_paths in file_mappings_model.root.items()
-        if not Path(
-            job_paths.sim_metrics
-        ).exists()  # Check if the sim_metrics file exists
+        if not Path(job_paths.sim_metrics).exists()
+        and (
+            not filter_keys or str(url) in filter_keys
+        )  # ✅ Only include matching keys
     }
 
     # If no missing metrics, exit early to save computational resources.
@@ -1045,7 +1058,7 @@ async def run_metrics_re_processing_pipeline_async(
             start_time = time.time()
             results = await asyncio.wait_for(
                 asyncio.gather(*batch, return_exceptions=True),
-                timeout=800,  # Increase timeout
+                timeout=900,  # Increase timeout
             )
             elapsed_time = time.time() - start_time
             logger.info(

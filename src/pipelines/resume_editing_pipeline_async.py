@@ -225,6 +225,7 @@ async def run_resume_editing_pipeline_async(
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_TURBO,
     no_of_concurrent_workers: int = 3,
+    filter_keys: list[str] | None = None,  # ✅ New: selected list of urls only!
 ) -> None:
     """
     Run the pipeline to modify responsibilities based on the previous and current
@@ -239,6 +240,11 @@ async def run_resume_editing_pipeline_async(
         Defaults to 'openai'.
         - model_id (str, optional): Specific model version to be used.
         Defaults to 'gpt-3.5-turbo'.
+        *- filter_keys (list[str] | None, optional): (New) Optional list of
+        * job posting URLs to include.
+        If provided, only jobs matching these keys will be edited.
+        Defaults to None (process all).
+
 
 
     Returns:
@@ -262,6 +268,12 @@ async def run_resume_editing_pipeline_async(
         return
 
     logger.info(f"paths_dict:\n{paths_dict}")
+
+    # * Step 1.5: ✅ New; added a filter to selected list of urls (process small batches)
+    if filter_keys:
+        paths_dict = {
+            url: paths for url, paths in paths_dict.items() if url in filter_keys
+        }
 
     # Step 2: Process each job posting URL and modify responsibilities
     # Use async.gather

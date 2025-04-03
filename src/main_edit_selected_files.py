@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, List
 from pydantic import HttpUrl
@@ -58,6 +59,10 @@ async def edit_selected_files(
     """
     Run the asynchronous resume editing pipeline for a selected list of URLs.
 
+    This function creates two simulated mapping files—one for the previous iteration
+    and one for the current iteration—each containing only the URLs you want to process,
+    while preserving their respective file paths.
+
     Args:
         custom_urls (List[str]): List of job posting URLs to process.
         mapping_file_prev (Path): Path to the previous iteration mapping file.
@@ -109,17 +114,19 @@ async def edit_selected_files(
     #     url: mapping_dict[url] for url in custom_urls if url in mapping_dict
     # }
 
-    # Create two temporary filtered mapping files: previous, current iterations
-    temp_prev_mapping_file = Path(mapping_file_prev)
-    temp_curr_mapping_file = Path(mapping_file_curr)
-
-    # Save the filtered mappings (wrapped under "root") into both temporary files
-    with open(temp_prev_mapping_file, "w") as f:
-        json.dump({"root": filtered_mapping_prev}, f, indent=2)
+    # Create two temporary files for the filtered mappings using tempfile.NamedTemporaryFile
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as temp_prev:
+        json.dump(filtered_mapping_prev, temp_prev, indent=2)
+        temp_prev_mapping_file = Path(temp_prev.name)
     logger.info(f"Filtered previous mapping saved to {temp_prev_mapping_file}")
 
-    with open(temp_curr_mapping_file, "w") as f:
-        json.dump({"root": filtered_mapping_curr}, f, indent=2)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as temp_curr:
+        json.dump(filtered_mapping_curr, temp_curr, indent=2)
+        temp_curr_mapping_file = Path(temp_curr.name)
     logger.info(f"Filtered current mapping saved to {temp_curr_mapping_file}")
 
     # Run the async editing pipeline using the simulated mapping files
@@ -133,6 +140,10 @@ async def edit_selected_files(
         model_id=model_id,
     )
     logger.info("Editing process completed.")
+
+    # Optionally, delete the temporary files if no longer needed:
+    # temp_prev_mapping_file.unlink()
+    # temp_curr_mapping_file.unlink()
 
 
 def main() -> None:
@@ -150,9 +161,9 @@ def main() -> None:
         # "https://jobs.smartrecruiters.com/Blend360/744000042638791-director-ai-strategy?trid=2d92f286-613b-4daf-9dfa-6340ffbecf73",
         # "https://jobs.us.pwc.com/job/-/-/932/76741173104?utm_source=linkedin.com&utm_campaign=core_media&utm_medium=social_media&utm_content=job_posting&ss=paid&dclid=CjgKEAjwy46_BhD8-aeS9rzGtzsSJAAuE6pojXgWgT7LeiCns3H71Hqcb3dqchcqskpnFxz8njxwwPD_BwE",
         # "https://zendesk.wd1.myworkdayjobs.com/en-US/zendesk/job/San-Francisco-California-United-States-of-America/Competitive-Intelligence-Manager_R30346?source=LinkedIn",
-        "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/California---San-Francisco/Vice-President--Product-Research---Insights_JR279859?source=LinkedIn_Jobs",
+        # "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site/job/California---San-Francisco/Vice-President--Product-Research---Insights_JR279859?source=LinkedIn_Jobs",
         # "https://careers.thomsonreuters.com/us/en/job/THTTRUUSJREQ188456EXTERNALENUS/Director-of-AI-Content-Innovation?utm_source=linkedin&utm_medium=phenom-feeds",
-        # "https://careers.spglobal.com/jobs/310832?lang=en-us&utm_source=linkedin",
+        "https://careers.spglobal.com/jobs/310832?lang=en-us&utm_source=linkedin",
         # "https://bostonscientific.eightfold.ai/careers/job/563602800464180?domain=bostonscientific.com",
     ]
 
