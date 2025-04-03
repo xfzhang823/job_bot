@@ -1,33 +1,8 @@
 # pipelines/run_pipelines.py
-import os
 import logging
+import asyncio
 import inspect
 from typing import Optional
-from tqdm import tqdm
-import asyncio
-
-
-from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-
-# Pipeline functions
-from pipelines.resume_editing_pipeline import (
-    run_resume_editing_pipeline as run_resume_editing_pipeline,
-)
-from pipelines.resume_eval_pipeline import (
-    run_metrics_re_processing_pipeline as re_run_resume_comparison_pipeline,
-)
-
-from pipelines.resume_editing_pipeline_async import (
-    run_resume_editing_pipeline_async as run_resume_editting_pipeline_async,
-)
-from project_config import (
-    OPENAI,
-    ANTHROPIC,
-    CLAUDE_HAIKU,
-    CLAUDE_SONNET,
-    GPT_35_TURBO,
-    GPT_4_TURBO,
-)
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
 
 # Set logger
@@ -39,6 +14,9 @@ def run_pipeline(
     pipeline_id: str,
     llm_provider: str = OPENAI,
     model_id: Optional[str] = GPT_4_TURBO,
+    filter_keys: Optional[
+        list[str]
+    ] = None,  # ✅ NEW (for processing a small batch of urls)
 ):
     """
     *This is the sync version
@@ -163,6 +141,10 @@ def run_pipeline(
         if "model_id" in func_signature.parameters:
             local_kwargs["model_id"] = model_id
 
+        # * ✅ New: add filter_keys if the function supports it
+        if filter_keys and "filter_keys" in func_signature.parameters:
+            local_kwargs["filter_keys"] = filter_keys
+
         logger.info(
             f"Running pipeline '{pipeline_id}' with function '{func.__name__}' and kwargs: {local_kwargs}"
         )
@@ -172,8 +154,13 @@ def run_pipeline(
 
 # Async version
 async def run_pipeline_async(
-    pipeline_id: str, llm_provider: str = OPENAI, model_id: Optional[str] = None
-):
+    pipeline_id: str,
+    llm_provider: str = OPENAI,
+    model_id: Optional[str] = None,
+    filter_keys: Optional[
+        list[str]
+    ] = None,  # ✅ NEW (for processing a small batch of urls)
+) -> None:
     """
     * Async version: see the sync version docstring for more details.
     Runs an asynchronous pipeline function dynamically.
@@ -240,6 +227,10 @@ async def run_pipeline_async(
         if "model_id" in func_signature.parameters:
             local_kwargs["model_id"] = model_id
 
+        # * ✅ New: add filter_keys if the function supports it
+        if filter_keys and "filter_keys" in func_signature.parameters:
+            local_kwargs["filter_keys"] = filter_keys
+
         logger.info(
             f"Running async pipeline '{pipeline_id}' with function '{func.__name__}' and kwargs: {local_kwargs}"
         )
@@ -257,168 +248,3 @@ async def run_pipeline_async(
             await asyncio.to_thread(func, **local_kwargs)
 
     logger.info(f"Pipeline '{pipeline_id}' execution completed.")
-
-
-def run_pipeline_1(llm_provider: str = OPENAI, model_id: str = GPT_4_TURBO) -> None:
-    """
-    Synchronous pipeline for preprocessing job posting webpages.
-
-    This pipeline identifies and processes new URLs. For each new URL,
-    it invokes the `run_preprocessing_pipeline` function to extract relevant
-    data and save it. If no new URLs are found, the function logs and exits.
-    """
-    run_pipeline("1", llm_provider=llm_provider, model_id=model_id)
-
-
-def run_pipeline_2a(llm_provider: str = OPENAI):
-    """
-    Pipeline to create/update the mapping file for iteration 0.
-
-    This function updates the mapping file and copies the requirements files from
-    the previous directory to the current one.
-    """
-    run_pipeline("2a", llm_provider=llm_provider)
-
-
-def run_pipeline_2b(llm_provider: str = OPENAI):
-    """
-    Pipeline to flatten responsibilities and requirements files for iteration 0.
-    """
-    run_pipeline("2b", llm_provider=llm_provider)
-
-
-def run_pipeline_2c(llm_provider: str = OPENAI, model_id: str = GPT_4_TURBO):
-    """
-    Pipeline to evaluate resumes against job requirements and generate similarity metrics.
-    """
-    run_pipeline("2c", llm_provider=llm_provider, model_id=model_id)
-
-
-def run_pipeline_2d(llm_provider: str = OPENAI):
-    """
-    Pipeline to add extra indices (composite scores and PCA scores) to metrics files
-    based on similarity & entailment metrics.
-    """
-    run_pipeline("2d", llm_provider=llm_provider)
-
-
-def run_pipeline_2e(llm_provider: str = OPENAI):
-    """
-    Pipeline to clean up metrics csv files by removing empty rows.
-    """
-    run_pipeline("2e", llm_provider=llm_provider)
-
-
-def run_pipeline_2f(llm_provider: str = OPENAI):
-    """
-    Pipeline to copy files in responsibilities folder to pruned_responsibilities folder,
-    and exclude certain responsibilities.
-    """
-    # Calls `run_pipeline("2f")`, which runs both mini pipelines from PIPELINE_CONFIG
-    run_pipeline("2f", llm_provider=llm_provider)
-
-
-def run_pipeline_3a(llm_provider: str = OPENAI):
-    """
-    Pipeline to create or upsert the mapping file for iteration 1.
-    """
-    run_pipeline("3a", llm_provider=llm_provider)
-
-
-def run_pipeline_3b(llm_provider: str = OPENAI, model_id=GPT_4_TURBO):
-    """
-    Pipeline to modify responsibilities text based on requirements using LLM.
-
-    Args:
-        llm_provider (str): The LLM provider, e.g., 'openai' or 'claude'.
-    """
-    run_pipeline("3b", llm_provider=llm_provider, model_id=model_id)
-
-
-def run_pipeline_3c(llm_provider: str = OPENAI):
-    """
-    Pipeline to copy requirements files from iteration 0 to iteration 1.
-    """
-    run_pipeline("3c", llm_provider=llm_provider)
-
-
-def run_pipeline_3d(llm_provider: str = OPENAI):
-    """
-    Pipeline to evaluate (modified resumes against job requirements and generate similarity metrics.
-    """
-    run_pipeline("3d", llm_provider=llm_provider)
-
-
-def run_pipeline_3e(llm_provider: str = OPENAI):
-    """
-    Pipeline to add multivariate indices to metrics files in iteration 1.
-    """
-    run_pipeline("3e", llm_provider=llm_provider)
-
-
-def run_pipeline_3f(llm_provider: str = OPENAI):
-    """
-    Pipeline to clean up metrics csv files by removing empty rows.
-    """
-    run_pipeline("3f", llm_provider=llm_provider)
-
-
-# * Async Functions
-async def run_pipeline_1_async(
-    llm_provider: str = OPENAI, model_id: str = GPT_4_TURBO
-) -> None:
-    """
-    Asynchronous pipeline for preprocessing job posting webpages.
-
-    This pipeline identifies and processes new URLs. For each new URL, it invokes the
-    `run_preprocessing_pipeline_async` function to extract relevant data and save it.
-    If no new URLs are found, the function logs and exits.
-    """
-    asyncio.run(
-        run_pipeline_async("1_async", llm_provider=llm_provider, model_id=model_id)
-    )
-
-
-async def run_pipeline_2c_async(llm_provider: str = OPENAI):
-    """
-    Async pipeline to evaluate resumes against job requirements and generate similarity \
-metrics in iter 0.
-    """
-    asyncio.run(run_pipeline_async("2_async", llm_provider=llm_provider))
-
-
-async def run_pipeline_2d_async(llm_provider: str = OPENAI):
-    """
-    Async ipeline to add extra indices (composite scores and PCA scores) to metrics
-    files based on similarity & entailment metrics.
-    """
-    asyncio.run(run_pipeline_async("2d_async", llm_provider=llm_provider))
-
-
-async def run_pipeline_3b_async(
-    llm_provider: str = OPENAI, model_id: str = GPT_4_TURBO
-):
-    """
-    Async pipeline for modifying responsibilities text based on requirements using LLM.
-
-    Args:
-        llm_provider (str): The LLM provider, e.g., 'openai' or 'claude'.
-    """
-    asyncio.run(
-        run_pipeline_async("3b_async", llm_provider=llm_provider, model_id=model_id)
-    )
-
-
-async def run_pipeline_3d_async(llm_provider: str = OPENAI):
-    """
-    Async pipeline to evaluate resumes against job requirements and generate
-    similarity metrics in iter 1.
-    """
-    asyncio.run(run_pipeline_async("3d_async", llm_provider=llm_provider))
-
-
-def run_pipeline_3e_async(llm_provider: str = OPENAI):
-    """
-    Async pipeline to add multivariate indices to metrics files in iteration 1.
-    """
-    asyncio.run(run_pipeline_async("3e_async", llm_provider=llm_provider))
