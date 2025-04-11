@@ -5,11 +5,17 @@ Last Updated on:
 pydantic models for validate LLM responses
 """
 
-from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ValidationError, constr, Field
-import pandas as pd
 import logging
-from models.resume_job_description_io_models import Requirements
+from typing import Any, Dict, List, Optional, Union
+from pydantic import (
+    BaseModel,
+    ValidationError,
+    constr,
+    Field,
+    HttpUrl,
+    field_serializer,
+)
+import pandas as pd
 
 
 # Set up logger
@@ -168,7 +174,7 @@ class JobSiteData(BaseModel):
         and qualifications as a dictionary.
     """
 
-    url: str = Field(..., description="Job posting URL")
+    url: str | HttpUrl = Field(..., description="Job posting URL")
     job_title: str = Field(..., description="Job title")
     company: str = Field(..., description="Company name")
     location: Optional[str] = Field(None, description="Job location")
@@ -179,16 +185,53 @@ class JobSiteData(BaseModel):
         description="Dictionary containing job description, responsibilities, and qualifications",
     )
 
+    @field_serializer("url")
+    def serialize_url(self, v: str | HttpUrl) -> str:
+        """Into str when exporting data out"""
+        return str(v)
+
 
 class JobSiteResponse(BaseResponseModel):
     """
     Model for handling job site response data, standardizing job-related information.
 
     Attributes:
-        data (JobSiteData): Holds detailed job site information as a nested JobSiteData instance.
+        data (JobSiteData): Holds detailed job site information as a nested
+        JobSiteData instance.
 
-    Config:
-        json_schema_extra (dict): Provides an example structure for documentation.
+    The `JobSiteResponse` model wraps structured job posting information in
+    a standard response format used across pipelines. This includes the job title,
+    company, location, salary, and parsed content such as responsibilities and
+    qualifications.
+
+    ✅ Example Output:
+    -------------------
+    {
+        "status": "success",
+        "message": "Job site data processed successfully.",
+        "data": {
+            "url": "https://example.com/job-posting",
+            "job_title": "Software Engineer",
+            "company": "Tech Corp",
+            "location": "San Francisco, CA",
+            "salary_info": "$100,000 - $120,000",
+            "posted_date": "2024-11-08",
+            "content": {
+                "description": "We are looking for a Software Engineer...",
+                "responsibilities": [
+                    "Develop software",
+                    "Collaborate with team"
+                ],
+                "qualifications": [
+                    "BS in Computer Science",
+                    "2+ years experience"
+                ]
+            }
+        }
+    }
+
+    This model is used as a standardized return type after scraping or LLM-parsing
+    a job webpage (e.g., in the `process_single_url_async` pipeline step).
     """
 
     data: JobSiteData
@@ -268,11 +311,47 @@ class NestedRequirements(BaseModel):
 
 class RequirementsResponse(BaseResponseModel):
     """
-    Response model for job requirements.
-    It wraps a flat structure where each section contains a list of requirement texts.
+    Response model for job requirements extracted from job descriptions.
 
     Attributes:
-        data (Dict[str, List[str]]): NestedRequirements
+        data (NestedRequirements): Structured job requirements organized into
+            high-level categories such as "pie_in_the_sky", "down_to_earth",
+            "bare_minimum", "cultural_fit", and "other".
+
+    This model is used after parsing and structuring job requirements into logical tiers.
+    It serves as the output format for requirement extraction steps in the job parsing
+    pipeline.
+
+    ✅ Example Output:
+    -------------------
+    {
+        "status": "success",
+        "message": "Job requirements data processed successfully.",
+        "data": {
+            "pie_in_the_sky": [
+                "Top-tier strategy consulting experience",
+                "Motivated by high impact, high visibility work"
+            ],
+            "down_to_earth": [
+                "Bachelor's degree and MBA required",
+                "3-5 years of work experience preferred",
+                "Strong analytical and communication skills"
+            ],
+            "bare_minimum": [
+                "Bachelor's degree",
+                "Ability to manage multiple priorities"
+            ],
+            "cultural_fit": [
+                "Excited about contributing to a dynamic team"
+            ],
+            "other": [
+                "Insurance industry experience is a plus"
+            ]
+        }
+    }
+
+    The `data` field wraps a `NestedRequirements` model and reflects categorized insights from the
+    job post. This structure is used throughout the alignment, editing, and evaluation stages.
     """
 
     data: NestedRequirements

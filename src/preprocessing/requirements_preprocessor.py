@@ -1,4 +1,4 @@
-""" TBA """
+"""TBA"""
 
 import logging
 from pathlib import Path
@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Union
 
 # User defined
 from utils.generic_utils import read_from_json_file
-from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
+from utils.flatten_and_search import fetch_subtrees, flatten_dict_and_list
 
 # Setup logger
 logger = logging.getLogger(__name__)

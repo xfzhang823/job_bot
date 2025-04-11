@@ -33,7 +33,7 @@ from sklearn.metrics import pairwise_distances
 import spacy
 
 # User defined
-from utils.model_loader import get_hf_model, get_spacy_model
+from utils.ml_model_loader import get_hf_model, get_spacy_model
 
 
 # Set up logger

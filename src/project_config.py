@@ -271,6 +271,12 @@ This file lists the key qualifications and responsibilities.",
 }
 
 
+# * Pipeline Data directory, sub-directories, and file paths (contains duckdb database)
+PIPELINE_DATA_DIR = BASE_DIR / "pipeline_data"  # input/output data folder
+DB_DIR = PIPELINE_DATA_DIR / "db"
+DUCKDB_FILE = DB_DIR / "pipeline_data.duckdb"
+
+
 # *LLM Models
 
 # llm_providers

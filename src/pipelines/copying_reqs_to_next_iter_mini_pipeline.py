@@ -3,7 +3,7 @@ Filename: copying_requirements_mini_pipeline.py
 
 This module sets up the input/output files for job posting requirements from iteration 1.
 It includes functions to copy the requirements from the previous iteration to the current iteration
-and verify the existence of required input files and output directories. The process involves 
+and verify the existence of required input files and output directories. The process involves
 validating the file paths and contents, leveraging Pydantic models for requirements validation.
 """
 
@@ -17,7 +17,9 @@ from evaluation_optimization.create_mapping_file import (
     load_existing_or_create_new_mapping,
 )
 from models.resume_job_description_io_models import Requirements
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
 from utils.generic_utils import (
     read_from_json_file,
@@ -58,8 +60,8 @@ def set_directory_paths(
     mapping_file_curr = Path(mapping_file_curr)
 
     # Load the mapping files using the Pydantic model loader
-    file_mapping_prev_model = load_mappings_model_from_json(mapping_file_prev)
-    file_mapping_curr_model = load_mappings_model_from_json(mapping_file_curr)
+    file_mapping_prev_model = load_job_file_mappings_model(mapping_file_prev)
+    file_mapping_curr_model = load_job_file_mappings_model(mapping_file_curr)
 
     if file_mapping_prev_model is None or file_mapping_curr_model is None:
         logger.error(

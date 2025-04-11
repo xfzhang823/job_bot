@@ -16,7 +16,7 @@ from utils.generic_utils import (
 )
 from evaluation_optimization.evaluation_optimization_utils import create_file_name
 from models.resume_job_description_io_models import JobFileMappings, JobFilePaths
-
+from utils.pydantic_model_loaders import load_job_file_mappings_model
 
 logger = logging.getLogger(__name__)
 
@@ -130,52 +130,6 @@ def create_mapping_entry(
     return job_file_paths_model  # Return the validated JobFilePaths instance
 
 
-def load_mappings_model_from_json(mapping_file: Union[str, Path]) -> JobFileMappings:
-    """
-    Load job file mappings from a JSON file using the JobFileMappings model.
-
-    Args:
-        mapping_file (str | Path): Path to the JSON mapping file.
-
-    Returns:
-        Optional[JobFileMappings]: Job file mappings model or None if validation fails.
-
-    Logs:
-        - Information about loading and validation success.
-        - Errors encountered during validation or file processing.
-    """
-    try:
-        mapping_file = Path(mapping_file)  # Change to Path obj. if str
-        # Read the JSON file without specifying a key to get the entire data
-        file_mapping = read_from_json_file(mapping_file, key=None)
-
-        # Ensure the data is a dictionary
-        if not isinstance(file_mapping, dict):
-            logger.error(
-                f"Mapping file {mapping_file} does not contain a valid JSON object."
-            )
-            return None
-
-        # Initialize the Pydantic model with the entire mapping
-        job_file_mappings_model = JobFileMappings.model_validate(file_mapping)
-
-        logger.info(f"Loaded and validated mapping file from {mapping_file}")
-        return job_file_mappings_model
-
-    except ValidationError as e:
-        logger.error(f"Validation error in mapping file {mapping_file}: {e}")
-        return None
-    except FileNotFoundError as e:
-        logger.error(f"Mapping file not found: {mapping_file}. Error: {e}")
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decoding failed for file {mapping_file}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error loading mapping file {mapping_file}: {e}")
-        return None
-
-
 def load_existing_or_create_new_mapping(
     job_descriptions: dict,
     config: MappingConfig,
@@ -251,7 +205,7 @@ def load_existing_or_create_new_mapping(
 
     if mapping_file.exists():
         # Load existing mapping
-        file_mappings_model = load_mappings_model_from_json(mapping_file)
+        file_mappings_model = load_job_file_mappings_model(mapping_file)
         if not file_mappings_model:
             raise ValueError(
                 "❌ Failed to load and validate the existing mapping file."

@@ -92,7 +92,9 @@ from models.resume_job_description_io_models import (
     SimilarityMetrics,
 )
 
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from evaluation_optimization.metrics_calculator import (
     calculate_many_to_many_similarity_metrices,
     categorize_scores_for_df,
@@ -264,11 +266,8 @@ async def generate_metrics_from_flat_json_async(
             )
 
             # Step 7: Ensure URL column is first and converted to string
-            df["job_posting_url"] = str(url)  # Assign first
-            df = df[
-                ["job_posting_url"]
-                + [col for col in df.columns if col != "job_posting_url"]
-            ]
+            df["url"] = str(url)  # Assign first
+            df = df[["url"] + [col for col in df.columns if col != "url"]]
 
             # Step 8: Validate before saving
             if df.empty:
@@ -419,7 +418,7 @@ async def generate_metrics_from_nested_json_async(
                 # * (many-to-many mapping).
                 try:
                     similarity_metrics_model = SimilarityMetrics(
-                        job_posting_url=url,
+                        url=url,
                         responsibility_key=responsibility_key,
                         responsibility=responsibility_text,
                         requirement_key=requirement_key,
@@ -556,7 +555,7 @@ async def run_metrics_processing_pipeline_async(
     logger.info(f"Loading mapping file: {mapping_file}")
 
     # Step 1: Read the mapping file (synchronously)
-    file_mapping_model = load_mappings_model_from_json(
+    file_mapping_model = load_job_file_mappings_model(
         mapping_file
     )  # Returns Pydantic model
     if file_mapping_model is None:
@@ -712,7 +711,7 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 
     # Step 1: Load the mapping file into a Pydantic model
     # Don't really need to use async for loading json file
-    file_mapping_model = load_mappings_model_from_json(mapping_file)
+    file_mapping_model = load_job_file_mappings_model(mapping_file)
     if file_mapping_model is None:
         logger.error(f"Failed to load the mapping file: {mapping_file}")
         return
@@ -766,7 +765,7 @@ async def run_multivariate_indices_processing_mini_pipeline_async(
 
             # Verify required columns
             required_columns = {
-                "job_posting_url",
+                "url",
                 "responsibility_key",
                 "responsibility",
                 "requirement_key",
@@ -947,7 +946,7 @@ async def run_metrics_re_processing_pipeline_async(
 
     # Step 2: Load the mapping file into a validated Pydantic model
     # This ensures the file structure and expected fields are correct before proceeding.
-    file_mappings_model: JobFileMappings = load_mappings_model_from_json(mapping_file)
+    file_mappings_model: JobFileMappings = load_job_file_mappings_model(mapping_file)
     if (
         file_mappings_model is None
     ):  # Error handling: Exit if mapping file fails validation.

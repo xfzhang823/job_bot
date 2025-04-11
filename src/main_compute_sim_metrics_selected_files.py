@@ -30,7 +30,9 @@ from pipelines.resume_eval_pipeline_async import (
     run_metrics_re_processing_pipeline_async,
     run_multivariate_indices_processing_mini_pipeline_async,
 )
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from utils.generic_utils_async import read_and_validate_json_async, read_json_file_async
 from models.resume_job_description_io_models import (
     Requirements,
@@ -132,7 +134,7 @@ async def compute_similarity_metrics(
 
     logger.info(f"Loading mapping file: {original_mapping_file}")
 
-    file_mapping_model = load_mappings_model_from_json(original_mapping_file)
+    file_mapping_model = load_job_file_mappings_model(original_mapping_file)
     if file_mapping_model is None:
         logger.error(f"Failed to load mapping file {original_mapping_file}")
         return

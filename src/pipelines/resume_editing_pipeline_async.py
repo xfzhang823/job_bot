@@ -1,10 +1,10 @@
 import os
-from pathlib import Path
+import json
+from pathlib import Path, WindowsPath
 import logging
 from typing import Union
 import asyncio
-
-# from joblib import Parallel, delayed
+from pydantic import HttpUrl
 
 from models.resume_job_description_io_models import (
     ResponsibilityMatch,
@@ -23,8 +23,11 @@ from evaluation_optimization.resumes_editing_async import (
     modify_multi_resps_based_on_reqs_async,
 )
 
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from utils.generic_utils import (
+    inspect_json_structure,
     read_from_json_file,
     verify_dir,
     verify_file,
@@ -81,7 +84,7 @@ def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict
 
 def set_directory_paths(
     mapping_file_prev: Union[str, Path], mapping_file_curr: Union[str, Path]
-) -> dict:
+) -> dict[HttpUrl, dict[str, WindowsPath]]:
     """
     Set the directory paths for processing responsibilities and requirements based on the
     previous and current mapping files, using Pydantic models for validation.
@@ -98,14 +101,18 @@ def set_directory_paths(
         the current iteration.
 
     Returns:
-        dict: A dictionary where each key is a URL from the mapping, and the value
-        is another dictionary containing:
-            - 'requirements_input': Path to the requirements file from the
-            previous iteration.
-            - 'responsibilities_input': Path to the pruned responsibilities file
-            from the previous iteration.
-            - 'responsibilities_output': Path to the responsibilities file for
-            the current iteration.
+        dict[HttpUrl, dict[str, Path]]: A dictionary where:
+            - Each key is a validated `HttpUrl` corresponding to a job posting.
+            - Each value is a dictionary containing:
+                - 'requirements_input': Path to the requirements file from
+                the previous iteration.
+                - 'responsibilities_input': Path to the pruned responsibilities file
+                from the previous iteration.
+                - 'responsibilities_output': Path to the responsibilities file for
+                the current iteration.
+
+        All paths are represented using `pathlib.Path` (typically `WindowsPath` on Windows).
+        Entries are only included if all required input files exist.
 
         If any file is missing or an error occurs, the function logs the issue and skips
         processing for that URL.
@@ -115,8 +122,8 @@ def set_directory_paths(
     mapping_file_curr = Path(mapping_file_curr)
 
     # Load the mapping files using the Pydantic model loader
-    file_mapping_prev = load_mappings_model_from_json(mapping_file_prev)
-    file_mapping_curr = load_mappings_model_from_json(mapping_file_curr)
+    file_mapping_prev = load_job_file_mappings_model(mapping_file_prev)
+    file_mapping_curr = load_job_file_mappings_model(mapping_file_curr)
 
     if file_mapping_prev is None or file_mapping_curr is None:
         logger.error(
@@ -165,6 +172,8 @@ def set_directory_paths(
             continue
 
     logger.info(f"Directory path dictionary:\n{paths_dict}")
+    logger.info("Data structure:")
+    logger.info(json.dumps(inspect_json_structure(paths_dict), indent=2))
     return paths_dict
 
 
@@ -262,7 +271,9 @@ async def run_resume_editing_pipeline_async(
     logger.info("I/O dir/file paths are correct. Proceed with processing.")
 
     # Step 1: Setup directory and file paths
-    paths_dict = set_directory_paths(mapping_file_prev, mapping_file_curr)
+    paths_dict = set_directory_paths(
+        mapping_file_prev, mapping_file_curr
+    )  #! url in returned dict is httpURL (not str)
     if not paths_dict:
         logger.error("Failed to set up directory paths.")
         return
@@ -271,9 +282,11 @@ async def run_resume_editing_pipeline_async(
 
     # * Step 1.5: ✅ New; added a filter to selected list of urls (process small batches)
     if filter_keys:
+        logger.info(f"Filter_keys for editing:\n{filter_keys}")  # Debug
         paths_dict = {
-            url: paths for url, paths in paths_dict.items() if url in filter_keys
+            url: paths for url, paths in paths_dict.items() if str(url) in filter_keys
         }
+        logger.info(f"Filtered file mapping for editing:\n{paths_dict}")  # Debug
 
     # Step 2: Process each job posting URL and modify responsibilities
     # Use async.gather
