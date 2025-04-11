@@ -5,7 +5,9 @@ import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, List
 from pydantic import HttpUrl
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from pipelines.resume_editing_pipeline_async import run_resume_editing_pipeline_async
 from project_config import (
     ITERATE_0_OPENAI_DIR,
@@ -72,14 +74,14 @@ async def edit_selected_files(
     """
     # Load previous iteration's mappping file
     logger.info(f"Loading previous mapping file: {mapping_file_prev}")
-    file_mapping_prev = load_mappings_model_from_json(mapping_file_prev)
+    file_mapping_prev = load_job_file_mappings_model(mapping_file_prev)
     if file_mapping_prev is None:
         logger.error(f"Failed to load mapping file {mapping_file_prev}")
         return
 
     # Load current mapping file
     logger.info(f"Loading current mapping file: {mapping_file_curr}")
-    file_mapping_curr = load_mappings_model_from_json(mapping_file_curr)
+    file_mapping_curr = load_job_file_mappings_model(mapping_file_curr)
     if file_mapping_curr is None:
         logger.error(f"Failed to load mapping file {mapping_file_curr}")
         return

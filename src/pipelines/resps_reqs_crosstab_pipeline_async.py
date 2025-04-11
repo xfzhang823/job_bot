@@ -38,7 +38,9 @@ from typing import Optional
 
 # User-defined imports
 from utils.generic_utils import read_from_json_file
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from evaluation_optimization.evaluation_optimization_utils import create_file_name
 from human_review_and_editing.create_resp_req_crosstab import (
     create_resp_req_crosstab,
@@ -191,7 +193,7 @@ def load_original_responsibilities(
         return {}
 
     # Read mapping file
-    original_mapping_model = load_mappings_model_from_json(mapping_file)
+    original_mapping_model = load_job_file_mappings_model(mapping_file)
     if original_mapping_model:
         mapping = (
             original_mapping_model.root

@@ -26,7 +26,9 @@ from evaluation_optimization.metrics_calculator import (
     calculate_text_similarity_metrics,
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from utils.generic_utils import (
     read_from_json_file,
     validate_json_file,
@@ -261,7 +263,7 @@ def generate_metrics_from_nested_json(
             # Step 4: Validate using SimilarityMetrics model
             try:
                 similarity_metrics_model = SimilarityMetrics(
-                    job_posting_url=url,
+                    url=url,
                     responsibility_key=responsibility_key,
                     responsibility=responsibility_text,
                     requirement_key=requirement_key,
@@ -354,7 +356,7 @@ def run_metrics_processing_pipeline(
     mapping_file = Path(mapping_file)
 
     # Step 1: Read and validate the mapping file
-    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+    file_mappings_model: Optional[JobFileMappings] = load_job_file_mappings_model(
         mapping_file
     )
 
@@ -428,7 +430,7 @@ def run_multivariate_indices_processing_mini_pipeline(
         raise ValueError(f"The file '{mapping_file}' does not exist.")
 
     # Step 1: Validate the mapping file and load it into a Pydantic model
-    file_mapping_model = load_mappings_model_from_json(mapping_file=mapping_file)
+    file_mapping_model = load_job_file_mappings_model(mapping_file=mapping_file)
 
     if not file_mapping_model:
         logger.error(f"Failed to load the mapping file: {mapping_file}")
@@ -557,7 +559,7 @@ def run_metrics_re_processing_pipeline(
         None
     """
     # Step 1: Read / Validate file mapping
-    file_mappings_model: Optional[JobFileMappings] = load_mappings_model_from_json(
+    file_mappings_model: Optional[JobFileMappings] = load_job_file_mappings_model(
         mapping_file
     )
 

@@ -1,9 +1,7 @@
-""" TBA """
+"""TBA"""
 
-import os
-import sys
-from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 import logging
 
 # root_dir = Path(__file__).resolve().parent.parent / "src"
@@ -173,7 +171,8 @@ def recursive_search(d, search_key=None, search_value=None, results=None):
 
 def fetch_subtrees(d: Dict, search_key: str = "", search_value: str = ""):
     """
-    Fetches only the immediate items containing a specified key or value in a nested dictionary.
+    Fetches only the immediate items containing a specified key or value in a nested
+    dictionary.
 
     Args:
         d (dict): The nested dictionary to search.
@@ -181,7 +180,8 @@ def fetch_subtrees(d: Dict, search_key: str = "", search_value: str = ""):
         search_value (Any, optional): The value to search for.
 
     Returns:
-        list: A list of immediate items (key-value pairs) containing the search key or value.
+        list: A list of immediate items (key-value pairs) containing the search key
+        or value.
 
         Example:
         Given the nested dictionary:

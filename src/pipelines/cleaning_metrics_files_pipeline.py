@@ -6,14 +6,16 @@ import pandas as pd
 import logging
 from pathlib import Path
 from typing import Dict, Union
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 
 def run_cleaning_similarity_metrics_files_pipeline(
-    mapping_file: Union[str, Path]
+    mapping_file: Union[str, Path],
 ) -> None:
     """
     Find similarity metrics CSV files from a mapping file and clean them by removing
@@ -27,7 +29,7 @@ def run_cleaning_similarity_metrics_files_pipeline(
     mapping_file = Path(mapping_file)
 
     # Load mappings
-    file_mappings = load_mappings_model_from_json(mapping_file)
+    file_mappings = load_job_file_mappings_model(mapping_file)
     if not file_mappings:
         logger.error(f"Failed to load mapping file: {mapping_file}")
         return

@@ -1,11 +1,11 @@
-""" TBA """
+"""TBA"""
 
 import re
 import logging
 from utils.generic_utils import pretty_print_json
-from utils.dict_utils import fetch_subtrees
+from utils.flatten_and_search import fetch_subtrees
 from utils.generic_utils import read_from_json_file
-from utils.dict_utils import fetch_subtrees, flatten_dict_and_list
+from utils.flatten_and_search import fetch_subtrees, flatten_dict_and_list
 import logging
 
 
@@ -67,7 +67,8 @@ class ResumeParser:
         Extract the professional profile from the resume.
 
         Args:
-            key (str): The key to search for in the resume data. Default is 'professional_profile'.
+            key (str): The key to search for in the resume data.
+            Default is 'professional_profile'.
 
         Returns:
             dict: The extracted professional profile.

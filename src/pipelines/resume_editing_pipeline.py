@@ -22,7 +22,9 @@ from evaluation_optimization.resumes_editing_seq import (
     modify_multi_resps_based_on_reqs,
 )
 from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
-from evaluation_optimization.create_mapping_file import load_mappings_model_from_json
+from utils.pydantic_model_loaders import (
+    load_job_file_mappings_model,
+)
 from utils.generic_utils import (
     read_from_json_file,
     save_to_json_file,
@@ -65,8 +67,8 @@ def set_directory_paths(
     mapping_file_curr = Path(mapping_file_curr)
 
     # Load the mapping files using the Pydantic model loader
-    file_mapping_prev = load_mappings_model_from_json(mapping_file_prev)
-    file_mapping_curr = load_mappings_model_from_json(mapping_file_curr)
+    file_mapping_prev = load_job_file_mappings_model(mapping_file_prev)
+    file_mapping_curr = load_job_file_mappings_model(mapping_file_curr)
 
     if file_mapping_prev is None or file_mapping_curr is None:
         logger.error(

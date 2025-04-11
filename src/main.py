@@ -257,50 +257,50 @@ def main_openai():
     # ☑️ Step 0: Masking/Filter URLs to run a small batch (temporary step)
     run_filtering_job_posting_urls_mini_pipe_line()
 
-    # ✅ Step 1: Preprocessing job posting webpages
-    execute_pipeline("1_async", llm_provider=OPENAI, model_id=GPT_35_TURBO)
+    # # ✅ Step 1: Preprocessing job posting webpages
+    # execute_pipeline("1_async", llm_provider=OPENAI, model_id=GPT_35_TURBO)
 
-    # ✅ Step 2: Creating/updating mapping file for iteration 0
-    execute_pipeline("2a", llm_provider=OPENAI)
+    # # ✅ Step 2: Creating/updating mapping file for iteration 0
+    # execute_pipeline("2a", llm_provider=OPENAI)
 
-    # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
-    execute_pipeline("2b", llm_provider=OPENAI)
+    # # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
+    # execute_pipeline("2b", llm_provider=OPENAI)
 
-    # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
-    execute_pipeline("2c_async", llm_provider=OPENAI, filter_keys=urls_to_filter)
+    # # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
+    # execute_pipeline("2c_async", llm_provider=OPENAI, filter_keys=urls_to_filter)
 
-    # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
-    execute_pipeline("2d_async", llm_provider=OPENAI)
+    # # ✅ Step 5: Add Composite Scores & PCA Scores to Metrics
+    # execute_pipeline("2d_async", llm_provider=OPENAI)
 
-    # ✅ Step 6: Clean Up Sim Metrics CSV Files (Removing Empty Rows)
-    execute_pipeline("2e", llm_provider=OPENAI)
+    # # ✅ Step 6: Clean Up Sim Metrics CSV Files (Removing Empty Rows)
+    # execute_pipeline("2e", llm_provider=OPENAI)
 
-    # ✅ Step 7: Copy & Prune Responsibilities
-    execute_pipeline("2f", llm_provider=OPENAI)
+    # # ✅ Step 7: Copy & Prune Responsibilities
+    # execute_pipeline("2f", llm_provider=OPENAI)
 
-    # ✅ Step 8: Creating/updating mapping file for iteration 1
-    execute_pipeline("3a", llm_provider=OPENAI)
+    # # ✅ Step 8: Creating/updating mapping file for iteration 1
+    # execute_pipeline("3a", llm_provider=OPENAI)
 
-    # ✅ Step 9: Modify Responsibilities Based on Requirements from Iter 0
-    # & Save to Iter 1
-    execute_pipeline(
-        "3b_async",
-        llm_provider=OPENAI,
-        model_id=GPT_4_TURBO,
-        filter_keys=urls_to_filter,
-    )
+    # # ✅ Step 9: Modify Responsibilities Based on Requirements from Iter 0
+    # # & Save to Iter 1
+    # execute_pipeline(
+    #     "3b_async",
+    #     llm_provider=OPENAI,
+    #     model_id=GPT_4_TURBO,
+    #     filter_keys=urls_to_filter,
+    # )
 
-    # ✅ Step 10: Copy Requirements from Iteration 0 to Iteration 1
-    execute_pipeline("3c", llm_provider=OPENAI)
+    # # ✅ Step 10: Copy Requirements from Iteration 0 to Iteration 1
+    # execute_pipeline("3c", llm_provider=OPENAI)
 
-    # ✅ Step 11: Async Resume Evaluation in Iteration 1
-    execute_pipeline("3d_async", llm_provider=OPENAI, filter_keys=urls_to_filter)
+    # # ✅ Step 11: Async Resume Evaluation in Iteration 1
+    # execute_pipeline("3d_async", llm_provider=OPENAI, filter_keys=urls_to_filter)
 
-    # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
-    execute_pipeline("3e_async", llm_provider=OPENAI)
+    # # ✅ Step 11: Add Multivariate Indices to Metrics Files in Iteration 1
+    # execute_pipeline("3e_async", llm_provider=OPENAI)
 
-    # ✅ Step 12: Clean Metrics Files in Iteration 1
-    execute_pipeline("3f", llm_provider=OPENAI)
+    # # ✅ Step 12: Clean Metrics Files in Iteration 1
+    # execute_pipeline("3f", llm_provider=OPENAI)
 
 
 if __name__ == "__main__":

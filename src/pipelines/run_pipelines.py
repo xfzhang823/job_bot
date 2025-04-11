@@ -4,6 +4,14 @@ import asyncio
 import inspect
 from typing import Optional
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
+from project_config import (
+    OPENAI,
+    ANTHROPIC,
+    GPT_4_TURBO,
+    GPT_35_TURBO,
+    CLAUDE_HAIKU,
+    CLAUDE_SONNET,
+)
 
 # Set logger
 logger = logging.getLogger(__name__)

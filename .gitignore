@@ -3,6 +3,7 @@ data/
 documents/
 sandbox/
 input_output/
+pipeline_data/
 
 # Specific files to exclude
 verification.py

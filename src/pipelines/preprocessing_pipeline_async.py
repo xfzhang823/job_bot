@@ -112,7 +112,36 @@ async def process_single_url_async(
         logger.info(job_description_dict)  # debug
 
         # Gatekeeper: if no meaningful content was extracted, skip further processing.
-        data_section = job_description_dict.get("data", {})
+        # Unwrap the outer dict: expect a single URL key
+        if isinstance(job_description_dict, dict) and len(job_description_dict) == 1:
+            first_val = next(iter(job_description_dict.values()))
+            data_section = first_val.get("data", {})
+
+            content = data_section.get("content")
+
+            logger.debug(f"data keys: {list(data_section.keys())}")
+            logger.debug(
+                f"content preview: {json.dumps(content, indent=2) if content else 'None'}"
+            )
+
+            # Check that content is a dict and has at least one non-empty string value
+            if not isinstance(content, dict) or not any(
+                v.strip() for v in content.values() if isinstance(v, str)
+            ):
+                logger.error(
+                    f"Content is missing or has no meaningful values: {job_description_url}"
+                )
+                return
+        else:
+            logger.error(
+                f"Unexpected format for job_description_dict: {job_description_dict}"
+            )
+            return
+
+        logger.debug(
+            f"🔍 content preview: {json.dumps(content, indent=2) if content else 'None'}"
+        )
+
         content = data_section.get("content")
         if not content:
             logger.error(f"No content found for URL: {job_description_url}, skipping.")

@@ -423,6 +423,19 @@ def get_company_and_job_title(
     return {"company": None, "job_title": None}
 
 
+def inspect_json_structure(obj):
+    "Helper function to inspecct nested JSON obj structure."
+    if isinstance(obj, dict):
+        return {
+            str(type(k).__name__): inspect_json_structure(v)
+            for k, v in list(obj.items())[:1]
+        }
+    elif isinstance(obj, list):
+        return [inspect_json_structure(obj[0])] if obj else []
+    else:
+        return type(obj).__name__
+
+
 def is_existing(direcotry_path: Path, file_name: Path):
     """
     Checks if a file exists in the specified directory.

@@ -5,6 +5,7 @@ Last updated on: 2024-10-16
 
 # Import dependencies
 from pathlib import Path
+import logging
 from typing import Dict, Optional, Union
 from pydantic import (
     BaseModel,
@@ -16,7 +17,9 @@ from pydantic import (
     RootModel,
 )
 from pydantic_core import Url
-import logging
+
+# User defined
+from models.llm_response_models import JobSiteResponse, RequirementsResponse
 import logging_config
 
 
@@ -32,7 +35,7 @@ class Responsibilities(BaseModel):
     and `responsibilities` (flattened responsibilities).
 
     Attributes:
-        - url (Optional[str]): The job posting URL (optional).
+        - url (Optional[str | HttpUrl]): The job posting URL (optional).
         Defaults to "Not Available" if missing.
         - responsibilities (Dict[str, str]): A dictionary containing flattened
         responsibilities.
@@ -69,10 +72,17 @@ class Responsibilities(BaseModel):
         - `ValidationError`: If `responsibilities` is missing or not a dictionary.
     """
 
-    url: Optional[str] = Field(None, description="URL of the job posting (optional).")
+    url: Optional[str | HttpUrl] = Field(
+        None, description="URL of the job posting (optional)."
+    )
     responsibilities: Dict[str, str] = Field(
         ..., description="Flattened job responsibilities."
     )
+
+    @field_serializer("url")
+    def serialize_url(self, v: str | HttpUrl) -> str:
+        """Into str when exporting data out"""
+        return str(v)
 
 
 # Model to validate the initial output: optimized text for a single responsibility
@@ -122,7 +132,8 @@ class ResponsibilityMatch(BaseModel):
 # *Model to validate final output: multiple resp to requirements matches
 class ResponsibilityMatches(BaseModel):
     """
-    Pydantic model for validating nested responsibilities and their associated requirement matches.
+    Pydantic model for validating nested responsibilities and their associated requirement
+    matches.
 
     This model is designed to handle the hierarchical structure of responsibilities and
     their corresponding requirement-based optimized texts. It validates the format of
@@ -201,7 +212,8 @@ class ResponsibilityMatches(BaseModel):
     """
 
     responsibilities: Dict[str, ResponsibilityMatch] = Field(
-        ..., description="Mapping from responsibilty keys to nested requirement matches"
+        ...,
+        description="Mapping from responsibility keys to nested requirement matches",
     )
 
 
@@ -214,8 +226,8 @@ class NestedResponsibilities(BaseModel):
     making it easier to validate and process responsibilities efficiently.
 
     Structure Overview:
-    - `url`: Stores the job posting URL (string or `HttpUrl`).
-    - `responsibilities`: A dictionary mapping responsibility keys
+    - 'url': Stores the job posting URL (string or `HttpUrl`).
+    - 'responsibilities': A dictionary mapping responsibility keys
     (e.g., `"0.responsibilities.0"`) to `ResponsibilityMatch` objects, which contain
     optimized texts for various job requirements.
 
@@ -358,8 +370,12 @@ class Requirements(BaseModel):
         - `ValidationError`: If `requirements` is missing or not a dictionary.
     """
 
-    url: str = Field(..., description="URL of the job posting (required).")
+    url: str | HttpUrl = Field(..., description="URL of the job posting (required).")
     requirements: Dict[str, str] = Field(..., description="Flattened job requirements.")
+
+    @field_serializer("url")
+    def serialize_url(self, v: str | HttpUrl) -> str:
+        return str(v)
 
 
 # *Model validate Similarity Metrics
@@ -430,7 +446,7 @@ class SimilarityMetrics(BaseModel):
     #    value is not a valid float (type=type_error.float)
     """
 
-    job_posting_url: str = Field(..., description="Job posting url")
+    url: str | HttpUrl = Field(..., description="Job posting url")
     responsibility_key: str = Field(..., description="Responsibility key")
     responsibility: str = Field(..., description="Responsibility text")
     requirement_key: str = Field(..., description="Requirement key")
@@ -439,7 +455,9 @@ class SimilarityMetrics(BaseModel):
     soft_similarity: float = Field(..., description="Soft similarity")
     word_movers_distance: float = Field(..., description="Word Mover's Distance")
     deberta_entailment_score: float = Field(..., description="Deberta entailment score")
-    roberta_entailment_score: float = Field(..., description="Roberta entailment score")
+    roberta_entailment_score: Optional[float] = Field(
+        None, description="Roberta entailment score"
+    )  # ☑️ Newly added; make optional for now
 
     # Optional fields
     bert_score_precision_cat: Optional[str] = Field(
@@ -460,17 +478,24 @@ class SimilarityMetrics(BaseModel):
     scaled_bert_score_precision: Optional[float] = Field(
         None, description="Scaled BERT score"
     )
-    scaled_deberta_entailment_score: Optional[float] = Field(
-        None, description="Scaled Deberta entailment score"
-    )
     scaled_soft_similarity: Optional[float] = Field(
         None, description="Scaled soft similarity"
     )
     scaled_word_movers_distance: Optional[float] = Field(
         None, description="Scaled Word Mover's Distance"
     )
+    scaled_deberta_entailment_score: Optional[float] = Field(
+        None, description="Scaled Deberta entailment score"
+    )
+    scaled_roberta_entailment_score: Optional[float] = Field(
+        None, description="Scaled Roberta entailment score"
+    )
     composite_score: Optional[float] = Field(None, description="Composite score")
     pca_score: Optional[float] = Field(None, description="PCA score")
+
+    @field_serializer("url")
+    def serialize_url(self, v: str | HttpUrl) -> str:
+        return str(v)
 
     @field_validator("*", mode="before", check_fields=False)
     def clean_strings(cls, v):  # ignore the error
@@ -501,7 +526,7 @@ class JobFilePaths(BaseModel):
 
 
 # *Outer model for the mapping of job URLs to JobFilePaths
-class JobFileMappings(RootModel[Dict[HttpUrl, JobFilePaths]]):
+class JobFileMappings(RootModel[Dict[HttpUrl | str, JobFilePaths]]):
     """
     Pydantic model for validating a mapping of job URLs to associated file paths for
     requirements, responsibilities, and metrics.
@@ -586,6 +611,86 @@ class JobFileMappings(RootModel[Dict[HttpUrl, JobFilePaths]]):
     """
 
     pass  # RootModel does not require additional fields
+
+
+class JobPostingUrlMetadata(BaseModel):
+    """
+    Metadata for a single job posting.
+
+    Fields:
+    - url: canonical job posting URL
+    - company: employer name
+    - job_title: job title from the source
+    """
+
+    url: Union[HttpUrl, str]
+    company: str
+    job_title: str
+
+
+class JobPostingUrlsFile(RootModel[dict[str, JobPostingUrlMetadata]]):
+    """
+    Full mapping of job posting URLs to their metadata.
+
+    Structure:
+    {
+        "<job_url>": {
+            "url": "<job_url>",
+            "company": "<company>",
+            "job_title": "<title>"
+        },
+        ...
+    }
+    """
+
+    pass
+
+
+class JobPostingsFile(Dict[Union[HttpUrl, str], JobSiteResponse]):
+    """
+    Represents the full structured job postings file.
+
+    This model is designed to wrap a dictionary mapping job posting URLs
+    (as HttpUrl or string) to validated `JobSiteResponse` objects, which
+    contain extracted metadata and content from scraped webpages.
+
+    Structure:
+    {
+        "https://company.com/job123": JobSiteResponse(...),
+        "https://another.com/role456": JobSiteResponse(...)
+    }
+
+    Notes:
+    - The keys are not forced to be strings, so downstream processing can
+    access structured components of the URL (scheme, host, path).
+    - Useful for further filtering or trimming query parameters like
+    `?source=...`.
+    """
+
+    pass
+
+
+class ExtractedRequirementsFile(Dict[Union[HttpUrl, str], RequirementsResponse]):
+    """
+    Represents the full structured extracted job requirements file.
+
+    This model wraps a dictionary where each key is a job posting URL
+    (HttpUrl or string), and the value is a `RequirementsResponse` containing
+    categorized requirement text extracted via LLMs.
+
+    Structure:
+    {
+        "https://company.com/job123": RequirementsResponse(...),
+        "https://another.com/role456": RequirementsResponse(...)
+    }
+
+    Notes:
+    - Allows structured URL access if you later want to group/filter based on
+    host or path.
+    - Aligns with other root-level mappings like `JobFileMappings`.
+    """
+
+    pass
 
 
 class PipelineInput(BaseModel):

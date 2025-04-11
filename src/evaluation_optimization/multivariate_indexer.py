@@ -31,7 +31,7 @@ DEFAULT_COMPOSITE_METRICS = [
 ]
 
 DEFAULT_COLUMN_ORDER = [
-    "job_posting_url",
+    "url",
     "responsibility_key",
     "responsibility",
     "requirement_key",
