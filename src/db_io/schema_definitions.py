@@ -6,21 +6,50 @@ in the resume-job alignment pipeline. Each table schema is designed for a specif
 in the pipeline, ensuring standardized structure, traceability, and efficient querying
 across preprocessing, editing, evaluation, and cleanup workflows.
 
----
 
 Stages in the pipeline:
-- preprocessing: Initial ingestion and structuring of job posting data
-(URLs, content, requirements).
-- staging: Transformation of nested structures into flattened representations
-(responsibilities, requirements).
-- evaluation: Similarity and entailment scoring between resume responsibilities
-and job requirements.
-- editing: LLM-powered optimization of resume content for alignment with
-job requirements.
-- revaluation: Re-scoring of edited responsibilities for improvement tracking.
-- cleanup: Final filtering, pruning, and consolidation of output data.
 
----
+- job_urls:
+    Initial ingestion of job posting URLs. This is the starting point of the pipeline where
+    all target URLs are registered and assigned metadata (e.g., company, job title).
+
+- job_postings:
+    Crawls or parses each job URL to extract job content. This includes job title, company,
+    location, salary, and the full description in structured form.
+
+- extracted_requirements:
+    Applies an LLM to extract structured job requirements grouped by logical categories such as
+    'pie_in_the_sky', 'down_to_earth', and 'bare_minimum'. Output is a nested requirements model.
+
+- flattened_requirements:
+    Flattens the nested job requirements into key-value form, enabling direct alignment with
+    resume responsibilities. Keys are structured as `category.index` (e.g., `0.down_to_earth.1`).
+
+- flattened_responsibilities:
+    Flattens the original resume responsibilities into key-value pairs for semantic comparison.
+    Each bullet point or grouped item becomes one record.
+
+- edited_responsibilities:
+    Uses an LLM to rewrite resume responsibilities to better match job requirements. Each match
+    pair is edited with optimized language for alignment and tracked by
+    responsibility/requirement keys.
+
+- similarity_metrics_eval:
+    Computes similarity and entailment metrics (e.g., BERTScore, WMD, DeBERTa/Roberta entailment)
+    between original responsibilities and flattened requirements.
+
+- similarity_metrics_reval:
+    Recomputes the same set of metrics for the LLM-edited responsibilities to assess improvements
+    after editing.
+
+- crosstab_review:
+    Produces cross-tab views and comparative visualizations for human QA. May include LLM feedback
+    or reviewer notes.
+
+- final_responsibilities:
+    Outputs the finalized and optionally trimmed version of each edited responsibility for delivery.
+    May be used for presentation, export, or downstream integration with resume builders.
+
 
 Each table schema includes standardized metadata columns:
 - `source_file`: Indicates the file or batch source used for ingestion.
@@ -45,55 +74,60 @@ for name, ddl in DUCKDB_SCHEMAS.items():
 
 from enum import Enum
 
-
+# todo: need to update primary key (makle llm provider a key too)
 DUCKDB_SCHEMAS = {
     "pipeline_control": """
         CREATE TABLE IF NOT EXISTS pipeline_control (
-            url TEXT PRIMARY KEY,                   -- The job posting URL
-            llm_provider TEXT DEFAULT 'openai',     -- 'openai', 'anthropic', etc.
-            version TEXT DEFAULT 'original',        -- 'original', 'edited', etc.
-            status TEXT DEFAULT 'new',              -- 'new', 'in_progress', 'complete', 'skipped'
-            is_active BOOLEAN DEFAULT TRUE,         -- Whether this row is in-scope for processing
-            stage TEXT,                             -- 'preprocessing', 'staging', 'evaluation', 'revaluation', 'cleanup'
-            last_updated TIMESTAMP DEFAULT current_timestamp,
-            notes TEXT                              -- Optional free-form metadata (e.g., 'Missing reqs')
+            url TEXT PRIMARY KEY,
+            llm_provider TEXT DEFAULT 'openai',
+            iteration INTEGER DEFAULT 0,
+            version TEXT DEFAULT 'original',
+            status TEXT DEFAULT 'new',
+            is_active BOOLEAN DEFAULT TRUE,
+            stage TEXT,
+            timestamp TIMESTAMP DEFAULT current_timestamp,
+            notes TEXT,
+            PRIMARY KEY (url, iteration, version)
         );
     """,
     "job_urls": """
-		CREATE TABLE IF NOT EXISTS job_urls (
-			url TEXT PRIMARY KEY,
-			company TEXT,
-			job_title TEXT,
-			source_file TEXT,
-			stage TEXT,
-			timestamp TIMESTAMP DEFAULT current_timestamp
-		);
+        CREATE TABLE IF NOT EXISTS job_urls (
+            url TEXT PRIMARY KEY,
+            company TEXT,
+            job_title TEXT,
+            iteration INTEGER DEFAULT 0,
+            source_file TEXT,
+            stage TEXT,
+            timestamp TIMESTAMP DEFAULT current_timestamp
+        );
     """,
     "job_postings": """
-		CREATE TABLE IF NOT EXISTS job_postings (
-			url TEXT,
-			status TEXT,
-			message TEXT,
-			job_title TEXT,
-			company TEXT,
-			location TEXT,
-			salary_info TEXT,
-			posted_date TEXT,
-			content TEXT,
-			source_file TEXT,
-			stage TEXT,
-			timestamp TIMESTAMP DEFAULT current_timestamp
-		);
+        CREATE TABLE IF NOT EXISTS job_postings (
+            url TEXT,
+            status TEXT,
+            message TEXT,
+            job_title TEXT,
+            company TEXT,
+            location TEXT,
+            salary_info TEXT,
+            posted_date TEXT,
+            content TEXT,
+            iteration INTEGER DEFAULT 0,
+            source_file TEXT,
+            stage TEXT,
+            timestamp TIMESTAMP DEFAULT current_timestamp
+        );
     """,
     "extracted_requirements": """
         CREATE TABLE IF NOT EXISTS extracted_requirements (
             url TEXT,
             status TEXT,
             message TEXT,
-            requirement_category TEXT,     -- e.g., 'pie_in_the_sky'
-			requirement_category_idx INTEGER,      -- order in the original JSON object
-            requirement TEXT,              -- e.g., "Advanced operations skills"
-            requirement_idx INTEGER,       -- index within the list
+            requirement_category TEXT,
+            requirement_category_idx INTEGER,
+            requirement TEXT,
+            requirement_idx INTEGER,
+            iteration INTEGER DEFAULT 0,
             source_file TEXT,
             stage TEXT,
             timestamp TIMESTAMP DEFAULT current_timestamp
@@ -104,6 +138,7 @@ DUCKDB_SCHEMAS = {
             url TEXT,
             responsibility_key TEXT,
             responsibility TEXT,
+            iteration INTEGER DEFAULT 0,
             source_file TEXT,
             stage TEXT,
             timestamp TIMESTAMP DEFAULT current_timestamp
@@ -114,17 +149,19 @@ DUCKDB_SCHEMAS = {
             url TEXT,
             requirement_key TEXT,
             requirement TEXT,
+            iteration INTEGER DEFAULT 0,
             source_file TEXT,
             stage TEXT,
             timestamp TIMESTAMP DEFAULT current_timestamp
         );
-	""",
+    """,
     "pruned_responsibilities": """
         CREATE TABLE IF NOT EXISTS pruned_responsibilities (
             url TEXT,
             responsibility_key TEXT,
             responsibility TEXT,
             pruned_by TEXT,
+            iteration INTEGER DEFAULT 0,
             source_file TEXT,
             stage TEXT,
             timestamp TIMESTAMP DEFAULT current_timestamp
@@ -134,9 +171,10 @@ DUCKDB_SCHEMAS = {
         CREATE TABLE IF NOT EXISTS edited_responsibilities (
             url TEXT,
             responsibility_key TEXT,
-			requirement_key TEXT,
+            requirement_key TEXT,
             optimized_text TEXT,
             llm_provider TEXT,
+            iteration INTEGER DEFAULT 0,
             source_file TEXT,
             stage TEXT,
             timestamp TIMESTAMP DEFAULT current_timestamp
@@ -171,13 +209,37 @@ DUCKDB_SCHEMAS = {
             composite_score DOUBLE,
             pca_score DOUBLE,
 
-            version TEXT,                  -- 'original' or 'edited'
-            llm_provider TEXT,             -- optional, filled for edited only
+            version TEXT,
+            llm_provider TEXT,
+            iteration INTEGER DEFAULT 0,
             source_file TEXT,
             stage TEXT,
             timestamp TIMESTAMP DEFAULT current_timestamp
         );
     """,
+    # TODO: add later
+    # "crosstab_review": """
+    #     CREATE TABLE IF NOT EXISTS crosstab_review (
+    #         url TEXT,
+    #         review_notes TEXT,
+    #         reviewer TEXT,
+    #         source_file TEXT,
+    #         stage TEXT,
+    #         timestamp TIMESTAMP DEFAULT current_timestamp
+    #     );
+    # """,
+    # "final_responsibilities": """
+    #     CREATE TABLE IF NOT EXISTS final_responsibilities (
+    #         url TEXT,
+    #         responsibility_key TEXT,
+    #         responsibility TEXT,
+    #         optimized_text TEXT,
+    #         trimmed_by TEXT,
+    #         source_file TEXT,
+    #         stage TEXT,
+    #         timestamp TIMESTAMP DEFAULT current_timestamp
+    #     );
+    # """,
 }
 
 
@@ -187,6 +249,7 @@ DUCKDB_COLUMN_ORDER = {
         "url",
         "company",
         "job_title",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -201,6 +264,7 @@ DUCKDB_COLUMN_ORDER = {
         "salary_info",
         "posted_date",
         "content",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -213,6 +277,7 @@ DUCKDB_COLUMN_ORDER = {
         "requirement_category_idx",
         "requirement",
         "requirement_idx",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -221,6 +286,7 @@ DUCKDB_COLUMN_ORDER = {
         "url",
         "responsibility_key",
         "responsibility",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -229,6 +295,7 @@ DUCKDB_COLUMN_ORDER = {
         "url",
         "requirement_key",
         "requirement",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -238,6 +305,7 @@ DUCKDB_COLUMN_ORDER = {
         "responsibility_key",
         "responsibility",
         "pruned_by",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -248,6 +316,7 @@ DUCKDB_COLUMN_ORDER = {
         "requirement_key",
         "optimized_text",
         "llm_provider",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -277,6 +346,7 @@ DUCKDB_COLUMN_ORDER = {
         "pca_score",
         "version",
         "llm_provider",
+        "iteration",
         "source_file",
         "stage",
         "timestamp",
@@ -286,19 +356,62 @@ DUCKDB_COLUMN_ORDER = {
 
 class PipelineStage(str, Enum):
     """
-    Class to define stages
+    * Class to define stages (redefined to use table names explicitly as stages)
 
     Example Usage:
         df["stage"] = PipelineStage.PREPROCESSING.value
         assert stage in PipelineStage.list()
     """
 
-    PREPROCESSING = "preprocessing"
-    STAGING = "staging"
-    EVALUATION = "evaluation"
-    EDITING = "editing"
-    REVALUATION = "revaluation"
-    CLEANUP = "cleanup"
+    # ✅ Preprocessing Stages
+    JOB_URLS = "job_urls"
+    JOB_POSTINGS = "job_postings"
+    EXTRACTED_REQUIREMENTS = "extracted_requirements"
+
+    # ✅ Staging
+    FLATTENED_REQUIREMENTS = "flattened_requirements"
+    FLATTENED_RESPONSIBILITIES = "flattened_responsibilities"
+
+    # ✅ Editing (LLM)
+    EDITED_RESPONSIBILITIES = "edited_responsibilities"
+
+    # todo: keep it out for now (may not include in final version)
+    # PRUNED_RESPONSIBILITIES = "pruned_responsibilities"
+
+    # ✅ Evaluation
+    SIM_METRICS_EVAL = "similarity_metrics_eval"  # original responsibilities vs reqs
+    SIM_METRICS_REVAL = "similarity_metrics_reval"  # edited responsibilities vs reqs
+
+    # ✅ Human Review (optional stages to be added)
+    CROSSTAB_REVIEW = "crosstab_review"  # cross-tab visualization + feedback
+
+    # ✅ Export
+    FINAL_RESPONSIBILITIES = "final_responsibilities"  # manually trimmed/pruned output
+
+    @classmethod
+    def list(cls) -> list[str]:
+        return [stage.value for stage in cls]
+
+
+class PipelineStatus(str, Enum):
+    """
+    * Class to define Status
+
+    ! Pipeline Status is different from status in JobPostings and ExtractedRequirements tables,
+    ! which refers LLM API call status
+
+    Example:
+        >>> df["status"] = PipelineStage.PREPROCESSING.value
+        >>> assert stage in PipelineStage.list()
+    """
+
+    NEW = "new"  # Not yet started
+    IN_PROGRESS = (
+        "in_progress"  # This stage completed successfully, but the pipeline continues
+    )
+    COMPLETE = "complete"  # Final stage completed successfully (end of pipeline)
+    ERROR = "error"  # Current stage failed
+    SKIPPED = "skipped"  # Explicitly skipped (optional path or filtered out)
 
     @classmethod
     def list(cls) -> list[str]:
@@ -325,6 +438,9 @@ class TableName(str, Enum):
             print(f" - {table}")
 
     """
+
+    PIPELINE_CONTROL = "pipeline_control"
+    """Controls pipeline progression with state machine."""
 
     JOB_URLS = "job_urls"
     """Registry of job posting URLs and associated metadata (company, title)."""

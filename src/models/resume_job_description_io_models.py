@@ -628,7 +628,7 @@ class JobPostingUrlMetadata(BaseModel):
     job_title: str
 
 
-class JobPostingUrlsFile(RootModel[dict[str, JobPostingUrlMetadata]]):
+class JobPostingUrlsBatch(RootModel[dict[str, JobPostingUrlMetadata]]):
     """
     Full mapping of job posting URLs to their metadata.
 
@@ -646,7 +646,7 @@ class JobPostingUrlsFile(RootModel[dict[str, JobPostingUrlMetadata]]):
     pass
 
 
-class JobPostingsFile(Dict[Union[HttpUrl, str], JobSiteResponse]):
+class JobPostingsBatch(Dict[Union[HttpUrl, str], JobSiteResponse]):
     """
     Represents the full structured job postings file.
 
@@ -670,24 +670,37 @@ class JobPostingsFile(Dict[Union[HttpUrl, str], JobSiteResponse]):
     pass
 
 
-class ExtractedRequirementsFile(Dict[Union[HttpUrl, str], RequirementsResponse]):
+class ExtractedRequirementsBatch(Dict[Union[HttpUrl, str], RequirementsResponse]):
     """
-    Represents the full structured extracted job requirements file.
+    Represents a batch of structured, LLM-extracted job requirements aligned by job URL.
 
-    This model wraps a dictionary where each key is a job posting URL
-    (HttpUrl or string), and the value is a `RequirementsResponse` containing
-    categorized requirement text extracted via LLMs.
+    This model wraps a root dictionary where each key is a job posting URL
+    (`HttpUrl` or `str`), and the value is a `RequirementsResponse` containing
+    categorized requirement clusters (e.g., "bare_minimum", "down_to_earth", etc.).
 
-    Structure:
+    Intended for use after preprocessing or scraping, this batch model enables
+    consistent downstream ingestion into DuckDB or other tabular systems.
+
+    Example structure (before model validation):
+
     {
-        "https://company.com/job123": RequirementsResponse(...),
-        "https://another.com/role456": RequirementsResponse(...)
+        "https://company.com/job123": {
+            "status": "success",
+            "message": "Job site data processed successfully.",
+            "data": {
+                "bare_minimum": ["Bachelor's degree..."],
+                "down_to_earth": ["3+ years experience..."],
+                "pie_in_the_sky": ["PhD preferred..."],
+                ...
+            }
+        },
+        ...
     }
 
     Notes:
-    - Allows structured URL access if you later want to group/filter based on
-    host or path.
-    - Aligns with other root-level mappings like `JobFileMappings`.
+    - Validates each response independently using `RequirementsResponse`.
+    - Enables keyed access and filtering based on URL (e.g., domain-level grouping).
+    - Used in both JSON-based pipelines and DB-driven ingestion stages.
     """
 
     pass

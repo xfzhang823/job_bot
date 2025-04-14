@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 async def extract_job_requirements_with_openai_async(
     job_description: str, model_id: str = GPT_35_TURBO
-) -> Dict[Any, Any]:
+) -> RequirementsResponse:
     """
     Extracts key requirements from the job description using GPT.
 
@@ -29,8 +29,22 @@ async def extract_job_requirements_with_openai_async(
         model_id (str): The model ID for OpenAI (default is gpt-3.5-turbo).
 
     Returns:
-        dict: Extracted requirements including qualifications, responsibilities,
-        and skills.
+        RequirementsResponse: Pydantic model containing extracted requirements
+        including qualifications, responsibilities, and skills.
+
+    * ✅ Example Output:
+    -------------------
+    {
+        "status": "success",
+        "message": "Job requirements data processed successfully.",
+        "data": {
+            "pie_in_the_sky": [...],
+            "down_to_earth": [...],
+            "bare_minimum": [...],
+            "cultural_fit": [...],
+            "other": [...]
+        }
+    }
     """
     if not job_description:
         logger.error("job_description text is empty or invalid.")
@@ -61,12 +75,12 @@ async def extract_job_requirements_with_openai_async(
         )
 
     # Return the model-dumped dictionary (from Pydantic obj to dict)
-    return response_model.model_dump()
+    return response_model
 
 
 async def extract_job_requirements_with_anthropic_async(
     job_description: str, model_id: str = GPT_35_TURBO
-) -> Dict:
+) -> RequirementsResponse:
     """
     Extracts key requirements from the job description using Anthropic.
 
@@ -75,8 +89,36 @@ async def extract_job_requirements_with_anthropic_async(
         model_id (str): The model ID for OpenAI (default is gpt-3.5-turbo).
 
     Returns:
-        dict: Extracted requirements including qualifications, responsibilities,
-        and skills.
+        RequirementsResponse: Pydantic model containing extracted requirements
+        including qualifications, responsibilities, and skills.
+
+    * ✅ Example Output:
+    -------------------
+    {
+        "status": "success",
+        "message": "Job requirements data processed successfully.",
+        "data": {
+            "pie_in_the_sky": [
+                "Top-tier strategy consulting experience",
+                "Motivated by high impact, high visibility work"
+            ],
+            "down_to_earth": [
+                "Bachelor's degree and MBA required",
+                "3-5 years of work experience preferred",
+                "Strong analytical and communication skills"
+            ],
+            "bare_minimum": [
+                "Bachelor's degree",
+                "Ability to manage multiple priorities"
+            ],
+            "cultural_fit": [
+                "Excited about contributing to a dynamic team"
+            ],
+            "other": [
+                "Insurance industry experience is a plus"
+            ]
+        }
+    }
     """
     if not job_description:
         logger.error("job_description text is empty or invalid.")
@@ -106,5 +148,5 @@ async def extract_job_requirements_with_anthropic_async(
             "Received response is not in expected JobSiteResponseModel format."
         )
 
-    # Return the model-dumped dictionary (from Pydantic obj to dict)
-    return response_model.model_dump()
+    # Return pydantic model (do not model_dump() to dict)
+    return response_model

@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, List
 from pydantic import HttpUrl
-from utils.pydantic_model_loaders import (
+from utils.pydantic_model_loaders_from_files import (
     load_job_file_mappings_model,
 )
 from pipelines.resume_editing_pipeline_async import run_resume_editing_pipeline_async

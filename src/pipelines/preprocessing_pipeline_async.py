@@ -37,6 +37,10 @@ from preprocessing.extract_requirements_with_llms_async import (
 )
 from preprocessing.preprocessing_utils import find_new_urls
 from models.llm_response_models import JobSiteResponse, RequirementsResponse
+from models.resume_job_description_io_models import (
+    JobPostingsBatch,
+    ExtractedRequirementsBatch,
+)
 from project_config import (
     OPENAI,
     ANTHROPIC,
@@ -93,7 +97,7 @@ async def process_single_url_async(
 
         if web_scrape:
             # Step 1a: If scraping, Webpage -> job description JSON format
-            job_description_dict = await process_webpages_to_json_async(
+            job_description_model = await process_webpages_to_json_async(
                 urls=job_description_url,
                 llm_provider=llm_provider,
                 model_id=model_id,
@@ -104,17 +108,19 @@ async def process_single_url_async(
         else:
             # Step 1b: If not scraping, read existing data from the job_description_url
             # (assumed to be available)
-            job_description_dict = read_from_json_file(job_descriptions_json_file).get(
-                job_description_url, {}
+            job_description_model = JobSiteResponse.model_validate(
+                read_from_json_file(job_descriptions_json_file).get(
+                    job_description_url, {}
+                )
             )
             logger.info(f"Job description fetched for URL: {job_description_url}")
 
-        logger.info(job_description_dict)  # debug
+        logger.info(job_description_model)  # todo: debug; delete later
 
         # Gatekeeper: if no meaningful content was extracted, skip further processing.
         # Unwrap the outer dict: expect a single URL key
-        if isinstance(job_description_dict, dict) and len(job_description_dict) == 1:
-            first_val = next(iter(job_description_dict.values()))
+        if isinstance(job_description_model, dict) and len(job_description_model) == 1:
+            first_val = next(iter(job_description_model.values()))
             data_section = first_val.get("data", {})
 
             content = data_section.get("content")
@@ -134,7 +140,7 @@ async def process_single_url_async(
                 return
         else:
             logger.error(
-                f"Unexpected format for job_description_dict: {job_description_dict}"
+                f"Unexpected format for job_description_dict: {job_description_model}"
             )
             return
 
@@ -155,37 +161,49 @@ async def process_single_url_async(
 
         # Extract job requirements using openai or anthropic
         if llm_provider.lower() == OPENAI:
-            requirements_dict = await extract_job_requirements_with_openai_async(
+            requirements_model = await extract_job_requirements_with_openai_async(
                 job_description=job_description_json, model_id=model_id
             )
         elif llm_provider.lower() == ANTHROPIC:
-            requirements_dict = await extract_job_requirements_with_anthropic_async(
+            requirements_model = await extract_job_requirements_with_anthropic_async(
                 job_description=job_description_json, model_id=model_id
             )
         else:
             raise ValueError(f"{llm_provider} is not a supported API.")
 
-        logger.info(f"Job Requirements: \n{requirements_dict}")
+        logger.info(f"Job Requirements: \n{requirements_model}")
 
         # Use the lock when writing to files to avoid race conditions
         async with lock:
-            # Read the existing job descriptions and requirements files to avoid overwriting
-            existing_job_descriptions = read_from_json_file(job_descriptions_json_file)
-            existing_job_requirements = read_from_json_file(job_requirements_json_file)
+            # 🔄 Load and validate both JSON files into Pydantic batch models
+            existing_job_descriptions_dict = read_from_json_file(
+                job_descriptions_json_file
+            )
+            existing_job_requirements_dict = read_from_json_file(
+                job_requirements_json_file
+            )
 
-            # Update the job descriptions file if the URL is new
-            if job_description_url not in existing_job_descriptions:
-                existing_job_descriptions[job_description_url] = job_description_dict
-                await add_new_data_to_json_file_async(
-                    existing_job_descriptions, job_descriptions_json_file
-                )
+            job_desc_batch = JobPostingsBatch.model_validate(
+                existing_job_descriptions_dict
+            )  # type: ignore[attr-defined]
+            job_reqs_batch = ExtractedRequirementsBatch.model_validate(
+                existing_job_requirements_dict
+            )  # type: ignore[attr-defined]
 
-            # Update the job requirements file if the URL is new or semi-new
-            if job_description_url not in existing_job_requirements:
-                existing_job_requirements[job_description_url] = requirements_dict
-                await add_new_data_to_json_file_async(
-                    existing_job_requirements, job_requirements_json_file
-                )
+            # ✅ Add new entries directly to the .root dicts (preserves model integrity)
+            if job_description_url not in job_desc_batch.root:
+                job_desc_batch.root[job_description_url] = job_description_model
+
+            if job_description_url not in job_reqs_batch.root:
+                job_reqs_batch.root[job_description_url] = requirements_model
+
+            # 💾 Dump full models back to disk
+            await add_new_data_to_json_file_async(
+                job_desc_batch.model_dump(), job_descriptions_json_file
+            )
+            await add_new_data_to_json_file_async(
+                job_reqs_batch.model_dump(), job_requirements_json_file
+            )
 
         logger.info(
             f"Job description and requirements processed for URL: {job_description_url}"

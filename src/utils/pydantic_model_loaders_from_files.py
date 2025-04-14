@@ -6,10 +6,10 @@ import pandas as pd
 from pydantic import ValidationError, HttpUrl, TypeAdapter
 
 from models.resume_job_description_io_models import (
-    JobPostingsFile,
+    JobPostingsBatch,
     JobPostingUrlMetadata,
-    JobPostingUrlsFile,
-    ExtractedRequirementsFile,
+    JobPostingUrlsBatch,
+    ExtractedRequirementsBatch,
     Requirements,
     Responsibilities,
     NestedResponsibilities,
@@ -64,7 +64,7 @@ def load_job_file_mappings_model(
 
 def load_job_postings_file_model(
     file_path: Union[str, Path],
-) -> Optional[JobPostingsFile]:
+) -> Optional[JobPostingsBatch]:
     """
     Load a validated JobPostingsFile model from a JSON file.
 
@@ -89,7 +89,7 @@ def load_job_postings_file_model(
             except ValidationError as e:
                 logger.warning(f"⚠️ Validation error for {k}: {e}")
                 continue
-        return JobPostingsFile(validated)
+        return JobPostingsBatch(validated)
 
     except Exception as e:
         logger.error(f"Failed to load JobPostingsFile model from {file_path}: {e}")
@@ -98,7 +98,7 @@ def load_job_postings_file_model(
 
 def load_job_posting_urls_file_model(
     file_path: Union[str, Path],
-) -> Optional[JobPostingUrlsFile]:
+) -> Optional[JobPostingUrlsBatch]:
     """
     Load a validated JobPostingUrlsFile model from a JSON file.
 
@@ -116,7 +116,7 @@ def load_job_posting_urls_file_model(
             url: (JobPostingUrlMetadata(**val) if isinstance(val, dict) else val)
             for url, val in raw.items()
         }
-        return JobPostingUrlsFile(validated)
+        return JobPostingUrlsBatch(validated)
     except Exception as e:
         logger.error(f"Failed to load JobPostingUrlsFile model from {file_path}: {e}")
         return None
@@ -145,7 +145,7 @@ def load_requirements_model(file_path: Union[str, Path]) -> Optional[Requirement
 
 def load_extracted_requirements_model(
     file_path: Union[str, Path],
-) -> Optional[ExtractedRequirementsFile]:
+) -> Optional[ExtractedRequirementsBatch]:
     """
     Load a validated ExtractedRequirementsFile model from a JSON file.
 
@@ -167,7 +167,7 @@ def load_extracted_requirements_model(
             for k, v in raw.items()
         }
 
-        return ExtractedRequirementsFile(validated)
+        return ExtractedRequirementsBatch(validated)
 
     except ValidationError as e:
         logger.error(
