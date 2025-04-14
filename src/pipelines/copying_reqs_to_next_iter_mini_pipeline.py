@@ -17,7 +17,7 @@ from evaluation_optimization.create_mapping_file import (
     load_existing_or_create_new_mapping,
 )
 from models.resume_job_description_io_models import Requirements
-from utils.pydantic_model_loaders import (
+from utils.pydantic_model_loaders_from_files import (
     load_job_file_mappings_model,
 )
 from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys

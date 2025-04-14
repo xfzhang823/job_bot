@@ -22,7 +22,7 @@ from evaluation_optimization.resumes_editing_seq import (
     modify_multi_resps_based_on_reqs,
 )
 from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
-from utils.pydantic_model_loaders import (
+from utils.pydantic_model_loaders_from_files import (
     load_job_file_mappings_model,
 )
 from utils.generic_utils import (

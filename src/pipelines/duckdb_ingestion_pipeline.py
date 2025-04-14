@@ -30,13 +30,13 @@ from db_io.db_insert import insert_df_dedup
 from db_io.setup_duckdb import create_all_duckdb_tables
 from db_io.schema_definitions import PipelineStage, TableName
 from models.resume_job_description_io_models import (
-    JobPostingsFile,
-    JobPostingUrlsFile,
-    ExtractedRequirementsFile,
+    JobPostingsBatch,
+    JobPostingUrlsBatch,
+    ExtractedRequirementsBatch,
     Responsibilities,
     Requirements,
 )
-from utils.pydantic_model_loaders import (
+from utils.pydantic_model_loaders_from_files import (
     load_job_postings_file_model,
     load_job_posting_urls_file_model,
     load_extracted_requirements_model,
@@ -213,10 +213,11 @@ def evaluation_original_metrics_db_ingestion_mini_pipeline(
         try:
             df = add_ingestion_metadata(
                 df=df,
-                file_path=file_path,
+                source_file=file_path,
                 stage=PipelineStage.EVALUATION,
                 table=TableName.SIMILARITY_METRICS,
                 version="original",
+                iteration=0,
             )
             insert_df_dedup(df, table_name)
         except Exception as e:
@@ -259,11 +260,12 @@ def evaluation_edited_metrics_db_ingestion_mini_pipeline(
         try:
             df = add_ingestion_metadata(
                 df=df,
-                file_path=file_path,
+                source_file=file_path,
                 stage=PipelineStage.REVALUATION,
                 table=TableName.SIMILARITY_METRICS,
                 version="edited",
                 llm_provider=llm_provider,
+                iteration=0,
             )
             insert_df_dedup(df, table_name)
 
@@ -307,6 +309,8 @@ def edited_responsibilities_db_ingestion_mini_pipeline(
             table_name=table_name,
             source_file=file_path,
             stage=PipelineStage.REVALUATION,
+            version="edited",
+            llm_provider="openai",
         )
         df["llm_provider"] = llm_provider
 

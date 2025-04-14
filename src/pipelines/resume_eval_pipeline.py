@@ -26,7 +26,7 @@ from evaluation_optimization.metrics_calculator import (
     calculate_text_similarity_metrics,
 )
 from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from utils.pydantic_model_loaders import (
+from utils.pydantic_model_loaders_from_files import (
     load_job_file_mappings_model,
 )
 from utils.generic_utils import (

@@ -16,7 +16,7 @@ from utils.generic_utils import (
 )
 from evaluation_optimization.evaluation_optimization_utils import create_file_name
 from models.resume_job_description_io_models import JobFileMappings, JobFilePaths
-from utils.pydantic_model_loaders import load_job_file_mappings_model
+from utils.pydantic_model_loaders_from_files import load_job_file_mappings_model
 
 logger = logging.getLogger(__name__)
 

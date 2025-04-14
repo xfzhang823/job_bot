@@ -30,7 +30,7 @@ from pipelines.resume_eval_pipeline_async import (
     run_metrics_re_processing_pipeline_async,
     run_multivariate_indices_processing_mini_pipeline_async,
 )
-from utils.pydantic_model_loaders import (
+from utils.pydantic_model_loaders_from_files import (
     load_job_file_mappings_model,
 )
 from utils.generic_utils_async import read_and_validate_json_async, read_json_file_async

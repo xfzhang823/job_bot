@@ -2,7 +2,8 @@ from typing import Dict, Any, Mapping
 import json
 import jsonschema
 from jsonschema import validate
-from pydantic import ValidationError
+from typing import Type, TypeVar, Any
+from pydantic import BaseModel, ValidationError
 import pandas as pd
 import logging
 import logging_config
@@ -65,3 +66,31 @@ def validate_dataframe_with_pydantic(df: pd.DataFrame):
 
     # Return the validated rows as a DataFrame
     return pd.DataFrame(validated_rows)
+
+
+T = TypeVar("T", bound=BaseModel)
+
+
+def validate_or_log(
+    model_cls: Type[T], data: Any, *, context: str = "unknown"
+) -> T | None:
+    """
+    Attempts to validate `data` against the given Pydantic model class.
+
+    If validation fails, logs a warning with the context and returns None.
+
+    Args:
+        model_cls (Type[T]): The Pydantic model class to validate against.
+        data (Any): The input data (typically a dict).
+        context (str): A string for logging context (e.g. URL or filename).
+
+    Returns:
+        T | None: The validated Pydantic model, or None if validation failed.
+    """
+    try:
+        return model_cls.model_validate(data)  # type: ignore[attr-defined]
+    except ValidationError as e:
+        logger.warning(
+            f"⚠️ Validation failed for {model_cls.__name__} in context: {context}\n{e}"
+        )
+        return None

@@ -12,6 +12,8 @@ This module facilitates a two-step process:
 2. Transform the extracted content into structured JSON format using an LLM (OpenAI API).
    - Converts raw webpage content into JSON representations suitable for specific use cases,
    such as job postings.
+
+Returns JobSiteResponse models (per URL), wrapped in a JobPostingsBatch for further ingestion.
 """
 
 import re
@@ -20,7 +22,6 @@ import logging
 import time
 import json
 from typing import Any, Dict, List, Literal, Tuple, Union
-import asyncio
 from playwright.async_api import async_playwright
 from llm_providers.llm_api_utils_async import (
     call_openai_api_async,
@@ -28,6 +29,7 @@ from llm_providers.llm_api_utils_async import (
 )
 from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
 from models.llm_response_models import JobSiteResponse
+from models.resume_job_description_io_models import JobPostingsBatch
 from project_config import (
     OPENAI,
     ANTHROPIC,
@@ -125,20 +127,24 @@ async def load_webpages_with_playwright_async(
     urls: List[str],
 ) -> Tuple[Dict[str, str], List[str]]:
     """
-    Fetch webpage content using Playwright (for dynamic or complex sites).
+    Fetch webpage content using Playwright.
 
     Args:
-        urls (List[str]): List of URLs to load.
+        urls (List[str]): List of job posting URLs to load and extract content from.
 
     Returns:
         Tuple[Dict[str, str], List[str]]:
-            A tuple containing:
-            - A dictionary where keys are URLs (str) and values are cleaned webpage content (str).
-            - A list of URLs (str) that failed to load.
+            - A mapping from URL to cleaned page content (str).
+            - A list of URLs that failed to load or extract.
+
+    Notes:
+        Cleans text using `clean_webpage_text`.
+        Uses `handle_cookie_banner` to bypass consent popups.
 
     Raises:
-        Exception: Logs errors for individual URLs that fail to load.
+        Logs errors per URL; continues processing remaining pages.
     """
+
     content_dict = {}
     failed_urls = []
 
@@ -250,7 +256,7 @@ async def convert_to_json_with_gpt_async(
     model_id: str = GPT_35_TURBO,  # use cheapest - easy task
     max_tokens: int = 2048,
     temperature: float = 0.3,
-) -> Dict[str, Any]:
+) -> JobSiteResponse:
     """
     Parse and convert job posting content to JSON format using OpenAI API asynchronously.
 
@@ -260,7 +266,7 @@ async def convert_to_json_with_gpt_async(
         - temperature (float, optional): temperature for the model (default is 0.3).
 
     Returns:
-        Dict[str, Any]: A dictionary representation of the extracted JSON content.
+        JobSiteResponse: A pydantic model representation of the extracted JSON content.
 
     Raises:
         ValueError: If the input text is empty or the response is not in the expected format.
@@ -298,7 +304,7 @@ async def convert_to_json_with_gpt_async(
         )
 
     # Return the model-dumped dictionary (from Pydantic obj to dict)
-    return response_model.model_dump()
+    return response_model
 
 
 async def convert_to_json_with_claude_async(
@@ -306,7 +312,7 @@ async def convert_to_json_with_claude_async(
     model_id: str = CLAUDE_HAIKU,
     max_tokens: int = 2048,
     temperature: float = 0.3,
-) -> Dict[str, Any]:
+) -> JobSiteResponse:
     """
     Parse and convert job posting content to JSON format using Anthropic API
     asynchronously.
@@ -319,7 +325,7 @@ async def convert_to_json_with_claude_async(
         (default is 0.3).
 
     Returns:
-        Dict[str, Any]: A dictionary representation of the extracted JSON content.
+        JobSiteResponse: A pydantic model representation of the extracted JSON content.
 
     Raises:
         ValueError: If the input text is empty or the response is not in
@@ -358,7 +364,7 @@ async def convert_to_json_with_claude_async(
         )
 
     # Return the model-dumped dictionary (from Pydantic obj to dict)
-    return response_model.model_dump()
+    return response_model
 
 
 def save_webpage_content(
@@ -408,7 +414,7 @@ async def process_webpages_to_json_async(
     model_id: str = GPT_4_TURBO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
-) -> Dict[str, Dict[str, Any]]:
+) -> JobPostingsBatch:
     """
     Async operation that orchestrates the entire process of extracting, cleaning,
     and converting webpage content to a structured JSON format asynchronously.
@@ -438,8 +444,7 @@ async def process_webpages_to_json_async(
         - temperature (float): The temperature value. Defaults to 0.3.
 
     Returns:
-        Dict[str, Dict[str, Any]]: A dictionary where each key is a URL, and
-        the value is the structured JSON representation of the converted webpage content.
+        JobPostingsBatch: A root model mapping each URL to a JobSiteResponse.
 
     Logs:
         - Information about successfully processed URLs.
@@ -457,24 +462,23 @@ async def process_webpages_to_json_async(
     # Step 1. Read raw webpage content with playwright
     webpages_content, failed_urls = await read_webpages_async(urls)  # returns 2 lists
 
-    # Step 2. Iterate through raw web content list -> structured JSON format
-    json_results = {}  # create a holder
+    # Step 2. Iterate through raw web content list - root model
+    batch_root: dict[str, JobSiteResponse] = {}
 
     # Iterate w/t OpenAI or Anthropic LLM API
     if llm_provider.lower() == OPENAI:
         for url, content in webpages_content.items():
             try:
-                json_result = await convert_to_json_with_gpt_async(
+                jobsite_model = await convert_to_json_with_gpt_async(
                     input_text=content,
                     model_id=model_id,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
                 logger.info(f"Successfully converted content from {url} to JSON.")
-                json_results[url] = json_result
+                batch_root[url] = jobsite_model
             except Exception as e:
                 logger.error(f"Error processing content for {url}: {e}")
-                json_results[url] = {"error": str(e)}
 
         if failed_urls:
             logger.info(f"URLs failed to process:\n{failed_urls}")
@@ -482,21 +486,20 @@ async def process_webpages_to_json_async(
     elif llm_provider.lower() == ANTHROPIC:
         for url, content in webpages_content.items():
             try:
-                json_result = await convert_to_json_with_claude_async(
+                jobsite_model = await convert_to_json_with_claude_async(
                     input_text=content,
                     model_id=model_id,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
                 logger.info(f"Successfully converted content from {url} to JSON.")
-                json_results[url] = json_result
+                batch_root[url] = jobsite_model
             except Exception as e:
                 logger.error(f"Error processing content for {url}: {e}")
-                json_results[url] = {"error": str(e)}
 
         if failed_urls:
             logger.info(f"URLs failed to process:\n{failed_urls}")
 
     else:
         raise ValueError(f"{llm_provider} is not a support LLM API.")
-    return json_results
+    return JobPostingsBatch(root=batch_root)  # type: ignore[arg-type]

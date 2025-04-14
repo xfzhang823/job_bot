@@ -30,11 +30,17 @@ dict-of-dicts to DataFrame
 Each function includes logging, validation, and structured keys to support robust
 database integration and round-trip JSON transforms.
 
+todo: leave the table data validation with table specific models for rehydrate functions
+todo: for now, because:
+todo: The ingestion pipeline already adds metadata and aligns columns using align_df_with_schema()
+todo: The risk of schema mismatch is low if ingestion is the only entry point into the DBit's.
+todo: The risk of schema mismatch is low.
+todo: evisit this when batch validation, QA reporting, dashboard or audit tooling,
+todo: writing comprehensive unit tests
 """
 
 # Imports
-from pathlib import Path
-from typing import Any, cast, Dict, List, Union, Optional
+from typing import Any, cast, Dict, List, Union
 import json
 import logging
 import pandas as pd
@@ -43,9 +49,10 @@ from models.resume_job_description_io_models import (
     NestedResponsibilities,
     Requirements,
     Responsibilities,
-    JobPostingUrlsFile,
-    JobPostingsFile,
-    ExtractedRequirementsFile,
+    JobPostingUrlMetadata,
+    JobPostingUrlsBatch,
+    JobPostingsBatch,
+    ExtractedRequirementsBatch,
 )
 from models.llm_response_models import (
     JobSiteResponse,
@@ -93,8 +100,8 @@ def unflatten_to_keyed_dict(
     }
 
 
-# * ✔️ Jobposting Urls (central registry to keep records of what to process or not)
-def flatten_job_urls_to_table(model: JobPostingUrlsFile) -> pd.DataFrame:
+# * ✔️ Jobposting Urls (central registry to keep records of all job posting URLs)
+def flatten_job_urls_to_table(model: JobPostingUrlsBatch) -> pd.DataFrame:
     """
     Flattens a validated JobPostingUrlsFile model into a flat DataFrame
     suitable for DuckDB insertion.
@@ -105,7 +112,8 @@ def flatten_job_urls_to_table(model: JobPostingUrlsFile) -> pd.DataFrame:
     - job_title (str)
 
     Args:
-        model (JobPostingUrlsFile): The root model with URL-keyed job posting metadata.
+        model (JobPostingUrlsFile): The root model with URL-keyed
+        job posting metadata.
 
     Returns:
         pd.DataFrame: Flattened representation of job posting URLs.
@@ -130,8 +138,38 @@ def flatten_job_urls_to_table(model: JobPostingUrlsFile) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def rehydrate_job_urls_from_table(df: pd.DataFrame) -> JobPostingUrlsBatch:
+    """
+    Rehydrates a DataFrame from the `job_urls` table into
+    a JobPostingUrlsFile model.
+
+    Args:
+        df (pd.DataFrame): Flattened table containing 'url', 'company',
+        and 'job_title' columns.
+
+    Returns:
+        JobPostingUrlsFile: Root model with validated mapping of URL -> metadata.
+    """
+    if df.empty:
+        return JobPostingUrlsBatch({})
+
+    # * Keep the most recent entry per URL (dedup just to be safe!)
+    df = df.sort_values("timestamp").drop_duplicates("url", keep="last")
+
+    validated: dict[str, JobPostingUrlMetadata] = {}
+
+    for row in df.to_dict(orient="records"):
+        try:
+            metadata = JobPostingUrlMetadata(**dict(row))  # type: ignore
+            validated[str(metadata.url)] = metadata  # use URL as key
+        except Exception as e:
+            continue  # optionally log or raise
+
+    return JobPostingUrlsBatch(validated)
+
+
 # * ✔️ Jobpostings
-def flatten_job_postings_to_table(model: JobPostingsFile) -> pd.DataFrame:
+def flatten_job_postings_to_table(model: JobPostingsBatch) -> pd.DataFrame:
     """
     Flattens a validated JobPostingsFile model into a wide-format DataFrame,
     where each row corresponds to a job posting.
@@ -190,7 +228,7 @@ def flatten_job_postings_to_table(model: JobPostingsFile) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def rehydrate_job_postings_from_table(df: pd.DataFrame) -> JobPostingsFile:
+def rehydrate_job_postings_from_table(df: pd.DataFrame) -> JobPostingsBatch:
     """
     Reconstructs a validated JobPostingsFile model from a wide-format DataFrame.
 
@@ -236,7 +274,7 @@ def rehydrate_job_postings_from_table(df: pd.DataFrame) -> JobPostingsFile:
             logger.error(f"❌ Unexpected error at {row.url}: {e}", exc_info=True)
 
     logger.info(f"✅ Rehydrated {len(result)} job postings from DataFrame.")
-    return JobPostingsFile(cast(dict[Union[HttpUrl, str], JobSiteResponse], result))
+    return JobPostingsBatch(cast(dict[Union[HttpUrl, str], JobSiteResponse], result))
 
 
 # * ☑️ Job Requirements
@@ -310,7 +348,7 @@ def rehydrate_requirements_from_table(df: pd.DataFrame) -> Requirements:
 
 
 def flatten_extracted_requirements_to_table(
-    model: ExtractedRequirementsFile,
+    model: ExtractedRequirementsBatch,
 ) -> pd.DataFrame:
     """
     Flattens a validated ExtractedRequirementsFile model into a long-format DataFrame.
@@ -370,7 +408,7 @@ def flatten_extracted_requirements_to_table(
 
 def rehydrate_extracted_requirements_from_table(
     df: pd.DataFrame,
-) -> ExtractedRequirementsFile:
+) -> ExtractedRequirementsBatch:
     """
     Reconstructs a validated ExtractedRequirementsFile model from a flattened
     requirements DataFrame.
@@ -414,7 +452,7 @@ def rehydrate_extracted_requirements_from_table(
 
     logger.info(f"✅ Rehydrated {len(result)} extracted requirements.")
 
-    return ExtractedRequirementsFile(
+    return ExtractedRequirementsBatch(
         cast(Dict[Union[str, HttpUrl], RequirementsResponse], result)
     )
 
