@@ -15,18 +15,18 @@ The rehydration logic ensures symmetry with the flattening process used
 during ingestion.
 
 -------------------------------------------------------------
- Loader Function                           | Return Type
-------------------------------------------|-------------------------------
- load_job_postings_for_url(...)           | JobSiteResponse
- load_extracted_requirements_for_url(...) | RequirementsResponse
- load_flattened_requirements_for_url(...) | Requirements
- load_flattened_responsibilities_for_url(...) | Responsibilities
- load_edited_responsibilities_for_url(...)   | NestedResponsibilities
-------------------------------------------|-------------------------------
- load_all_job_postings_file_model_from_db() | JobPostingsFile
- load_all_extracted_requirements_model_from_db() | ExtractedRequirementsFile
- load_all_job_urls_from_db()              | JobPostingUrlsFile
- get_urls_for_status(...)                 | List[str]
+ Loader Function                                        | Return Type
+-------------------------------------------------------------
+ load_job_postings_for_url_from_db(...)                 | JobSiteResponse
+ load_extracted_requirements_for_url_from_db(...)       | RequirementsResponse
+ load_flattened_requirements_for_url_from_db(...)       | Requirements
+ load_flattened_responsibilities_for_url_from_db(...)   | Responsibilities
+ load_edited_responsibilities_for_url_from_db(...)      | NestedResponsibilities
+-------------------------------------------------------------
+ load_all_job_postings_file_model_from_db()       | JobPostingsFile
+ load_all_extracted_requirements_model_from_db()  | ExtractedRequirementsFile
+ load_all_job_urls_from_db()                      | JobPostingUrlsFile
+ get_urls_for_status_from_pipeline_control (...)  | List[str]
 -------------------------------------------------------------
 
 Key design goals:
@@ -34,10 +34,20 @@ Key design goals:
 - ✅ Centralized rehydration + Pydantic validation for data integrity
 - ✅ Flexible enough for batch analytics and iterative development
 
-Usage:
-    urls = get_urls_for_status(stage=\"evaluation\", version=\"original\")
+>>> Example Usage:
+
+    # * Load from requirements table
+    urls = get_urls_by_status(stage=\"evaluation\", version=\"original\")
     for url in urls:
-        requirements = load_flattened_requirements_for_url(url, version=\"original\")
+        requirements = load_flattened_requirements_for_url_from_db(url, version=\"original\")
+
+    # * Force to load w/t disabled filter
+    url = "https://example.com/job-posting"
+    requirements_model = load_flattened_requirements_for_url_from_db(
+    url=url,
+    status=None,  # 👈 disables status filtering
+    iteration=0,
+)
 """
 
 import logging
@@ -59,8 +69,7 @@ from models.resume_job_description_io_models import (
 from models.duckdb_table_models import PipelineState
 from db_io.duckdb_adapter import get_duckdb_connection
 from db_io.flatten_and_rehydrate import *
-from db_io.schema_definitions import TableName
-from db_io.db_transform import ModelType
+from db_io.schema_definitions import TableName, PipelineStatus
 
 logger = logging.getLogger(__name__)
 
@@ -101,44 +110,37 @@ DB_LOADER_CONFIG = {
 
 
 # URL pre-filtering utility
-def get_urls_for_status(
-    status: str = "in_progress",
-    stage: Optional[str] = None,
-    version: Optional[str] = None,
+def get_urls_from_pipeline_control(
+    status: PipelineStatus = PipelineStatus.IN_PROGRESS,
+    url: Optional[str] = None,
     iteration: Optional[int] = None,
 ) -> List[str]:
     """
-    Returns a list of distinct URLs from the pipeline_control table matching
-    the given filters.
+    Returns a list of distinct URLs from the pipeline_control table
+    filtered by status and optional URL/iteration.
 
     Args:
-        status (str): Pipeline status to match (e.g., 'in_progress', 'new').
-        stage (Optional[str]): Optional pipeline stage filter.
-        version (Optional[str]): Optional version filter.
-        iteration (Optional[int]): Optional iteration filter.
+        - status (PipelineStatus): Status to match (e.g., 'new', 'in_progress').
+        - url (Optional[str]): Optional job URL filter.
+        - iteration (Optional[int]): Optional iteration filter.
 
     Returns:
         List[str]: List of matching job posting URLs.
     """
-
     filters = ["status = ?"]
-    params: List[str | int] = [status]
+    params: List[str | int] = [status.value]
 
-    if stage:
-        filters.append("stage = ?")
-        params.append(stage)
-    if version:
-        filters.append("version = ?")
-        params.append(version)
+    if url:
+        filters.append("url = ?")
+        params.append(url)
     if iteration is not None:
         filters.append("iteration = ?")
         params.append(iteration)
 
-    where_clause = " AND ".join(filters)
     sql = f"""
         SELECT DISTINCT url
         FROM pipeline_control
-        WHERE {where_clause}
+        WHERE {' AND '.join(filters)}
     """
 
     con = get_duckdb_connection()
@@ -150,11 +152,37 @@ def get_urls_for_status(
 def db_loader(
     table: TableName,
     url: Optional[str] = None,
-    version: Optional[str] = None,
+    status: Optional[PipelineStatus] = None,
     iteration: Optional[int] = None,
 ) -> Any:
     """
-    Loads and rehydrates data from DuckDB using config-specified rehydration function.
+    Loads and rehydrates data from DuckDB for a given table using
+    a configured rehydration function.
+
+    Supports optional filtering by URL, status, and iteration—only
+    if the table is marked as `filterable` in `DB_LOADER_CONFIG`.
+
+    Args:
+        - table (TableName): Enum name of the DuckDB table
+        (e.g., TableName.FLATTENED_REQUIREMENTS).
+        - url (Optional[str]): Filter for a specific job posting URL.
+        - status (Optional[PipelineStatus]): Filter for pipeline status
+        (e.g., 'in_progress', 'new').
+        - iteration (Optional[int]): Filter for iteration index (default is 0).
+
+    Returns:
+        Any: A validated Pydantic model corresponding to the table's schema.
+
+    Example:
+        >>> from db_io.pydantic_model_loaders_from_db import db_loader
+        >>> from db_io.schema_definitions import TableName, PipelineStatus
+        >>> model = db_loader(
+        ...     table=TableName.FLATTENED_REQUIREMENTS,
+        ...     url="https://example.com/job123",
+        ...     status=PipelineStatus.IN_PROGRESS,
+        ...     iteration=0
+        ... )
+        >>> print(model.requirements)  # access validated model fields
     """
     config = DB_LOADER_CONFIG.get(table)
     if not config:
@@ -163,7 +191,6 @@ def db_loader(
     rehydrate_fn = config["rehydrate_fn"]
     filterable = config.get("filterable", False)
 
-    con = get_duckdb_connection()
     filters = []
     params = []
 
@@ -171,9 +198,9 @@ def db_loader(
         if url:
             filters.append("url = ?")
             params.append(url)
-        if version:
-            filters.append("version = ?")
-            params.append(version)
+        if status:
+            filters.append("status = ?")
+            params.append(status.value)
         if iteration is not None:
             filters.append("iteration = ?")
             params.append(iteration)
@@ -181,6 +208,7 @@ def db_loader(
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     sql = f"SELECT * FROM {table.value} {where_clause} ORDER BY timestamp DESC"
 
+    con = get_duckdb_connection()
     df: pd.DataFrame = con.execute(sql, params).df()
     con.close()
 
@@ -189,46 +217,50 @@ def db_loader(
 
 # * FSM-compatible per-URL model loaders
 def load_job_postings_for_url_from_db(
-    url: str, version: str = "original", iteration: int = 0
+    url: str, status: Optional[PipelineStatus] = PipelineStatus.NEW, iteration: int = 0
 ) -> JobPostingsBatch:
     """
     Loads the job posting metadata for a specific URL.
     Returns a single JobSiteResponse (not the entire dict).
+
+    >>> Example: How to disable filtering (search all statuses)
+        url = "https://example.com/job-posting"
+        job_posting_model = load_job_postings_for_url_from_db(
+            url=url,
+            status=None,  # 👈 disables status filtering (forces search across all statuses)
+            iteration=0,
+        )
     """
     # Fetch the entire table first and then select data for the url
-    file_model = db_loader(
-        TableName.JOB_POSTINGS, url=url, version=version, iteration=iteration
+    model = db_loader(
+        TableName.JOB_POSTINGS,
+        url=url,
+        status=status,
+        iteration=iteration,
     )
     try:
-        return file_model.root[url]
-
+        return model.root[url]
     except KeyError:
         raise ValueError(
-            f"No entry found for URL {url} in {TableName.JOB_POSTINGS.value}"
+            f"No entry found for URL {url} in table {TableName.JOB_POSTINGS}"
         )
 
 
 def load_extracted_requirements_for_url_from_db(
-    url: str, version: str = "original", iteration: int = 0
+    url: str, status: PipelineStatus = PipelineStatus.IN_PROGRESS, iteration: int = 0
 ) -> RequirementsResponse:
     """
     Loads the extracted job requirements for a specific URL.
     Returns a single RequirementsResponse object.
     """
     # Fetch the entire table first and then select data for the url
-    file_model = db_loader(
-        TableName.EXTRACTED_REQUIREMENTS, url=url, version=version, iteration=iteration
+    return db_loader(
+        TableName.EXTRACTED_REQUIREMENTS, url=url, status=status, iteration=iteration
     )
-    try:
-        return file_model.root[url]
-    except KeyError:
-        raise ValueError(
-            f"No entry found for URL {url} in {TableName.EXTRACTED_REQUIREMENTS.value}"
-        )
 
 
 def load_flattened_requirements_for_url_from_db(
-    url: str, version: str = "original", iteration: int = 0
+    url: str, status: PipelineStatus = PipelineStatus.IN_PROGRESS, iteration: int = 0
 ) -> Requirements:
     """
     Loads the flattened requirements (key-value) for a specific job URL from
@@ -236,12 +268,15 @@ def load_flattened_requirements_for_url_from_db(
     Typically used for matching against resume responsibilities.
     """
     return db_loader(
-        TableName.FLATTENED_REQUIREMENTS, url=url, version=version, iteration=iteration
+        TableName.FLATTENED_REQUIREMENTS,
+        url=url,
+        status=status,
+        iteration=iteration,
     )
 
 
 def load_flattened_responsibilities_for_url_from_db(
-    url: str, version: str = "original", iteration: int = 0
+    url: str, status: PipelineStatus = PipelineStatus.IN_PROGRESS, iteration: int = 0
 ) -> Responsibilities:
     """
     Loads flattened resume responsibilities for a specific URL from
@@ -251,13 +286,13 @@ def load_flattened_responsibilities_for_url_from_db(
     return db_loader(
         TableName.FLATTENED_RESPONSIBILITIES,
         url=url,
-        version=version,
+        status=status,
         iteration=iteration,
     )
 
 
 def load_edited_responsibilities_for_url_from_db(
-    url: str, version: str = "original", iteration: int = 0
+    url: str, status: PipelineStatus = PipelineStatus.IN_PROGRESS, iteration: int = 0
 ) -> NestedResponsibilities:
     """
     Loads LLM-edited responsibilities for a specific URL from
@@ -265,7 +300,10 @@ def load_edited_responsibilities_for_url_from_db(
     Rehydrates nested responsibilities grouped by requirement.
     """
     return db_loader(
-        TableName.EDITED_RESPONSIBILITIES, url=url, version=version, iteration=iteration
+        TableName.EDITED_RESPONSIBILITIES,
+        url=url,
+        status=status,
+        iteration=iteration,
     )
 
 

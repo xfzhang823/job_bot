@@ -5,10 +5,10 @@ from typing import Optional
 import pandas as pd
 from datetime import datetime
 from db_io.duckdb_adapter import get_duckdb_connection
-from src.models.duckdb_table_models import PipelineState
+from models.duckdb_table_models import PipelineState
 
 
-def save_pipeline_state_to_duckdb(
+def persist_pipeline_state_to_duckdb(
     state: PipelineState, table_name: str = "pipeline_control"
 ):
     """

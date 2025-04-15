@@ -1,6 +1,76 @@
 # job_bot
 A bot helps me in job hunting, such as resume optimization, interview guide, so on...
 
+# Project Structure
+
+```
+project_root/
+├── src/
+│   ├── db_io/                        # Existing database and I/O logic
+│   │   ├── state_sync.py
+│   │   ├── duckdb_adapter.py
+│   │   ├── db_utils.py
+│   │   ├── schema_definitions.py
+│   │   ├── db_transform.py
+│   │   └── db_insert.py
+│   │
+│   ├── fsm/                          # Existing FSM management utilities
+│   │   ├── __init__.py
+│   │   ├── fsm_utils.py
+│   │   ├── pipeline_fsm_manager.py
+|   |   ├── fsm_integrity_checker.py   # Validate FSM states & transitions
+|   |   ├── fsm_state_control.py       # Control/manage FSM lifecycle (initialization, updates)
+|   |   └── llm_fsm.py                 # Future module for LLM-driven FSM decisions
+│   │
+│   ├── models/                       # Existing Pydantic models
+│   ├── pipelines/                    # Existing pipeline implementations
+│   ├── pipelines_with_fsm/           # 🆕 FSM-integrated pipeline implementations
+│   ├── prompts/                      # 🆕 Prompt templates and management
+│   ├── human_review_and_editing/     # 🆕 Human-in-the-loop review interfaces
+│   ├── preprocessing/                # 🆕 Data preprocessing utilities
+│   ├── evaluation_optimization/      # 🆕 Pipeline evaluation and optimization tools
+│   ├── utils/                        # Existing general utilities/helpers
+│   └── llm_providers/                # Existing LLM integration logic
+│
+└── tests/
+    └── test_fsm/                     # Unit tests specifically for FSM/pipeline_control
+```
+
+## Key Components
+
+### Core Systems
+- **Database I/O (`db_io/`)**
+  - Core database operations and utilities
+  - Includes DuckDB adapter, schema definitions, and transformation logic
+
+- **Finite State Machine (`fsm/`)**
+  - FSM utilities and pipeline state management
+  - **New Components**:
+    - `pipeline_control.py`: Centralized state management
+    - `fsm_analytics.py`: Pipeline control analytics
+    - `integrity_checker.py`: FSM validation and integrity checks
+
+### Pipeline Ecosystem
+- **`pipelines/`**: Baseline pipeline implementations
+- **`pipelines_with_fsm/`**: 🆕 Production pipelines with integrated state management
+- **`preprocessing/`**: 🆕 Data cleaning/normalization utilities
+
+### LLM Components
+- **`prompts/`**: 🆕 Prompt templates and version management
+- **`llm_providers/`**: LLM API integrations and adapters
+
+### Quality Control
+- **`human_review_and_editing/`**: 🆕 Interfaces for manual review/annotation
+- **`evaluation_optimization/`**: 🆕 Performance metrics and tuning tools
+
+### Supporting Directories
+- `models/`: Pydantic model definitions
+- `utils/`: General utility functions
+
+### Tests
+- `test_fsm/`: Unit tests for FSM and pipeline control components
+
+
 # Pipeline Management Overview
 
 In this project, pipelines are defined, managed, and executed in a modular fashion. The main components responsible for managing the pipelines include the following files:
