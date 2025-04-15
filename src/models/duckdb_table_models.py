@@ -14,7 +14,7 @@ from pydantic import BaseModel, HttpUrl, Field
 from db_io.schema_definitions import PipelineStage
 
 
-# ✅ Aliases to use throughout your code
+# ✅ Aliases to use throughout the code
 VersionType = Literal["original", "edited", "final"]
 StatusType = Literal["new", "in_progress", "complete", "skipped", "error"]
 

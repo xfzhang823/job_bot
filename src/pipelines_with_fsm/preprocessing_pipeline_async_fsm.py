@@ -105,96 +105,10 @@ async def fetch_job_description(
         return {}
 
 
-async def scrape_parse_persist_job_posting_async(
-    url: str,
-    fsm: PipelineFSMManager,
-    model_id: str = GPT_4_TURBO,
-    llm_provider: str = OPENAI,
-    max_tokens: int = 2048,
-    temperature: float = 0.3,
-) -> Optional[JobSiteResponse]:
-    """
-    Scrapes, parses, validates, and persists a single job posting from the web.
-
-    This function performs a full pipeline for a single job URL:
-    - Web scraping via Playwright
-    - JSON conversion via LLM (OpenAI or Anthropic)
-    - Content validation (ensures extracted content is meaningful)
-    - Persists the result to the DuckDB `job_postings` table
-
-    If the scrape fails, the function logs the error and returns None.
-    If the scrape succeeds but the content is empty or uninformative,
-    the model is persisted with `status="error"` and `message` explaining why.
-
-    Args:
-        url (str): The job posting URL to process.
-        model_id (str): The LLM model ID to use.
-        llm_provider (str): The LLM provider ("openai" or "anthropic").
-        max_tokens (int): Maximum number of tokens for LLM response.
-        temperature (float): Sampling temperature for LLM.
-
-    Returns:
-        JobSiteResponse: A parsed response model with `.status = "success"` or `"error"`.
-        Returns None only if scraping or LLM completely fails.
-    """
-    logger.info(f"🌐 Starting webscraping, parsing, and persisting for URL: {url}")
-
-    try:
-        job_postings_batch = await process_webpages_to_json_async(
-            urls=url,
-            llm_provider=llm_provider,
-            model_id=model_id,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    except Exception as e:
-        logger.exception(f"❌ Scraping or LLM failed at URL: {url}")
-        return None  # Do not update FSM — let outer pipeline decide
-
-    try:
-        jobposting_model = job_postings_batch.root[url]  # type: ignore[attr-defined]
-        data_section = jobposting_model.data
-        content = data_section.get("content")
-
-        if not isinstance(content, dict) or not any(
-            isinstance(v, str) and v.strip() for v in content.values()
-        ):
-            jobposting_model.status = "error"
-            jobposting_model.message = "Empty or uninformative content extracted"
-            logger.warning(f"🚫 Skipping URL due to empty content: {url}")
-        else:
-            jobposting_model.status = "success"
-            jobposting_model.message = "Job description parsed successfully"
-
-        job_posting_batch = JobPostingsBatch(root={url: jobposting_model})  # type: ignore[arg-type]
-        job_df = flatten_model_to_df(
-            model=job_posting_batch,
-            table_name=TableName.JOB_POSTINGS,
-            stage=PipelineStage.JOB_POSTINGS,
-        )
-        insert_df_dedup(job_df, TableName.JOB_POSTINGS.value)
-
-        # ✅ Update FSM
-        fsm_manager = PipelineFSMManager()
-        fsm = fsm_manager.get_fsm(url)  # ✅ clean and inferred
-
-        fsm.step(
-            status=PipelineStatus.IN_PROGRESS.value, notes=jobposting_model.message
-        )
-
-        logger.info(f"✅ Done: {url} → {jobposting_model.status}")
-        return jobposting_model
-
-    except Exception as e:
-        logger.exception(f"💾 Failed to post-process or persist job posting: {url}")
-        fsm.step(status="error", notes="Post-processing/persist failed")
-        return None
-
-
 async def extract_persist_requirements_async(
     url: str,
     job_posting_model: JobSiteResponse,
-    fsm: PipelineFSMManager,
+    fsm_manager: PipelineFSMManager,
     model_id: str = GPT_4_TURBO,
     llm_provider: str = OPENAI,
 ) -> Optional[RequirementsResponse]:
@@ -202,26 +116,26 @@ async def extract_persist_requirements_async(
     Extracts structured job requirements from a validated JobSiteResponse model
     using an LLM, and persists the result to DuckDB.
 
-    The process includes:
-    - Converting the job posting to JSON string format.
-    - Calling the selected LLM to extract categorized requirements.
-    - Validating and wrapping the response.
-    - Persisting the result into the `extracted_requirements` DuckDB table.
-
-    If the LLM fails or response is structurally valid but content is missing or empty,
-    `.status` will be set to "error". If an exception occurs, returns None.
+    This function performs:
+    - JSON serialization of the job posting
+    - Requirement extraction via OpenAI or Anthropic
+    - Validation + enrichment of the response model
+    - Insertion into the `extracted_requirements` DuckDB table
+    - Pipeline FSM status updates
 
     Args:
-        url (str): Job posting URL.
-        job_posting_model (JobSiteResponse): Parsed job description model.
-        model_id (str): LLM model ID (e.g., "gpt-4-turbo").
-        llm_provider (str): LLM provider name ("openai" or "anthropic").
+        - url (str): Job posting URL.
+        - job_posting_model (JobSiteResponse): Parsed job description model.
+        - fsm_manager (PipelineFSMManager): Pipeline state manager.
+        - model_id (str): LLM model ID (e.g., "gpt-4-turbo").
+        - llm_provider (str): LLM provider name ("openai" or "anthropic").
 
     Returns:
         Optional[RequirementsResponse]: The validated response model if successful,
-        otherwise None on hard failure.
+        or None if an LLM or persistence error occurred.
     """
     logger.info(f"📄 Extracting requirements for URL: {url}")
+    fsm = fsm_manager.get_fsm(url)
 
     try:
         job_desc_json = json.dumps(job_posting_model.data, indent=2)
@@ -239,13 +153,14 @@ async def extract_persist_requirements_async(
 
     except Exception as e:
         logger.exception(f"❌ LLM failed to extract requirements for {url}")
-        return None  # skip FSM update; retry logic is handled upstream
+        fsm.mark_status(PipelineStatus.ERROR, notes="LLM extraction failed")
+        return None
 
-    # ✅ Gatekeeper check
+    # ✅ Validate the response content
     if not req_model.data or not any(dict(req_model.data).values()):
         req_model.status = "error"
-        req_model.message = "No requirements extracted"
-        logger.warning(f"⚠️ Extracted requirements were empty for {url}")
+        req_model.message = "No requirements extracted from LLM output"
+        logger.warning(f"⚠️ Empty requirements extracted for {url}")
     else:
         req_model.status = "success"
         req_model.message = "Requirements extracted successfully"
@@ -259,63 +174,51 @@ async def extract_persist_requirements_async(
         )
         insert_df_dedup(req_df, TableName.EXTRACTED_REQUIREMENTS.value)
 
-        # ✅ Update FSM
-        fsm.step(status="in_progress", notes=req_model.message)
+        # ✅ Update pipeline control
+        fsm.mark_status(
+            PipelineStatus.IN_PROGRESS,
+            notes=req_model.message,
+        )
+        fsm.step()
 
-        logger.info(f"✅ Requirements for {url}: {req_model.status}")
+        logger.info(
+            f"✅ Requirements pipeline complete for {url} — status: {req_model.status}"
+        )
         return req_model
 
     except Exception as e:
-        logger.exception(f"💾 Failed to persist requirements for {url}")
-        fsm.step(status="error", notes="Failed to persist extracted requirements")
+        logger.exception(f"💾 Failed to persist requirements for URL: {url}")
+        fsm.mark_status(
+            PipelineStatus.ERROR,
+            notes="Failed to persist extracted requirements",
+        )
         return None
 
 
-async def process_single_url_with_fsm(
+async def run_extracted_requirements_stage_async(
     url: str,
-    fsm: PipelineFSMManager,
-    lock: asyncio.Lock,
-    model_id: str = GPT_4_TURBO,
-    llm_provider: str = OPENAI,
-):
+    fsm: PipelineFSM,
+    job_posting_model: JobSiteResponse,
+    **kwargs,
+) -> Optional[RequirementsResponse]:
     """
-    FSM-driven controller for processing a URL across pipeline stages.
+    FSM wrapper for extracted_requirements stage. Uses existing extract_requirements_from_job_posting_async().
     """
-    current_stage = fsm.get_stage(url)
-    logger.info(f"📌 [{url}] Current FSM Stage: {current_stage}")
+    try:
+        # 🔁 Use your existing per-URL processor
+        requirements = await extract_requirements_from_job_posting_async(
+            job_description_url=url,
+            job_description_model=job_posting_model,
+            **kwargs,
+        )
 
-    async with lock:
-        if current_stage == PipelineStage.JOB_POSTINGS:
-            try:
-                jobsite_model = await scrape_parse_persist_job_posting_async(
-                    url, model_id, llm_provider
-                )
-                job_df = flatten_model_to_df(
-                    model=jobsite_model,
-                    table_name=TableName.JOB_POSTINGS,
-                    stage=current_stage,
-                )
-                insert_df_dedup(job_df, TableName.JOB_POSTINGS.value)
-                fsm.step(url, status="complete")
-            except Exception as e:
-                logger.error(f"❌ Preprocessing failed: {e}")
-                fsm.step(url, status="error", notes=str(e))
-                return
+        fsm.step()
+        save_pipeline_state_to_duckdb(fsm.state_model)
+        return requirements
 
-        elif current_stage == PipelineStage.STAGING:
-            try:
-                jobsite_model = load_job_postings_for_url_from_db(url)
-                await extract_persist_requirements_async(
-                    url, jobsite_model, model_id, llm_provider
-                )
-                fsm.step(url, status="complete")
-            except Exception as e:
-                logger.error(f"❌ Requirements extraction failed: {e}")
-                fsm.step(url, status="error", notes=str(e))
-                return
-
-        else:
-            logger.info(f"✅ {url} already processed or unknown stage: {current_stage}")
+    except Exception as e:
+        logger.warning(f"❌ Failed to process requirements for {url}: {e}")
+        return None
 
 
 async def process_single_url_async(
@@ -469,145 +372,6 @@ async def process_single_url_async(
         logger.info(
             f"Job description and requirements processed for URL: {job_description_url}"
         )
-
-
-# async def process_single_url_async(
-#     job_description_url: str,
-#     job_descriptions_json_file: Path,
-#     job_requirements_json_file: Path,
-#     lock: asyncio.Lock,
-#     semaphore: asyncio.Semaphore,  # limit # of concurrent worker (avoid rate limit)
-#     llm_provider: str = OPENAI,
-#     model_id: str = GPT_4_TURBO,
-#     max_tokens: int = 2048,
-#     temperature: float = 0.3,
-#     web_scrape: bool = True,  # Flag to control whether to need to webscrape the content or not
-# ) -> None:
-#     """
-#     Asynchronously processes a single job posting URL, fetches the job description
-#     (with or without web scraping), and extracts job requirements using GPT or other LLMs.
-
-#     Args:
-#         - job_description_url (str): The job description URL to process.
-#         - job_descriptions_json_file (Path): Path to the job descriptions JSON file.
-#         - job_requirements_json_file (Path): Path to the job requirements JSON file.
-#         - lock (asyncio.Lock): A lock to ensure thread safety during critical sections.
-#         #* The lock is put in the function b/c each URL processing must be done before
-#         #* it is saved to file.
-#         - semaphore (asyncio.Semaphore): To limit the number of concurrent tasks.
-#         - llm_provider (str): The LLM provider to use (default is "openai").
-#         - model_id (str): The model ID to use for GPT (default is "gpt-4-turbo").
-#         - max_tokens (int): The maximum number of tokens to generate. Defaults to 2048.
-#         - temperature (float): The temperature value. Defaults to 0.3.
-#         - web_scrape (bool): Flag to control whether to scrape the content or not.
-
-#     Returns:
-#         None
-#     """
-#     logger.info(f"Processing URL: {job_description_url}")
-
-#     # Apply the semaphore to limit concurrent execution
-#     async with semaphore:
-
-#         if web_scrape:
-#             # Step 1a: If scraping, Webpage -> job description JSON format
-#             job_description_dict = await process_webpages_to_json_async(
-#                 urls=job_description_url,
-#                 llm_provider=llm_provider,
-#                 model_id=model_id,
-#                 max_tokens=max_tokens,
-#                 temperature=temperature,
-#             )  # Returns a dict: Dict[str, Dict[str, Any]]
-#             logger.info(f"Job description fetched for URL: {job_description_url}")
-#         else:
-#             # Step 1b: If not scraping, read existing data from the job_description_url
-#             # (assumed to be available)
-#             job_description_dict = read_from_json_file(job_descriptions_json_file).get(
-#                 job_description_url, {}
-#             )
-#             logger.info(f"Job description fetched for URL: {job_description_url}")
-
-#         logger.info(job_description_dict)  # debug
-
-#         # Gatekeeper: if no meaningful content was extracted, skip further processing.
-#         # Unwrap the outer dict: expect a single URL key
-#         if isinstance(job_description_dict, dict) and len(job_description_dict) == 1:
-#             first_val = next(iter(job_description_dict.values()))
-#             data_section = first_val.get("data", {})
-
-#             content = data_section.get("content")
-
-#             logger.debug(f"data keys: {list(data_section.keys())}")
-#             logger.debug(
-#                 f"content preview: {json.dumps(content, indent=2) if content else 'None'}"
-#             )
-
-#             # Check that content is a dict and has at least one non-empty string value
-#             if not isinstance(content, dict) or not any(
-#                 v.strip() for v in content.values() if isinstance(v, str)
-#             ):
-#                 logger.error(
-#                     f"Content is missing or has no meaningful values: {job_description_url}"
-#                 )
-#                 return
-#         else:
-#             logger.error(
-#                 f"Unexpected format for job_description_dict: {job_description_dict}"
-#             )
-#             return
-
-#         logger.debug(
-#             f"🔍 content preview: {json.dumps(content, indent=2) if content else 'None'}"
-#         )
-
-#         content = data_section.get("content")
-#         if not content:
-#             logger.error(f"No content found for URL: {job_description_url}, skipping.")
-#             return
-#         #! Early return (do not save or continute to extract requirements)
-
-#         #! According to OpenAI, you shouldn't passing JSON str into LLM;
-#         #! howeever, according to Anthropic and DeepSeek, JSON input is fine.
-#         # Step 2: Converst job_description from dict to json string
-#         job_description_json = json.dumps(data_section, indent=2)
-
-#         # Extract job requirements using openai or anthropic
-#         if llm_provider.lower() == OPENAI:
-#             requirements_dict = await extract_job_requirements_with_openai_async(
-#                 job_description=job_description_json, model_id=model_id
-#             )
-#         elif llm_provider.lower() == ANTHROPIC:
-#             requirements_dict = await extract_job_requirements_with_anthropic_async(
-#                 job_description=job_description_json, model_id=model_id
-#             )
-#         else:
-#             raise ValueError(f"{llm_provider} is not a supported API.")
-
-#         logger.info(f"Job Requirements: \n{requirements_dict}")
-
-#         # Use the lock when writing to files to avoid race conditions
-#         async with lock:
-#             # Read the existing job descriptions and requirements files to avoid overwriting
-#             existing_job_descriptions = read_from_json_file(job_descriptions_json_file)
-#             existing_job_requirements = read_from_json_file(job_requirements_json_file)
-
-#             # Update the job descriptions file if the URL is new
-#             if job_description_url not in existing_job_descriptions:
-#                 existing_job_descriptions[job_description_url] = job_description_dict
-#                 await add_new_data_to_json_file_async(
-#                     existing_job_descriptions, job_descriptions_json_file
-#                 )
-
-#             # Update the job requirements file if the URL is new or semi-new
-#             if job_description_url not in existing_job_requirements:
-#                 existing_job_requirements[job_description_url] = requirements_dict
-#                 await add_new_data_to_json_file_async(
-#                     existing_job_requirements, job_requirements_json_file
-#                 )
-
-#         logger.info(
-#             f"Job description and requirements processed for URL: {job_description_url}"
-#         )
 
 
 async def process_urls_async(

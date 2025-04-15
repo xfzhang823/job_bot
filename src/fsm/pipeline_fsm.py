@@ -73,11 +73,11 @@ Note: Designed for forward-only progression through irreversible stages.
 # Imports
 import logging
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
 # User defined
 from transitions import Machine
-from db_io.state_sync import save_pipeline_state_to_duckdb
+from db_io.state_sync import persist_pipeline_state_to_duckdb
 from db_io.schema_definitions import PipelineStage, PipelineStatus, TableName
 from src.models.duckdb_table_models import PipelineState
 
@@ -241,7 +241,7 @@ class PipelineFSM:
         table_name: str = TableName.PIPELINE_CONTROL.value,
     ):
         """
-        pdate the pipeline status and optional notes for the current pipeline stage,
+        Update the pipeline status and optional notes for the current pipeline stage,
         without advancing the stage.
 
         Args:
@@ -254,7 +254,7 @@ class PipelineFSM:
             self.state_model.notes = notes
             self.state_model.timestamp = datetime.now()
 
-            save_pipeline_state_to_duckdb(self.state_model, table_name)
+            persist_pipeline_state_to_duckdb(self.state_model, table_name)
             logger.info(
                 f"📝 Status updated for {self.state_model.url}: {status} — {notes}"
             )
@@ -264,7 +264,7 @@ class PipelineFSM:
                 exc_info=True,
             )
 
-    def step(self, table_name: str = "pipeline_control"):
+    def step(self, table_name: str = TableName.PIPELINE_CONTROL.value):
         """
         Advance to the next stage and persist the update.
         Does not modify status or notes.
@@ -280,7 +280,7 @@ class PipelineFSM:
                 self.state_model.last_stage = self._state
                 self.state_model.timestamp = datetime.now()
 
-                save_pipeline_state_to_duckdb(self.state_model, table_name)
+                persist_pipeline_state_to_duckdb(self.state_model, table_name)
                 logger.info(f"✅ Advanced to: {self.state_model.last_stage}")
             else:
                 logger.info(f"✅ Already at final stage: {self.state_model.url}")

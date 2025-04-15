@@ -372,14 +372,16 @@ class PipelineStage(str, Enum):
     FLATTENED_REQUIREMENTS = "flattened_requirements"
     FLATTENED_RESPONSIBILITIES = "flattened_responsibilities"
 
+    # ✅ Evaluation
+    SIM_METRICS_EVAL = "similarity_metrics_eval"  # original responsibilities vs reqs
+
     # ✅ Editing (LLM)
     EDITED_RESPONSIBILITIES = "edited_responsibilities"
 
     # todo: keep it out for now (may not include in final version)
     # PRUNED_RESPONSIBILITIES = "pruned_responsibilities"
 
-    # ✅ Evaluation
-    SIM_METRICS_EVAL = "similarity_metrics_eval"  # original responsibilities vs reqs
+    # ✅ Revaluation
     SIM_METRICS_REVAL = "similarity_metrics_reval"  # edited responsibilities vs reqs
 
     # ✅ Human Review (optional stages to be added)
