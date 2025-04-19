@@ -17,7 +17,7 @@ from pydantic import ValidationError
 # Project-level imports
 from db_io.db_insert import insert_df_dedup
 from db_io.db_transform import flatten_model_to_df
-from db_io.schema_definitions import PipelineStage, PipelineStatus, TableName
+from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 from db_io.state_sync import load_pipeline_state
 from db_io.db_utils import get_urls_by_stage_and_status
 from fsm.pipeline_fsm_manager import PipelineFSMManager
@@ -112,7 +112,7 @@ async def extract_persist_requirements_for_url(
         return None
 
 
-async def process_extraction_batch_async_fsm(
+async def process_extracted_requirements_batch_async_fsm(
     urls: List[str],
     llm_provider: str,
     model_id: str,
@@ -163,7 +163,7 @@ async def run_job_requirements_pipeline_async_fsm(
 
     logger.info(f"🧪 Extracting requirements for {len(urls)} URLs...")
 
-    tasks = await process_extraction_batch_async_fsm(
+    tasks = await process_extracted_requirements_batch_async_fsm(
         urls=urls,
         llm_provider=llm_provider,
         model_id=model_id,

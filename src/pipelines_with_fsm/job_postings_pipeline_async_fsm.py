@@ -75,7 +75,7 @@ from typing import List, Optional
 # Project-level imports
 from db_io.db_insert import insert_df_dedup
 from db_io.db_transform import flatten_model_to_df
-from db_io.schema_definitions import PipelineStage, PipelineStatus, TableName
+from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 from db_io.state_sync import load_pipeline_state
 from db_io.db_utils import get_urls_by_stage_and_status
 from fsm.pipeline_fsm_manager import PipelineFSMManager
@@ -182,7 +182,7 @@ async def scrape_parse_persist_job_posting_async(
         return None
 
 
-async def process_job_posting_batch_async_fsm(
+async def process_job_postings_batch_async_fsm(
     urls: List[str],
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_TURBO,
@@ -282,7 +282,7 @@ async def run_job_postings_pipeline_async_fsm(
 
     logger.info(f"🚀 Processing {len(urls)} job URLs at stage 'job_urls'...")
 
-    tasks = await process_job_posting_batch_async_fsm(
+    tasks = await process_job_postings_batch_async_fsm(
         urls=urls,
         llm_provider=llm_provider,
         model_id=model_id,

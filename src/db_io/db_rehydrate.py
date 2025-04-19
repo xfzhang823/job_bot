@@ -4,7 +4,7 @@ from typing import Callable, TypeVar
 import pandas as pd
 from pydantic import BaseModel
 from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.schema_definitions import TableName, DUCKDB_COLUMN_ORDER
+from db_io.db_schema_registry import TableName, DUCKDB_SCHEMA_REGISTRY
 from db_io.flatten_and_rehydrate import (
     rehydrate_job_urls_from_table,
     rehydrate_job_postings_from_table,
@@ -52,13 +52,13 @@ def strip_ingestion_metadata(df: pd.DataFrame, table: TableName) -> pd.DataFrame
     before rehydrating into a Pydantic model.
 
     Args:
-        df (pd.DataFrame): The DataFrame loaded from DuckDB.
-        table (TableName): The DuckDB table being rehydrated.
+        - df (pd.DataFrame): The DataFrame loaded from DuckDB.
+        - table (TableName): The DuckDB table being rehydrated.
 
     Returns:
         pd.DataFrame: Cleaned DataFrame with only schema-relevant fields.
     """
-    schema_cols = DUCKDB_COLUMN_ORDER[table.value]
+    schema_cols = DUCKDB_SCHEMA_REGISTRY[table].column_order
 
     # Define standard metadata fields (always candidates for removal)
     metadata_fields = {
@@ -85,7 +85,8 @@ def rehydrate_model_from_duckdb(
     iteration: int | None = None,
 ) -> BaseModel:
     """
-    Generic loader that reads from a DuckDB table and rehydrates a Pydantic model.
+    Generic loader that reads from a DuckDB table and rehydrates
+    a Pydantic model.
 
     Args:
         table (TableName): The DuckDB table to query.

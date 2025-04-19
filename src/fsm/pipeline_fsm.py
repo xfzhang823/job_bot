@@ -78,7 +78,7 @@ from typing import Optional
 # User defined
 from transitions import Machine
 from db_io.state_sync import persist_pipeline_state_to_duckdb
-from db_io.schema_definitions import PipelineStage, PipelineStatus, TableName
+from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 from src.models.duckdb_table_models import PipelineState
 
 logger = logging.getLogger(__name__)
@@ -245,8 +245,8 @@ class PipelineFSM:
         without advancing the stage.
 
         Args:
-            status (PipelineStatus): Enum representing job status (e.g. IN_PROGRESS, ERROR).
-            notes (str): Optional message to attach to the current pipeline state.
+            - status (PipelineStatus): Enum representing job status (e.g. IN_PROGRESS, ERROR).
+            - notes (str): Optional message to attach to the current pipeline state.
             table_name (str): DuckDB table to persist update (default: pipeline_control).
         """
         try:

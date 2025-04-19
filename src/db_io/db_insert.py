@@ -1,11 +1,10 @@
 import logging
+import json
 from typing import List, Optional
 import pandas as pd
-import numpy as np
-import json
 from pydantic import BaseModel, HttpUrl
 from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.schema_definitions import DUCKDB_SCHEMAS, DUCKDB_COLUMN_ORDER
+from db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY, TableName
 
 
 logger = logging.getLogger(__name__)
@@ -26,8 +25,8 @@ def align_df_with_schema(
     (future enhancement)
 
     Args:
-        df (pd.DataFrame): Input DataFrame to validate and clean.
-        schema_columns (List[str]): Expected column names in final DuckDB order.
+        - df (pd.DataFrame): Input DataFrame to validate and clean.
+        - schema_columns (List[str]): Expected column names in final DuckDB order.
 
     Returns:
         pd.DataFrame: A cleaned and schema-aligned DataFrame.
@@ -89,7 +88,7 @@ def align_df_with_schema(
 
 def insert_df_dedup(
     df: pd.DataFrame,
-    table_name: str,
+    table_name: str | TableName,
     key_cols: Optional[List[str]] = None,
     dedup: bool = True,
 ) -> None:
@@ -97,16 +96,16 @@ def insert_df_dedup(
     Inserts a DataFrame into a DuckDB table with optional deduplication.
 
     This function:
-    - Aligns the DataFrame to match the expected schema from DUCKDB_COLUMN_ORDER
+    - Aligns the DataFrame to match the expected schema from DUCKDB_SCHEMA_REGISTRY
     - Optionally deduplicates based on one or more key columns
     - Registers the DataFrame in DuckDB and performs deletion + insert
 
     Args:
-        df (pd.DataFrame): The DataFrame to insert.
-        table_name (str): Name of the DuckDB table to insert into.
-        key_cols (Optional[List[str]]): Column names to match for duplicate deletion.
+        - df (pd.DataFrame): The DataFrame to insert.
+            table_name: str | TableName: Name of the DuckDB table to insert into.
+        - key_cols (Optional[List[str]]): Column names to match for duplicate deletion.
                                         If not provided, a default composite key is used.
-        dedup (bool): If True, deletes rows that match key columns before inserting.
+        - dedup (bool): If True, deletes rows that match key columns before inserting.
 
     Raises:
         ValueError: If no schema is found for the given table.
@@ -118,7 +117,17 @@ def insert_df_dedup(
     con = get_duckdb_connection()
     con.register("df", df)
 
-    schema_columns = DUCKDB_COLUMN_ORDER.get(table_name)
+    # * Ensure table_name is a TableName enum instance (convert from str if needed)
+    try:
+        table_name = (
+            next(t for t in TableName if t.value == table_name)
+            if isinstance(table_name, str)
+            else table_name
+        )
+    except StopIteration:
+        raise ValueError(f"❌ Unknown table name: {table_name}")
+
+    schema_columns = DUCKDB_SCHEMA_REGISTRY[TableName[table_name]].column_order
     if schema_columns is None:
         raise ValueError(f"No schema defined for table '{table_name}'")
 

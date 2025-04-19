@@ -1,3 +1,5 @@
+"""/fsm/fsm_analytics.py"""
+
 from db_io.db_utils import get_stage_progress_counts, get_recent_urls
 
 
