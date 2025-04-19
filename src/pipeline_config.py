@@ -129,18 +129,9 @@ from project_config import (
     CLAUDE_SONNET,
     CLAUDE_OPUS,
 )
-
+from db_io.pipeline_enums import PipelineStage
 
 logger = logging.getLogger()
-
-
-# Enum for defining pipeline stages
-class PipelineStage(Enum):
-    """Enumeration for different pipeline stages"""
-
-    PREPROCESSING = "preprocessing"  # Stage for processing job posting & resume data
-    EVALUATION = "evaluation"  # Stage for evaluating resumes and job descriptions
-    EDITING = "editing"  # Stage for editing and refining the content
 
 
 # Default model IDs for OpenAI and Anthropic (Claude)

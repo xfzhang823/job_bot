@@ -7,7 +7,7 @@ This module should be run once at setup time or as part of a migration process.
 
 import logging
 from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.schema_definitions import DUCKDB_SCHEMAS
+from db_io.db_schema_registry import DUCKDB_TABLE_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ def create_all_duckdb_tables():
         Any exceptions encountered during DDL execution are caught and logged.
     """
     con = get_duckdb_connection()
-    for table, ddl in DUCKDB_SCHEMAS.items():
+    for table, ddl in DUCKDB_TABLE_SCHEMAS.items():
         try:
             con.execute(ddl)
             logger.info(f"✅ Created or confirmed table '{table}' exists.")

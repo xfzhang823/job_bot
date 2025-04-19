@@ -6,24 +6,24 @@ Each model corresponds to one table and includes a shared base class for metadat
 """
 
 from datetime import datetime
-from typing import Literal, Optional, Union
-from pydantic import BaseModel, HttpUrl, Field
+from typing import Optional, Union
+from pydantic import BaseModel, ConfigDict, HttpUrl, Field
 
 
-# User defined
-from db_io.schema_definitions import PipelineStage
-
-
-# ✅ Aliases to use throughout the code
-VersionType = Literal["original", "edited", "final"]
-StatusType = Literal["new", "in_progress", "complete", "skipped", "error"]
+# ✅ Import enums from schema_definitions
+from db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    Version,
+    LLMProvider,
+)
 
 
 # 🔁 Shared Base Model with common metadata fields
 class BaseDBModel(BaseModel):
     """
     Base model for DuckDB table rows with shared metadata fields:
-    `url`, `iteration`, `stage`, `source_file`, and `timestamp`.
+    `url`, `iteration`, `stage`, `source_file`, `timestamp`, `version`, `llm_provider`
     """
 
     url: Union[HttpUrl, str] = Field(
@@ -31,8 +31,8 @@ class BaseDBModel(BaseModel):
     )
     iteration: int = Field(
         0,
-        description="Which full pipeline cycle this record belongs to (starts at 0, increments \
-on reprocessing).",
+        description="Which full pipeline cycle this record belongs to (starts at 0, increments on \
+reprocessing).",
     )
     stage: PipelineStage = Field(
         ..., description="Pipeline stage that generated this row."
@@ -43,6 +43,14 @@ on reprocessing).",
     timestamp: datetime = Field(
         default_factory=datetime.now,
         description="Timestamp marking when this record was ingested.",
+    )
+    version: Version = Field(
+        default=Version.ORIGINAL,
+        description="Version of the data (e.g., original, edited, final).",
+    )
+    llm_provider: LLMProvider = Field(
+        default=LLMProvider.NONE,
+        description="LLM provider used to generate or process this row (e.g., openai).",
     )
 
 
@@ -83,9 +91,6 @@ class EditedResponsibilitiesRow(BaseDBModel):
     requirement_key: str = Field(..., description="Key of the target requirement.")
     optimized_text: str = Field(
         ..., description="LLM-edited version of the responsibility."
-    )
-    llm_provider: str = Field(
-        ..., description="LLM provider used to generate the edit (e.g., 'openai')."
     )
 
 
@@ -130,13 +135,6 @@ class SimilarityMetricsRow(BaseDBModel):
         None, description="Dimensionality-reduced score via PCA."
     )
 
-    version: VersionType = Field(
-        ..., description="Data version, e.g., 'original' or 'edited'."
-    )
-    llm_provider: str = Field(
-        ..., description="Provider used to generate metrics if LLM is involved."
-    )
-
 
 class JobPostingsRow(BaseDBModel):
     """
@@ -144,7 +142,7 @@ class JobPostingsRow(BaseDBModel):
     Includes job metadata and full content as a JSON string.
     """
 
-    status: str
+    status: PipelineStatus
     message: Optional[str]
     job_title: str
     company: str
@@ -172,7 +170,7 @@ class ExtractedRequirementRow(BaseDBModel):
     Includes category indices and individual item order.
     """
 
-    status: str
+    status: PipelineStatus
     message: Optional[str]
     requirement_category: str
     requirement_category_idx: int
@@ -193,36 +191,28 @@ class PrunedResponsibilitiesRow(BaseDBModel):
     )
 
 
-# * 🎛️ Central process tabler to control FSM
+# * ✅ Pipeline control table model
 class PipelineState(BaseDBModel):
     """Tracks the lifecycle and status of a job posting as it progresses through the pipeline."""
 
-    stage: Optional[str] = Field(
+    stage: Optional[PipelineStage] = Field(
         default=None,
         exclude=True,
         description="Excluded. Control model uses `last_stage` instead.",
     )  # * ✅ control table uses last stage to infers last and next stages (state machine)
 
-    llm_provider: str = Field(
-        ...,
-        description="LLM provider used for this pipeline (e.g., openai, anthropic).",
+    status: PipelineStatus = Field(
+        default=PipelineStatus.NEW,
+        description="Pipeline status (e.g., new, in_progress, complete, error).",
     )
-    version: VersionType = Field(
-        "original",
-        description="The version of the content being processed (e.g., original, edited, final).",
-    )
-    status: StatusType = Field(
-        default="new",
-        description="Overall status of this job posting in the pipeline lifecycle.",
-    )
-    last_stage: Optional[str] = Field(
-        default=None, description="Most recently completed stage of the pipeline."
+    last_stage: Optional[PipelineStage] = Field(
+        default=None, description="Last completed stage."
     )
     is_active: bool = Field(
-        default=True,
-        description="Flag indicating whether this job is currently included in pipeline runs.",
+        default=True, description="Whether this job is currently active."
     )
     notes: Optional[str] = Field(
-        default=None,
-        description="Optional metadata such as error messages, debug notes, or override flags.",
+        default=None, description="Optional notes or debug info."
     )
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)

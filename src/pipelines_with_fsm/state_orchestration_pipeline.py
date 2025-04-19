@@ -25,7 +25,8 @@ job posting URL is accurately tracked and progresses smoothly through each defin
 
 4. **High-Level FSM Orchestration:**
    - Coordinates overall pipeline stage execution based on FSM state.
-   - Interfaces with existing pipeline execution logic (`run_pipeline.py`, `pipeline_fsm_manager.py`).
+   - Interfaces with existing pipeline execution logic (`run_pipeline.py`,
+   `pipeline_fsm_manager.py`).
 
 ---
 

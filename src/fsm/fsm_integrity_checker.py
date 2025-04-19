@@ -1,5 +1,9 @@
+"""
+/fsm/fsm_integrity_checker.py
+"""
+
 from db_io.db_utils import get_urls_by_stage_and_status
-from db_io.schema_definitions import PipelineStage
+from db_io.pipeline_enums import PipelineStage
 from fsm.pipeline_fsm import PipelineFSM, get_transitions
 from db_io.state_sync import load_pipeline_state
 

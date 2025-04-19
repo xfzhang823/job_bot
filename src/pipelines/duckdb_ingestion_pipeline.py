@@ -23,12 +23,14 @@ Supported phases:
 from pathlib import Path
 from typing import cast, Type, Callable, List
 import logging
+from enum import Enum
 import pandas as pd
 from pydantic import BaseModel
-from db_io.db_transform import flatten_model_to_df, add_ingestion_metadata
+from db_io.db_transform import flatten_model_to_df, add_metadata
 from db_io.db_insert import insert_df_dedup
 from db_io.setup_duckdb import create_all_duckdb_tables
-from db_io.schema_definitions import PipelineStage, TableName
+from db_io.pipeline_enums import PipelineStage, TableName
+from db_io.db_schema_registry import DUCKDB_PRIMARY_KEYS
 from models.resume_job_description_io_models import (
     JobPostingsBatch,
     JobPostingUrlsBatch,
@@ -87,47 +89,143 @@ staging_sources = [
 ]
 
 
-def preprocessing_db_ingestion_mini_pipeline():
-    """
-        Ingests raw preprocessing outputs into DuckDB.
+def ingest_job_urls_file_pipeline():
+    """Ingests `job_urls` table from a single JSON file."""
+    table_name = TableName.JOB_URLS
+    file_path = JOB_POSTING_URLS_FILTERED_FILE
+    logger.info(f"📥 Ingesting job URLs from {file_path}")
 
-        This includes:
-        - `job_urls`: URLs of job postings to crawl
-        - `job_postings`: Scraped content of job descriptions
-        - `extracted_requirements`: LLM-extracted requirement categories
+    if not file_path.exists():
+        logger.warning(f"⚠️ File not found: {file_path}")
+        return
 
-        Each JSON file is loaded via Pydantic, flattened, aligned, and inserted into
-    its corresponding table.
-    """
-    logger.info("\U0001f680 Starting preprocessing db ingestion mini-pipeline")
+    model = load_job_posting_urls_file_model(file_path)
+    if model is None:
+        logger.warning("⚠️ Skipping job URLs due to model loading failure.")
+        return
 
-    for table_name, file_path, load_fn in preprocessing_sources:
-        logger.info(f"\U0001f4e5 Ingesting {table_name} from {file_path}")
-        if not file_path.exists():
-            logger.warning(f"\u26a0\ufe0f File not found: {file_path}")
-            continue
+    df = flatten_model_to_df(
+        model=model,
+        table_name=table_name,
+        source_file=file_path,
+        stage=PipelineStage.JOB_URLS,
+    )
+    insert_df_dedup(df, table_name.value)
+    logger.info("✅ job_urls ingestion complete.")
 
-        model = load_fn(file_path)
-        if model is None:
-            logger.warning(
-                f"\u26a0\ufe0f Skipping {table_name} due to model loading failure."
-            )
-            continue
 
-        df = flatten_model_to_df(
-            model=model,
-            table_name=table_name,
-            source_file=file_path,
-            stage=PipelineStage.PREPROCESSING,
+def ingest_job_postings_file_pipeline():
+    """Ingests `job_postings` table from a single JSON file."""
+    table_name = TableName.JOB_POSTINGS
+    file_path = JOB_DESCRIPTIONS_JSON_FILE
+    logger.info(f"📥 Ingesting job postings from {file_path}")
+
+    if not file_path.exists():
+        logger.warning(f"⚠️ File not found: {file_path}")
+        return
+
+    model = load_job_postings_file_model(file_path)
+    if model is None:
+        logger.warning("⚠️ Skipping job postings due to model loading failure.")
+        return
+
+    df = flatten_model_to_df(
+        model=model,
+        table_name=table_name,
+        source_file=file_path,
+        stage=PipelineStage.JOB_POSTINGS,
+    )
+    insert_df_dedup(df, table_name.value)
+    logger.info("✅ job_postings ingestion complete.")
+
+
+def ingest_extracted_requirements_file_pipeline():
+    """Ingests `extracted_requirements` table from a single JSON file."""
+    table_name = TableName.EXTRACTED_REQUIREMENTS
+    file_path = JOB_REQUIREMENTS_JSON_FILE
+    logger.info(f"📥 Ingesting extracted requirements from {file_path}")
+
+    if not file_path.exists():
+        logger.warning(f"⚠️ File not found: {file_path}")
+        return
+
+    model = load_extracted_requirements_model(file_path)
+    if model is None:
+        logger.warning(
+            "⚠️ Skipping extracted requirements due to model loading failure."
         )
+        return
 
-        logger.debug(df.head(1))
-        logger.debug(df.columns)
-        logger.debug(df.dtypes)
+    df = flatten_model_to_df(
+        model=model,
+        table_name=table_name,
+        source_file=file_path,
+        stage=PipelineStage.EXTRACTED_REQUIREMENTS,
+    )
 
-        insert_df_dedup(df, table_name.value)
+    # todo: debug; delete later
+    # ✅ debug: Detect duplicated primary keys (within the DataFrame)
+    table_key = table_name.value if isinstance(table_name, Enum) else table_name
+    pk_fields = DUCKDB_PRIMARY_KEYS.get(table_key)
 
-    logger.info("\u2705 Preprocessing db ingestion mini-pipeline complete.")
+    missing_cols = [col for col in pk_fields if col not in df.columns]
+    if missing_cols:
+        logger.error(f"❌ DataFrame missing primary key columns: {missing_cols}")
+    else:
+        dupes = df[df.duplicated(subset=pk_fields, keep=False)]
+        if not dupes.empty:
+            duped_urls = dupes["url"].unique().tolist()
+            logger.warning(
+                f"⚠️ Detected {len(dupes)} duplicated rows based on PK {pk_fields} in table '{table_key}'. "
+                f"Problematic URLs: {duped_urls}"
+            )
+    # todo: debut; delete later
+
+    insert_df_dedup(df, table_name.value)
+    logger.info("✅ extracted_requirements ingestion complete.")
+
+
+# def preprocessing_db_ingestion_mini_pipeline():
+#     """
+#         Ingests raw preprocessing outputs into DuckDB.
+
+#         This includes:
+#         - `job_urls`: URLs of job postings to crawl
+#         - `job_postings`: Scraped content of job descriptions
+#         - `extracted_requirements`: LLM-extracted requirement categories
+
+#         Each JSON file is loaded via Pydantic, flattened, aligned, and inserted into
+#     its corresponding table.
+#     """
+#     logger.info("\U0001f680 Starting preprocessing db ingestion mini-pipeline")
+
+#     for table_name, file_path, load_fn in preprocessing_sources:
+#         logger.info(f"\U0001f4e5 Ingesting {table_name} from {file_path}")
+#         if not file_path.exists():
+#             logger.warning(f"\u26a0\ufe0f File not found: {file_path}")
+#             continue
+
+#         model = load_fn(file_path)
+#         if model is None:
+#             logger.warning(
+#                 f"\u26a0\ufe0f Skipping {table_name} due to model loading failure."
+#             )
+#             continue
+
+#         df = flatten_model_to_df(
+#             model=model,
+#             table_name=table_name,
+#             source_file=file_path,
+#             stage=PipelineStage.PREPROCESSING,
+#         )
+
+#         logger.debug(df.head(1))
+#         logger.debug(df.columns)
+#         logger.debug(df.dtypes)
+
+#         insert_df_dedup(df, table_name.value)
+
+#     logger.info("\u2705 Preprocessing db ingestion mini-pipeline complete.")
 
 
 def staging_db_ingestion_mini_pipeline():
@@ -211,7 +309,7 @@ def evaluation_original_metrics_db_ingestion_mini_pipeline(
             continue
 
         try:
-            df = add_ingestion_metadata(
+            df = add_metadata(
                 df=df,
                 source_file=file_path,
                 stage=PipelineStage.EVALUATION,
@@ -258,7 +356,7 @@ def evaluation_edited_metrics_db_ingestion_mini_pipeline(
             continue
 
         try:
-            df = add_ingestion_metadata(
+            df = add_metadata(
                 df=df,
                 source_file=file_path,
                 stage=PipelineStage.REVALUATION,
@@ -339,8 +437,10 @@ def run_duckdb_ingestion_pipeline():
     create_all_duckdb_tables()
     logger.info("\u2705 DuckDB schema setup complete.")
 
-    preprocessing_db_ingestion_mini_pipeline()
-    staging_db_ingestion_mini_pipeline()
-    evaluation_original_metrics_db_ingestion_mini_pipeline()
-    edited_responsibilities_db_ingestion_mini_pipeline()
-    evaluation_edited_metrics_db_ingestion_mini_pipeline()
+    ingest_job_urls_file_pipeline()
+    ingest_job_postings_file_pipeline()
+    ingest_extracted_requirements_file_pipeline()
+    # staging_db_ingestion_mini_pipeline()
+    # evaluation_original_metrics_db_ingestion_mini_pipeline()
+    # edited_responsibilities_db_ingestion_mini_pipeline()
+    # evaluation_edited_metrics_db_ingestion_mini_pipeline()

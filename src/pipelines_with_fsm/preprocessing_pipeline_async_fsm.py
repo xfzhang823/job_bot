@@ -36,10 +36,10 @@ from preprocessing.extract_requirements_with_llms_async import (
 from preprocessing.preprocessing_utils import find_new_urls
 
 from db_io.db_insert import insert_df_dedup
-from db_io.db_transform import flatten_model_to_df, add_ingestion_metadata
-from db_io.schema_definitions import PipelineStage, PipelineStatus, TableName
+from db_io.db_transform import flatten_model_to_df, add_metadata
+from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 
-from fsm.fsm_utils import advance_fsm_for_url
+from fsm.llm_fsm import advance_fsm_for_url
 from fsm.pipeline_fsm_manager import PipelineFSMManager
 
 from models.resume_job_description_io_models import (
@@ -524,7 +524,7 @@ async def run_preprocessing_pipeline_async_fsm(
             source_file="pipeline",
             stage=PipelineStage.PREPROCESSING,
         )
-        job_postings_df = add_ingestion_metadata(
+        job_postings_df = add_metadata(
             df=job_postings_df,
             source_file="pipeline",
             stage=PipelineStage.PREPROCESSING,
@@ -543,7 +543,7 @@ async def run_preprocessing_pipeline_async_fsm(
             source_file="pipeline",
             stage=PipelineStage.PREPROCESSING,
         )
-        extracted_df = add_ingestion_metadata(
+        extracted_df = add_metadata(
             df=extracted_df,
             source_file="pipeline",
             stage=PipelineStage.PREPROCESSING,

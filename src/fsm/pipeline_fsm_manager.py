@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional, Union
 from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.schema_definitions import TableName
+from db_io.db_schema_registry import TableName
 from fsm.pipeline_fsm import PipelineFSM
 from models.duckdb_table_models import PipelineState
 

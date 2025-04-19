@@ -69,7 +69,7 @@ from models.resume_job_description_io_models import (
 from models.duckdb_table_models import PipelineState
 from db_io.duckdb_adapter import get_duckdb_connection
 from db_io.flatten_and_rehydrate import *
-from db_io.schema_definitions import TableName, PipelineStatus
+from db_io.db_schema_registry import TableName, PipelineStatus
 
 logger = logging.getLogger(__name__)
 

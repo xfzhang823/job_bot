@@ -9,19 +9,21 @@ progress monitoring, and diagnostics.
 Each function returns raw values or DataFrames depending on the context.
 """
 
-from typing import Optional, List
+# Standard
+from typing import Optional, List, get_origin
+from datetime import datetime
+from enum import Enum
+from pydantic import BaseModel, HttpUrl
+from pydantic_core import PydanticUndefined
+from typing import get_origin, get_args, Union
 import pandas as pd
+
+# Project level
 from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.schema_definitions import PipelineStage, PipelineStatus
+from db_io.pipeline_enums import PipelineStage, PipelineStatus
 
 
 # ✅ Core FSM Worklist Search
-from db_io.duckdb_adapter import get_duckdb_connection
-from models.duckdb_table_models import PipelineStatus
-from db_io.schema_definitions import PipelineStage
-from typing import List, Optional
-
-
 def get_urls_by_status(status: PipelineStatus) -> List[str]:
     """
     Return a list of all URLs matching the given pipeline status.
@@ -182,3 +184,114 @@ def get_recent_urls(limit: int = 10) -> pd.DataFrame:
     """,
         (limit,),
     ).df()
+
+
+# ✅ DB Schema Generation Utilities
+def duckdb_type_from_annotation(annotation) -> str:
+    """
+    Maps a Pydantic annotation or standard Python type to a DuckDB-compatible SQL type.
+
+    Args:
+        annotation: The type annotation from a Pydantic field.
+
+    Returns:
+        str: A valid DuckDB SQL type (e.g., TEXT, INTEGER, DOUBLE).
+    """
+    base = get_origin(annotation) or annotation
+
+    # ✅ Handle Optional[X] / Union[X, None]
+    if base is Union:
+        args = get_args(annotation)
+        # remove NoneType from union
+        base = next((arg for arg in args if arg is not type(None)), str)
+
+    # ✅ Enum → TEXT
+    if isinstance(base, type) and issubclass(base, Enum):
+        return "TEXT"
+
+    # ✅ Pydantic-specific / URL
+    if base in [HttpUrl]:
+        return "TEXT"
+
+    # ✅ Date/time
+    if base in [datetime]:
+        return "TIMESTAMP"
+
+    # ✅ Basic primitives
+    if base in [str]:
+        return "TEXT"
+    if base in [int]:
+        return "INTEGER"
+    if base in [float]:
+        return "DOUBLE"
+    if base in [bool]:
+        return "BOOLEAN"
+
+    return "TEXT"  # ✅ Fallback for unknown or unsupported types
+
+
+def generate_table_schema_from_model(
+    model: type[BaseModel],
+    table_name: str,
+    primary_keys: list[str] | None = None,
+) -> str:
+    """
+    Auto-generates a DuckDB CREATE TABLE DDL statement from a Pydantic model.
+
+    Args:
+        model (type[BaseModel]): A Pydantic model class (not instance).
+        table_name (str): Desired DuckDB table name.
+        primary_keys (list[str]): Column names to use as primary key.
+
+    Returns:
+        str: SQL CREATE TABLE statement.
+    """
+    lines = []
+
+    for name, field in model.model_fields.items():
+        annotation = field.annotation
+        duckdb_type = duckdb_type_from_annotation(annotation)
+
+        # Static default support (including Enums)
+        default_clause = ""
+        if field.default is not PydanticUndefined:
+            val = field.default
+            if val is None:
+                default_clause = "DEFAULT NULL"
+            elif isinstance(val, Enum):
+                val = val.value
+                default_clause = f"DEFAULT '{val}'"
+            elif isinstance(val, str):
+                default_clause = f"DEFAULT '{val}'"
+            elif isinstance(val, bool):
+                default_clause = f"DEFAULT {'TRUE' if val else 'FALSE'}"
+            else:
+                default_clause = f"DEFAULT {val}"
+
+        lines.append(f"{name} {duckdb_type} {default_clause}".strip())
+
+    pk_clause = f", PRIMARY KEY ({', '.join(primary_keys)})" if primary_keys else ""
+
+    # 🔧 Use intermediate variable to avoid backslash in f-string
+    field_block = ",\n    ".join(lines)
+    return (
+        f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
+        f"    {field_block}"
+        f"{pk_clause}\n);"
+    )
+
+
+# ✅ DB Column Order Generation Utilities
+def generate_table_column_order_from_model(model: type[BaseModel]) -> list[str]:
+    """
+    Extracts DuckDB column order from a Pydantic model.
+
+    Args:
+        model (type[BaseModel]): A Pydantic model class
+
+    Returns:
+        list[str]: Ordered list of field names matching the model definition
+
+    * Column order is based on order in Pydantic model.
+    """
+    return list(model.model_fields.keys())
