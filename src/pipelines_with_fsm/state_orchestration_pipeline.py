@@ -43,11 +43,13 @@ job posting URL is accurately tracked and progresses smoothly through each defin
 
 3. Trigger FSM-based Pipeline Execution:
    - Query current FSM states from DuckDB (`pipeline_control` table).
-   - Identify URLs eligible for each pipeline stage (e.g., job_postings, extracted_requirements).
+   - Identify URLs eligible for each pipeline stage (e.g., job_postings,
+   extracted_requirements).
    - Execute respective pipeline modules based on FSM stage/status.
 
 4. FSM State Advancement:
-   - Upon successful completion of each stage for each URL, explicitly advance FSM states.
+   - Upon successful completion of each stage for each URL, explicitly advance 
+   FSM states.
    - Persist FSM updates into DuckDB to ensure accurate tracking.
 
 5. Repeat Process:
@@ -128,9 +130,9 @@ orchestrator.execute_pipeline_stages()
 
 ---
 
-This structured and FSM-centric orchestration ensures robust, transparent, and scalable
-pipeline execution, laying a clear foundation for future enhancements like LLM-driven
-state management.
+This structured and FSM-centric orchestration ensures robust, transparent, 
+and scalable pipeline execution, laying a clear foundation for future 
+enhancements like LLM-driven state management.
 
 """
 
