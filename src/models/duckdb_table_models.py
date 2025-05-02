@@ -203,7 +203,7 @@ class PipelineState(BaseDBModel):
 
     status: PipelineStatus = Field(
         default=PipelineStatus.NEW,
-        description="Pipeline status (e.g., new, in_progress, complete, error).",
+        description="Pipeline status (new, in_progress, complete, skipped, error",
     )
     last_stage: Optional[PipelineStage] = Field(
         default=None, description="Last completed stage."

@@ -89,6 +89,43 @@ staging_sources = [
 ]
 
 
+def ingest_single_file(
+    table_name: TableName,
+    file_path: Path,
+    loader_fn: Callable[[Path], BaseModel],
+    stage: PipelineStage,
+):
+    """
+    Generic ingestion function for single JSON files validated by Pydantic.
+
+    Args:
+        table_name (TableName): Enum of the DuckDB table to insert into.
+        file_path (Path): Path to the JSON file.
+        loader_fn (Callable): Pydantic model loader for the file.
+        stage (PipelineStage): Pipeline stage for metadata tagging.
+    """
+    logger.info(f"📥 Ingesting {table_name.value} from {file_path}")
+
+    if not file_path.exists():
+        logger.warning(f"⚠️ File not found: {file_path}")
+        return
+
+    model = loader_fn(file_path)
+    if model is None:
+        logger.warning(f"⚠️ Skipping {table_name.value} due to model load failure.")
+        return
+
+    df = flatten_model_to_df(
+        model=model,
+        table_name=table_name,
+        source_file=file_path,
+        stage=stage,
+    )
+    insert_df_dedup(df, table_name.value)
+
+    logger.info(f"✅ {table_name.value} ingestion complete.")
+
+
 def ingest_job_urls_file_pipeline():
     """Ingests `job_urls` table from a single JSON file."""
     table_name = TableName.JOB_URLS
@@ -183,49 +220,6 @@ def ingest_extracted_requirements_file_pipeline():
 
     insert_df_dedup(df, table_name.value)
     logger.info("✅ extracted_requirements ingestion complete.")
-
-
-# def preprocessing_db_ingestion_mini_pipeline():
-#     """
-#         Ingests raw preprocessing outputs into DuckDB.
-
-#         This includes:
-#         - `job_urls`: URLs of job postings to crawl
-#         - `job_postings`: Scraped content of job descriptions
-#         - `extracted_requirements`: LLM-extracted requirement categories
-
-#         Each JSON file is loaded via Pydantic, flattened, aligned, and inserted into
-#     its corresponding table.
-#     """
-#     logger.info("\U0001f680 Starting preprocessing db ingestion mini-pipeline")
-
-#     for table_name, file_path, load_fn in preprocessing_sources:
-#         logger.info(f"\U0001f4e5 Ingesting {table_name} from {file_path}")
-#         if not file_path.exists():
-#             logger.warning(f"\u26a0\ufe0f File not found: {file_path}")
-#             continue
-
-#         model = load_fn(file_path)
-#         if model is None:
-#             logger.warning(
-#                 f"\u26a0\ufe0f Skipping {table_name} due to model loading failure."
-#             )
-#             continue
-
-#         df = flatten_model_to_df(
-#             model=model,
-#             table_name=table_name,
-#             source_file=file_path,
-#             stage=PipelineStage.PREPROCESSING,
-#         )
-
-#         logger.debug(df.head(1))
-#         logger.debug(df.columns)
-#         logger.debug(df.dtypes)
-
-#         insert_df_dedup(df, table_name.value)
-
-#     logger.info("\u2705 Preprocessing db ingestion mini-pipeline complete.")
 
 
 def staging_db_ingestion_mini_pipeline():
