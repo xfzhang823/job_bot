@@ -62,19 +62,10 @@ from models.resume_job_description_io_models import (
     SimilarityMetrics,
 )
 from models.llm_response_models import RequirementsResponse
+from models.model_type import ModelType
 
 logger = logging.getLogger(__name__)
 
-ModelType = Union[
-    RequirementsResponse,
-    Requirements,
-    Responsibilities,
-    NestedResponsibilities,
-    JobPostingUrlsBatch,
-    JobPostingsBatch,
-    ExtractedRequirementsBatch,
-    SimilarityMetrics,
-]
 
 T = TypeVar("T", bound=BaseModel)
 FlattenFuncTyped = Callable[[T], pd.DataFrame]

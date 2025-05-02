@@ -29,8 +29,9 @@ from pydantic import BaseModel
 from db_io.db_transform import flatten_model_to_df, add_metadata
 from db_io.db_insert import insert_df_dedup
 from db_io.setup_duckdb import create_all_duckdb_tables
-from db_io.pipeline_enums import PipelineStage, TableName
-from db_io.db_schema_registry import DUCKDB_PRIMARY_KEYS
+from db_io.pipeline_enums import PipelineStage, TableName, LLMProvider, Version
+
+# from db_io.db_schema_registry import DUCKDB_PRIMARY_KEYS
 from models.resume_job_description_io_models import (
     JobPostingsBatch,
     JobPostingUrlsBatch,
@@ -38,6 +39,8 @@ from models.resume_job_description_io_models import (
     Responsibilities,
     Requirements,
 )
+from models.model_type import ModelType
+
 from utils.pydantic_model_loaders_from_files import (
     load_job_postings_file_model,
     load_job_posting_urls_file_model,
@@ -92,17 +95,29 @@ staging_sources = [
 def ingest_single_file(
     table_name: TableName,
     file_path: Path,
-    loader_fn: Callable[[Path], BaseModel],
+    loader_fn: Callable[[Path], BaseModel | None],
     stage: PipelineStage,
 ):
     """
-    Generic ingestion function for single JSON files validated by Pydantic.
+    Ingests a single validated JSON file into a DuckDB table.
+
+    This function handles common ingestion logic for files backed by Pydantic models.
+
+    Steps:
+    1. Loads the file via `loader_fn`, which returns a validated Pydantic model
+       (or None on failure).
+    2. If valid, casts the model to `ModelType` for compatibility with the flattening
+    dispatcher.
+    3. Uses `flatten_model_to_df()` to convert the model to a DataFrame and
+       append metadata (e.g. source_file, stage, timestamp).
+    4. Inserts the result into DuckDB using `insert_df_dedup()` with deduplication
+       and schema alignment.
 
     Args:
-        table_name (TableName): Enum of the DuckDB table to insert into.
+        table_name (TableName): Target DuckDB table.
         file_path (Path): Path to the JSON file.
-        loader_fn (Callable): Pydantic model loader for the file.
-        stage (PipelineStage): Pipeline stage for metadata tagging.
+        loader_fn (Callable): Loader function that returns a Pydantic model or None.
+        stage (PipelineStage): Enum indicating the processing stage for metadata.
     """
     logger.info(f"📥 Ingesting {table_name.value} from {file_path}")
 
@@ -110,10 +125,13 @@ def ingest_single_file(
         logger.warning(f"⚠️ File not found: {file_path}")
         return
 
-    model = loader_fn(file_path)
-    if model is None:
+    model_raw = loader_fn(file_path)
+    if model_raw is None:
         logger.warning(f"⚠️ Skipping {table_name.value} due to model load failure.")
         return
+
+    # Cast to ModelType
+    model = cast(ModelType, model_raw)
 
     df = flatten_model_to_df(
         model=model,
@@ -126,315 +144,229 @@ def ingest_single_file(
     logger.info(f"✅ {table_name.value} ingestion complete.")
 
 
-def ingest_job_urls_file_pipeline():
-    """Ingests `job_urls` table from a single JSON file."""
-    table_name = TableName.JOB_URLS
-    file_path = JOB_POSTING_URLS_FILTERED_FILE
-    logger.info(f"📥 Ingesting job URLs from {file_path}")
+def ingest_flattened_json_file(
+    file_path: Path,
+    table_name: TableName,
+    loader_fn: Callable[[Path], ModelType | None],
+    stage: PipelineStage,
+    version: Version = Version.ORIGINAL,
+    llm_provider: LLMProvider = LLMProvider.OPENAI,
+    iteration: int = 0,
+):
+    """
+    Loads and inserts a single flattened JSON file into DuckDB with full metadata.
+    """
+    logger.info(f"📥 Ingesting {table_name.value} from {file_path.name}")
 
-    if not file_path.exists():
-        logger.warning(f"⚠️ File not found: {file_path}")
-        return
-
-    model = load_job_posting_urls_file_model(file_path)
+    model = loader_fn(file_path)
     if model is None:
-        logger.warning("⚠️ Skipping job URLs due to model loading failure.")
+        logger.warning(f"⚠️ Skipping {file_path.name} due to validation failure.")
         return
 
     df = flatten_model_to_df(
         model=model,
         table_name=table_name,
         source_file=file_path,
+        stage=stage,
+    )
+
+    df["version"] = version.value
+    df["llm_provider"] = llm_provider.value
+    df["iteration"] = iteration
+
+    insert_df_dedup(df, table_name.value)
+    logger.info(f"✅ Inserted {table_name.value} from {file_path.name}")
+
+
+def ingest_job_urls_file_pipeline():
+    ingest_single_file(
+        table_name=TableName.JOB_URLS,
+        file_path=JOB_POSTING_URLS_FILTERED_FILE,
+        loader_fn=load_job_posting_urls_file_model,
         stage=PipelineStage.JOB_URLS,
     )
-    insert_df_dedup(df, table_name.value)
-    logger.info("✅ job_urls ingestion complete.")
 
 
 def ingest_job_postings_file_pipeline():
-    """Ingests `job_postings` table from a single JSON file."""
-    table_name = TableName.JOB_POSTINGS
-    file_path = JOB_DESCRIPTIONS_JSON_FILE
-    logger.info(f"📥 Ingesting job postings from {file_path}")
-
-    if not file_path.exists():
-        logger.warning(f"⚠️ File not found: {file_path}")
-        return
-
-    model = load_job_postings_file_model(file_path)
-    if model is None:
-        logger.warning("⚠️ Skipping job postings due to model loading failure.")
-        return
-
-    df = flatten_model_to_df(
-        model=model,
-        table_name=table_name,
-        source_file=file_path,
+    ingest_single_file(
+        table_name=TableName.JOB_POSTINGS,
+        file_path=JOB_DESCRIPTIONS_JSON_FILE,
+        loader_fn=load_job_postings_file_model,  # type: ignore[arg-type]
         stage=PipelineStage.JOB_POSTINGS,
     )
-    insert_df_dedup(df, table_name.value)
-    logger.info("✅ job_postings ingestion complete.")
 
 
 def ingest_extracted_requirements_file_pipeline():
-    """Ingests `extracted_requirements` table from a single JSON file."""
-    table_name = TableName.EXTRACTED_REQUIREMENTS
-    file_path = JOB_REQUIREMENTS_JSON_FILE
-    logger.info(f"📥 Ingesting extracted requirements from {file_path}")
+    ingest_single_file(
+        table_name=TableName.EXTRACTED_REQUIREMENTS,
+        file_path=JOB_REQUIREMENTS_JSON_FILE,
+        loader_fn=load_extracted_requirements_model,  # type: ignore[arg-type]
+        stage=PipelineStage.EXTRACTED_REQUIREMENTS,
+    )
 
-    if not file_path.exists():
-        logger.warning(f"⚠️ File not found: {file_path}")
+
+def ingest_flattened_requirements_file(file_path: Path):
+    ingest_flattened_json_file(
+        file_path=file_path,
+        table_name=TableName.FLATTENED_REQUIREMENTS,
+        loader_fn=load_requirements_model,
+        stage=PipelineStage.FLATTENED_REQUIREMENTS,
+        version=Version.ORIGINAL,
+        llm_provider=LLMProvider.OPENAI,
+        iteration=0,
+    )
+
+
+def ingest_flattened_responsibilities_file(file_path: Path):
+    ingest_flattened_json_file(
+        file_path=file_path,
+        table_name=TableName.FLATTENED_RESPONSIBILITIES,
+        loader_fn=load_responsibilities_model,
+        stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
+        version=Version.ORIGINAL,
+        llm_provider=LLMProvider.OPENAI,
+        iteration=0,
+    )
+
+
+def ingest_similarity_metrics_file(
+    file_path: Path,
+    version: Version,
+    stage: PipelineStage,
+    llm_provider: LLMProvider,
+    iteration: int = 0,
+):
+    """
+    Loads and inserts a similarity metrics CSV into DuckDB with metadata.
+    """
+    logger.info(f"📊 Ingesting similarity metrics from {file_path.name}")
+
+    df = load_similarity_metrics_model_from_csv(file_path)
+    if df is None:
+        logger.warning(f"⚠️ Skipping {file_path.name} due to validation failure.")
         return
 
-    model = load_extracted_requirements_model(file_path)
+    df = add_metadata(
+        df=df,
+        file_path=file_path,
+        stage=stage,
+        table=TableName.SIMILARITY_METRICS,
+        version=version,
+        llm_provider=llm_provider,
+    )
+    insert_df_dedup(df, TableName.SIMILARITY_METRICS.value)
+    logger.info(f"✅ Inserted metrics from {file_path.name}")
+
+
+def ingest_edited_responsibilities_file(
+    file_path: Path,
+    llm_provider: LLMProvider,
+    iteration: int = 0,
+):
+    """
+    Ingests a single LLM-edited responsibilities JSON file into the DuckDB database.
+
+    This function is used during the re-evaluation stage of the pipeline, where resume
+    responsibilities have been rewritten or optimized by an LLM (e.g., OpenAI or Anthropic)
+    and saved in nested JSON format.
+
+    Steps:
+    1. Loads the file using `load_nested_responsibilities_model()` to validate its structure
+       as a `NestedResponsibilities` Pydantic model.
+    2. Flattens the model using `flatten_model_to_df()` into a tabular DataFrame suitable
+       for DuckDB, and tags it with the `EDITED_RESPONSIBILITIES` stage.
+    3. Adds metadata fields:
+        - `version = Version.EDITED`
+        - `llm_provider = the provider used for editing`
+        - `iteration = the re-evaluation round (default = 0)`
+    4. Inserts the DataFrame into the `edited_responsibilities` DuckDB table using
+       `insert_df_dedup()`, which handles deduplication and schema enforcement.
+
+    Args:
+        file_path (Path): Path to the edited responsibilities JSON file.
+        llm_provider (LLMProvider): The LLM provider responsible for generating the edits.
+        iteration (int): The pipeline iteration number, defaults to 0.
+
+    Raises:
+        Logs a warning and skips insertion if the file fails validation.
+    """
+
+    logger.info(f"📝 Ingesting edited responsibilities from {file_path.name}")
+
+    model = load_nested_responsibilities_model(file_path)
     if model is None:
-        logger.warning(
-            "⚠️ Skipping extracted requirements due to model loading failure."
-        )
+        logger.warning(f"⚠️ Skipping {file_path.name} due to validation failure.")
         return
 
     df = flatten_model_to_df(
         model=model,
-        table_name=table_name,
+        table_name=TableName.EDITED_RESPONSIBILITIES,
         source_file=file_path,
-        stage=PipelineStage.EXTRACTED_REQUIREMENTS,
+        stage=PipelineStage.EDITED_RESPONSIBILITIES,
     )
+    df["version"] = Version.EDITED.value
+    df["llm_provider"] = llm_provider.value
+    df["iteration"] = iteration
 
-    # todo: debug; delete later
-    # ✅ debug: Detect duplicated primary keys (within the DataFrame)
-    table_key = table_name.value if isinstance(table_name, Enum) else table_name
-    pk_fields = DUCKDB_PRIMARY_KEYS.get(table_key)
-
-    missing_cols = [col for col in pk_fields if col not in df.columns]
-    if missing_cols:
-        logger.error(f"❌ DataFrame missing primary key columns: {missing_cols}")
-    else:
-        dupes = df[df.duplicated(subset=pk_fields, keep=False)]
-        if not dupes.empty:
-            duped_urls = dupes["url"].unique().tolist()
-            logger.warning(
-                f"⚠️ Detected {len(dupes)} duplicated rows based on PK {pk_fields} in table '{table_key}'. "
-                f"Problematic URLs: {duped_urls}"
-            )
-    # todo: debut; delete later
-
-    insert_df_dedup(df, table_name.value)
-    logger.info("✅ extracted_requirements ingestion complete.")
-
-
-def staging_db_ingestion_mini_pipeline():
-    """
-    Ingests staging-phase outputs from iteration 0 into DuckDB.
-
-    This includes:
-    - `flattened_responsibilities`: Extracted resume bullets (flattened)
-    - `flattened_requirements`: Job requirement categories (flattened)
-
-    Processes each JSON file using validated models and flattener functions.
-    """
-
-    logger.info("\U0001f680 Starting staging db ingestion mini-pipeline")
-
-    for table_name, dir_path, loader_fn in staging_sources:
-        if not dir_path.exists():
-            logger.warning(f"\u26a0\ufe0f Directory not found: {dir_path}")
-            continue
-
-        logger.info(
-            f"\U0001f4c2 Scanning directory: {dir_path} for table: {table_name}"
-        )
-
-        for file_path in dir_path.glob("*.json"):
-            logger.info(f"\U0001f4e5 Ingesting from {file_path.name} into {table_name}")
-            model = loader_fn(file_path)
-            if model is None:
-                logger.warning(
-                    f"\u26a0\ufe0f Skipping {file_path.name} due to model load failure."
-                )
-                continue
-
-            df = flatten_model_to_df(
-                model=model,
-                table_name=table_name,
-                source_file=file_path,
-                stage=PipelineStage.STAGING,
-            )
-
-            logger.debug(df.head(1))
-            logger.debug(df.columns)
-            logger.debug(df.dtypes)
-
-            insert_df_dedup(df, table_name.value)
-
-    logger.info("\u2705 Staging db ingestion mini-pipeline complete.")
-
-
-def evaluation_original_metrics_db_ingestion_mini_pipeline(
-    source_dir: Path | str = SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR,
-):
-    """
-    Ingests original similarity metrics (iteration 0) into DuckDB.
-
-    Each file is a CSV of semantic scores between resume and job requirement pairs,
-    before any editing.
-    Metadata such as version and timestamp is added conditionally based on
-    the target schema.
-    """
-
-    logger.info(
-        "\U0001f680 Starting original similarity metrics ingestion mini-pipeline"
-    )
-
-    table_name = TableName.SIMILARITY_METRICS.value
-    dir_path = Path(source_dir) if isinstance(source_dir, str) else source_dir
-
-    if not dir_path.exists():
-        logger.warning(f"\u26a0\ufe0f Directory not found: {dir_path}")
-        return
-
-    for file_path in dir_path.glob("*.csv"):
-        logger.info(f"\U0001f4e5 Ingesting similarity metrics from {file_path.name}")
-        df = load_similarity_metrics_model_from_csv(file_path)
-
-        if df is None:
-            logger.warning(
-                f"\u26a0\ufe0f Skipping {file_path.name} due to validation failure."
-            )
-            continue
-
-        try:
-            df = add_metadata(
-                df=df,
-                source_file=file_path,
-                stage=PipelineStage.EVALUATION,
-                table=TableName.SIMILARITY_METRICS,
-                version="original",
-                iteration=0,
-            )
-            insert_df_dedup(df, table_name)
-        except Exception as e:
-            logger.exception(f"❌ Failed to insert {file_path.name}: {e}")
-
-        insert_df_dedup(df, table_name)
-
-    logger.info("\u2705 Original similarity metrics ingestion complete.")
-
-
-def evaluation_edited_metrics_db_ingestion_mini_pipeline(
-    source_dir: Path | str = SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR,
-    llm_provider: str = "openai",
-):
-    """
-    Ingests similarity metrics for LLM-edited responsibilities into DuckDB.
-
-    These CSVs include re-scored alignment data after LLM-based editing.
-    The pipeline appends the LLM provider name and version tag to ensure traceability.
-    """
-    logger.info("\U0001f680 Starting edited similarity metrics ingestion mini-pipeline")
-
-    table_name = TableName.SIMILARITY_METRICS.value
-    dir_path = Path(source_dir) if isinstance(source_dir, str) else source_dir
-
-    if not dir_path.exists():
-        logger.warning(f"\u26a0\ufe0f Directory not found: {dir_path}")
-        return
-
-    for file_path in dir_path.glob("*.csv"):
-        logger.info(f"\U0001f4e5 Ingesting similarity metrics from {file_path.name}")
-        df = load_similarity_metrics_model_from_csv(file_path)
-
-        if df is None:
-            logger.warning(
-                f"\u26a0\ufe0f Skipping {file_path.name} due to validation failure."
-            )
-            continue
-
-        try:
-            df = add_metadata(
-                df=df,
-                source_file=file_path,
-                stage=PipelineStage.REVALUATION,
-                table=TableName.SIMILARITY_METRICS,
-                version="edited",
-                llm_provider=llm_provider,
-                iteration=0,
-            )
-            insert_df_dedup(df, table_name)
-
-        except Exception as e:
-            logger.exception(f"❌ Failed to insert {file_path.name}: {e}")
-    logger.info("\u2705 Edited similarity metrics ingestion complete.")
-
-
-def edited_responsibilities_db_ingestion_mini_pipeline(
-    source_dir: Path | str = RESPS_FILES_ITERATE_1_OPENAI_DIR,
-    llm_provider: str = "openai",
-):
-    """
-    Ingests LLM-generated edits to resume responsibilities into DuckDB.
-
-    Each JSON file includes nested structures of rewritten content aligned to job requirements.
-    Adds the provider (e.g., OpenAI) to indicate which model performed the editing.
-    """
-
-    logger.info("\U0001f680 Starting edited responsibilities ingestion mini-pipeline")
-
-    table_name = TableName.EDITED_RESPONSIBILITIES
-    dir_path = Path(source_dir) if isinstance(source_dir, str) else source_dir
-
-    if not dir_path.exists():
-        logger.warning(f"\u26a0\ufe0f Directory not found: {dir_path}")
-        return
-
-    for file_path in dir_path.glob("*.json"):
-        logger.info(f"\U0001f4e5 Ingesting from {file_path.name} into {table_name}")
-        model = load_nested_responsibilities_model(file_path)
-
-        if model is None:
-            logger.warning(
-                f"\u26a0\ufe0f Skipping {file_path.name} due to model load failure."
-            )
-            continue
-
-        df = flatten_model_to_df(
-            model=model,
-            table_name=table_name,
-            source_file=file_path,
-            stage=PipelineStage.REVALUATION,
-            version="edited",
-            llm_provider="openai",
-        )
-        df["llm_provider"] = llm_provider
-
-        logger.debug(df.head(1))
-        logger.debug(df.columns)
-        logger.debug(df.dtypes)
-
-        insert_df_dedup(df, table_name.value)
-
-    logger.info("\u2705 Edited responsibilities ingestion mini-pipeline complete.")
+    insert_df_dedup(df, TableName.EDITED_RESPONSIBILITIES.value)
+    logger.info(f"✅ Inserted edited responsibilities from {file_path.name}")
 
 
 def run_duckdb_ingestion_pipeline():
     """
-    Main orchestrator function for DuckDB ingestion.
+    Main orchestrator for DuckDB ingestion.
 
-    Runs all ingestion stages in order:
-    1. Creates all tables using predefined schema
-    2. Inserts preprocessing JSON outputs
-    3. Loads flattened responsibilities and requirements
-    4. Ingests original similarity scores (pre-edit)
-    5. Ingests edited responsibilities (LLM-optimized)
-    6. Ingests updated similarity scores (post-edit)
+    Ingests all structured outputs from the resume-job alignment pipeline, including:
+    - Preprocessing outputs: job URLs, job postings, extracted requirements
+    - Staging outputs: flattened responsibilities and requirements (iteration 0)
+    - Evaluation outputs: similarity metrics (original and edited)
+    - Editing outputs: LLM-optimized responsibilities (iteration 1)
+
+    This function assumes all source files exist in their expected paths
+    as defined in `project_config.py`.
     """
-    logger.info("\U0001f3d7\ufe0f Creating all DuckDB tables...")
+    logger.info("🏗️ Creating DuckDB tables...")
     create_all_duckdb_tables()
-    logger.info("\u2705 DuckDB schema setup complete.")
+    logger.info("✅ DuckDB schema setup complete.")
 
+    # 🔹 Preprocessing (single-file tables)
     ingest_job_urls_file_pipeline()
     ingest_job_postings_file_pipeline()
     ingest_extracted_requirements_file_pipeline()
-    # staging_db_ingestion_mini_pipeline()
-    # evaluation_original_metrics_db_ingestion_mini_pipeline()
-    # edited_responsibilities_db_ingestion_mini_pipeline()
-    # evaluation_edited_metrics_db_ingestion_mini_pipeline()
+
+    # 🔹 Flattened requirements & responsibilities (iteration 0)
+    for file_path in REQS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
+        ingest_flattened_requirements_file(file_path)
+
+    for file_path in RESPS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
+        ingest_flattened_responsibilities_file(file_path)
+
+    # 🔹 Original similarity metrics (iteration 0)
+    for file_path in SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR.glob("*.csv"):
+        ingest_similarity_metrics_file(
+            file_path=file_path,
+            version=Version.ORIGINAL,
+            stage=PipelineStage.SIM_METRICS_EVAL,
+            llm_provider=LLMProvider.OPENAI,
+            iteration=0,
+        )
+
+    # 🔹 Edited responsibilities (iteration 1)
+    for file_path in RESPS_FILES_ITERATE_1_OPENAI_DIR.glob("*.json"):
+        ingest_edited_responsibilities_file(
+            file_path=file_path,
+            llm_provider=LLMProvider.OPENAI,
+            iteration=0,
+        )
+
+    # 🔹 Edited similarity metrics (iteration 1)
+    for file_path in SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR.glob("*.csv"):
+        ingest_similarity_metrics_file(
+            file_path=file_path,
+            version=Version.EDITED,
+            stage=PipelineStage.SIM_METRICS_REVAL,
+            llm_provider=LLMProvider.OPENAI,
+            iteration=0,
+        )
+
+    logger.info("🏁 DuckDB ingestion pipeline complete.")

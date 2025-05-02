@@ -1,5 +1,5 @@
 """
-duckdb_table_models.py
+/models/duckdb_table_models.py
 
 Pydantic models representing DuckDB tables used in the resume-job alignment pipeline.
 Each model corresponds to one table and includes a shared base class for metadata fields.
@@ -203,7 +203,7 @@ class PipelineState(BaseDBModel):
 
     status: PipelineStatus = Field(
         default=PipelineStatus.NEW,
-        description="Pipeline status (new, in_progress, complete, skipped, error",
+        description="Pipeline status (new, in_progress, complete, skipped, error)",
     )
     last_stage: Optional[PipelineStage] = Field(
         default=None, description="Last completed stage."
