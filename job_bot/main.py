@@ -201,8 +201,8 @@ def execute_pipeline(
 def main_anthropic():
     """Executing the pipeline using Anthropic models (e.g., Claude)"""
 
-    #! ☑️ Step 0: Masking/Filter URLs to run a small batch (temporary step)
-    run_filtering_job_posting_urls_mini_pipe_line()
+    # #! ☑️ Step 0: Masking/Filter URLs to run a small batch (temporary step)
+    # run_filtering_job_posting_urls_mini_pipe_line()
 
     # Define default Anthropic model
     model_id = CLAUDE_HAIKU
@@ -210,8 +210,8 @@ def main_anthropic():
     # # ✅ Step 1: Preprocessing job posting webpages
     # execute_pipeline("1_async", llm_provider=ANTHROPIC, model_id=model_id)
 
-    # ✅ Step 2: Creating/updating mapping file for iteration 0
-    execute_pipeline("2a", llm_provider=ANTHROPIC)
+    # # ✅ Step 2: Creating/updating mapping file for iteration 0
+    # execute_pipeline("2a", llm_provider=ANTHROPIC)
 
     # # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
     # execute_pipeline("2b", llm_provider=ANTHROPIC)
@@ -228,8 +228,8 @@ def main_anthropic():
     # # ✅ Step 7: Copy & Prune Responsibilities
     # execute_pipeline("2f", llm_provider=ANTHROPIC)
 
-    # # ✅ Step 8: Creating/updating mapping file for iteration 1
-    # execute_pipeline("3a", llm_provider=ANTHROPIC)
+    # ✅ Step 8: Creating/updating mapping file for iteration 1
+    execute_pipeline("3a", llm_provider=ANTHROPIC)
 
     # # ✅ Step 9: Modify Responsibilities Based on Requirements from Iter 0
     # # & Save to Iter 1
@@ -305,6 +305,6 @@ def main_openai():
 
 if __name__ == "__main__":
 
-    main_openai()  # * Execute the OpenAI pipeline by calling main_openai
+    # main_openai()  # * Execute the OpenAI pipeline by calling main_openai
 
-    # main_anthropic()  # * Execute the OpenAI pipeline by calling anthropic
+    main_anthropic()  # * Execute the OpenAI pipeline by calling anthropic

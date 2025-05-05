@@ -1,7 +1,7 @@
-import setuptools
+from setuptools import setup, find_packages
 
-setuptools.setup(
-    name="your_project_name",
+setup(
+    name="job-bot",
     version="0.1.0",
     author="Xiao-Fei Zhang",
     author_email="nextexit101@email.com",
@@ -9,12 +9,12 @@ setuptools.setup(
     long_description="A longer description of your project",
     long_description_content_type="text/markdown",
     url="https://github.com/xfzhang823/job_bot",
-    packages=setuptools.find_packages("src"),
-    package_dir={"": "src"},
+    packages=find_packages(where="job_bot"),
+    package_dir={"": "job_bot"},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.10",
 )

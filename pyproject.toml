@@ -1,0 +1,45 @@
+[project]
+name = "job-bot"
+version = "0.1.0"
+description = "A bot to optimize resumes and align job descriptions using LLMs and DuckDB."
+authors = [{ name = "Xiao-Fei Zhang", email = "nextexit101@email.com" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    # Core Resume-Job Matching Pipeline
+    "duckdb==1.2.1",
+    "pydantic==2.10.6",
+    "pandas==2.2.2",
+    "openai==1.64.0",
+    "anthropic==0.47.2",
+    "transformers==4.44.2",
+    "sentence-transformers==3.0.1",
+    "python-docx==1.1.2",
+    "requests==2.32.3",
+    # NLP & Spacy
+    "spacy==3.7.4",
+    # Utilities
+    "beautifulsoup4==4.12.3",
+    "trafilatura==1.12.1",
+    "bert-score>=0.3.13",
+    "jsonschema>=4.23.0",
+    "numpy>=1.26.4",
+    "python-dotenv>=1.1.0",
+    "demjson3>=3.0.6",
+    "aiolimiter>=1.2.1",
+    "ollama>=0.4.8",
+    "playwright>=1.52.0",
+    "aiofiles>=24.1.0",
+    "ipykernel>=6.29.5",
+    "xlwings>=0.33.14",
+    "rich>=14.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+packages = ["job_bot"]

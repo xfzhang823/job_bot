@@ -1,8 +1,0 @@
-{
-  "https://zendesk.wd1.myworkdayjobs.com/en-US/zendesk/job/San-Francisco-California-United-States-of-America/Competitive-Intelligence-Manager_R30346?source=LinkedIn": {
-    "reqs": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\requirements\\Zendesk_Competitive_Intelligence_Manager_reqs_flat_iter1.json",
-    "resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\responsibilities\\Zendesk_Competitive_Intelligence_Manager_resps_nested_iter1.json",
-    "sim_metrics": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\similarity_metrics\\Zendesk_Competitive_Intelligence_Manager_sim_metrics_iter1.csv",
-    "pruned_resps": "C:\\github\\job_bot\\input_output\\evaluation_optimization\\evaluation_optimization_by_openai\\iteration_1\\pruned_responsibilities\\Zendesk_Competitive_Intelligence_Manager_pruned_resps_flat_iter1.json"
-  }
-}

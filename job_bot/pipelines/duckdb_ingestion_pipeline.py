@@ -62,6 +62,8 @@ from project_config import (
     SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR,
     SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR,
     RESPS_FILES_ITERATE_1_OPENAI_DIR,
+    RESPS_FILES_ITERATE_1_ANTHROPIC_DIR,
+    SIMILARITY_METRICS_ITERATE_1_ANTHROPIC_DIR,
 )
 
 logger = logging.getLogger(__name__)
@@ -383,43 +385,61 @@ def run_duckdb_ingestion_pipeline():
     create_all_duckdb_tables()
     logger.info("✅ DuckDB schema setup complete.")
 
-    # 🔹 Preprocessing (single-file tables)
-    ingest_job_urls_file_pipeline()
-    ingest_job_postings_file_pipeline()
-    ingest_extracted_requirements_file_pipeline()
+    # # 🔹 Preprocessing (single-file tables)
+    # ingest_job_urls_file_pipeline()
+    # ingest_job_postings_file_pipeline()
+    # ingest_extracted_requirements_file_pipeline()
 
-    # 🔹 Flattened requirements & responsibilities (iteration 0)
-    for file_path in REQS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
-        ingest_flattened_requirements_file(file_path)
+    # # 🔹 Flattened requirements & responsibilities (iteration 0)
+    # for file_path in REQS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
+    #     ingest_flattened_requirements_file(file_path)
 
-    for file_path in RESPS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
-        ingest_flattened_responsibilities_file(file_path)
+    # for file_path in RESPS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
+    #     ingest_flattened_responsibilities_file(file_path)
 
-    # 🔹 Original similarity metrics (iteration 0)
-    for file_path in SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR.glob("*.csv"):
-        ingest_similarity_metrics_file(
-            file_path=file_path,
-            version=Version.ORIGINAL,
-            stage=PipelineStage.SIM_METRICS_EVAL,
-            llm_provider=LLMProvider.OPENAI,
-            iteration=0,
-        )
+    # # 🔹 Original similarity metrics (iteration 0)
+    # for file_path in SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR.glob("*.csv"):
+    #     ingest_similarity_metrics_file(
+    #         file_path=file_path,
+    #         version=Version.ORIGINAL,
+    #         stage=PipelineStage.SIM_METRICS_EVAL,
+    #         llm_provider=LLMProvider.OPENAI,
+    #         iteration=0,
+    #     )
 
-    # 🔹 Edited responsibilities (iteration 1)
-    for file_path in RESPS_FILES_ITERATE_1_OPENAI_DIR.glob("*.json"):
+    # # 🔹 Edited responsibilities (iteration 1)
+    # for file_path in RESPS_FILES_ITERATE_1_OPENAI_DIR.glob("*.json"):
+    #     ingest_edited_responsibilities_file(
+    #         file_path=file_path,
+    #         llm_provider=LLMProvider.OPENAI,
+    #         iteration=0,
+    #     )
+
+    # # 🔹 Edited similarity metrics (iteration 1)
+    # for file_path in SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR.glob("*.csv"):
+    #     ingest_similarity_metrics_file(
+    #         file_path=file_path,
+    #         version=Version.EDITED,
+    #         stage=PipelineStage.SIM_METRICS_REVAL,
+    #         llm_provider=LLMProvider.OPENAI,
+    #         iteration=0,
+    #     )
+
+    # 🔹 Edited responsibilities (iteration 1 - Anthropic)
+    for file_path in RESPS_FILES_ITERATE_1_ANTHROPIC_DIR.glob("*.json"):
         ingest_edited_responsibilities_file(
             file_path=file_path,
-            llm_provider=LLMProvider.OPENAI,
+            llm_provider=LLMProvider.ANTHROPIC,
             iteration=0,
         )
 
-    # 🔹 Edited similarity metrics (iteration 1)
-    for file_path in SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR.glob("*.csv"):
+    # 🔹 Edited similarity metrics (iteration 1 - Anthropic)
+    for file_path in SIMILARITY_METRICS_ITERATE_1_ANTHROPIC_DIR.glob("*.csv"):
         ingest_similarity_metrics_file(
             file_path=file_path,
             version=Version.EDITED,
             stage=PipelineStage.SIM_METRICS_REVAL,
-            llm_provider=LLMProvider.OPENAI,
+            llm_provider=LLMProvider.ANTHROPIC,
             iteration=0,
         )
 
