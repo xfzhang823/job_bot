@@ -1,5 +1,5 @@
 import logging
-from pipelines.duckdb_ingestion_pipeline import run_duckdb_ingestion_pipeline
+from pipelines_with_fsm.duckdb_ingestion_pipeline import run_duckdb_ingestion_pipeline
 import logging_config
 
 logger = logging.getLogger(__name__)

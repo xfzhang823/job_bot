@@ -76,10 +76,9 @@ from datetime import datetime
 from typing import Optional
 
 # User defined
-from transitions import Machine
-from db_io.state_sync import persist_pipeline_state_to_duckdb
+from db_io.state_sync import upsert_pipeline_state_to_duckdb
 from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
-from src.models.duckdb_table_models import PipelineState
+from models.duckdb_table_models import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +253,7 @@ class PipelineFSM:
             self.state_model.notes = notes
             self.state_model.timestamp = datetime.now()
 
-            persist_pipeline_state_to_duckdb(self.state_model, table_name)
+            upsert_pipeline_state_to_duckdb(self.state_model, table_name)
             logger.info(
                 f"📝 Status updated for {self.state_model.url}: {status} — {notes}"
             )
@@ -280,7 +279,7 @@ class PipelineFSM:
                 self.state_model.last_stage = self._state
                 self.state_model.timestamp = datetime.now()
 
-                persist_pipeline_state_to_duckdb(self.state_model, table_name)
+                upsert_pipeline_state_to_duckdb(self.state_model, table_name)
                 logger.info(f"✅ Advanced to: {self.state_model.last_stage}")
             else:
                 logger.info(f"✅ Already at final stage: {self.state_model.url}")

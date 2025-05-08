@@ -101,14 +101,14 @@ def add_metadata(
     stage: PipelineStage,
     table: TableName,
     version: Optional[Version] = Version.ORIGINAL,
-    llm_provider: Optional[LLMProvider] = LLMProvider.NONE,
+    llm_provider: Optional[LLMProvider] = None,
     iteration: int = 0,
 ) -> pd.DataFrame:
     """
     Adds standard metadata columns to a DataFrame if expected by the schema.
     """
     version = version or Version.ORIGINAL
-    llm_provider = llm_provider or LLMProvider.NONE
+    llm_provider = llm_provider if llm_provider else None
 
     schema_cols = DUCKDB_SCHEMA_REGISTRY[table].column_order
 
@@ -121,7 +121,7 @@ def add_metadata(
     if "version" in schema_cols:
         df["version"] = version.value
     if "llm_provider" in schema_cols:
-        df["llm_provider"] = llm_provider.value
+        df["llm_provider"] = llm_provider.value if llm_provider else None
     if "iteration" in schema_cols:
         df["iteration"] = iteration
 
@@ -144,7 +144,7 @@ def add_all_metadata(
     downstream format.
     """
     version = version or Version.ORIGINAL
-    llm_provider = llm_provider or LLMProvider.NONE
+    llm_provider = llm_provider if llm_provider else None
 
     df = df.copy()
 
@@ -158,7 +158,7 @@ def add_all_metadata(
     df["stage"] = stage.value
     df["timestamp"] = pd.Timestamp.now()
     df["version"] = version.value
-    df["llm_provider"] = llm_provider.value
+    df["llm_provider"] = llm_provider.value if llm_provider else None
     df["iteration"] = iteration
 
     # Add any missing columns (padding to align with table schema)

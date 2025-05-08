@@ -42,7 +42,6 @@ class LLMProvider(str, Enum):
     ANTHROPIC = ANTHROPIC
     MISTRAL = "mistral"
     LLAMA = "llama"
-    NONE = "none"  # ✅ For non-LLM-driven stages
 
     @classmethod
     def values(cls) -> list[str]:
@@ -106,7 +105,7 @@ class PipelineStatus(str, Enum):
     IN_PROGRESS = (
         "in_progress"  # This stage completed successfully, but the pipeline continues
     )
-    COMPLETE = "complete"  # Final stage completed successfully (end of pipeline)
+    COMPLETED = "completed"  # Final stage completed successfully (end of pipeline)
     ERROR = "error"  # Current stage failed
     SKIPPED = "skipped"  # Explicitly skipped (optional path or filtered out)
 

@@ -269,7 +269,6 @@ DUCKDB_SCHEMA_REGISTRY = {
             "requirement_idx",
             "iteration",
             "version",
-            "llm_provider",
         ],
     ),
     TableName.FLATTENED_REQUIREMENTS: TableSchema(
@@ -316,17 +315,17 @@ DUCKDB_SCHEMA_REGISTRY = {
             "llm_provider",
         ],
     ),
-    TableName.PRUNED_RESPONSIBILITIES: TableSchema(
-        model=PrunedResponsibilitiesRow,
-        table_name=TableName.PRUNED_RESPONSIBILITIES.value,
-        primary_keys=[
-            "url",
-            "requirement_key",
-            "responsibility_key",
-            "iteration",
-            "version",
-        ],
-    ),
+    # TableName.PRUNED_RESPONSIBILITIES: TableSchema(
+    #     model=PrunedResponsibilitiesRow,
+    #     table_name=TableName.PRUNED_RESPONSIBILITIES.value,
+    #     primary_keys=[
+    #         "url",
+    #         "requirement_key",
+    #         "responsibility_key",
+    #         "iteration",
+    #         "version",
+    #     ],
+    # ),
 }
 
 

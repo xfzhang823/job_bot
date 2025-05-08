@@ -31,7 +31,7 @@ import pandas as pd
 from pydantic import BaseModel
 from db_io.db_transform import flatten_model_to_df, add_metadata
 from db_io.db_insert import insert_df_dedup
-from db_io.setup_duckdb import create_all_duckdb_tables
+from job_bot.db_io.create_db_tables import create_all_db_tables
 from db_io.pipeline_enums import PipelineStage, TableName, LLMProvider, Version
 
 # from db_io.db_schema_registry import DUCKDB_PRIMARY_KEYS
@@ -197,9 +197,9 @@ def ingest_flattened_json_file(
         stage=stage,
     )
 
-    df["version"] = version.value
-    df["llm_provider"] = llm_provider.value
-    df["iteration"] = iteration
+    df["version"] = version.value if version else None
+    df["llm_provider"] = llm_provider.value if llm_provider else None
+    df["iteration"] = iteration if iteration is not None else None
 
     insert_df_dedup(df=df, table_name=table_name.value, mode=mode)
     logger.info(f"✅ Inserted {table_name.value} from {file_path.name}")
@@ -355,9 +355,9 @@ def ingest_edited_responsibilities_file(
         source_file=file_path,
         stage=PipelineStage.EDITED_RESPONSIBILITIES,
     )
-    df["version"] = Version.EDITED.value
-    df["llm_provider"] = llm_provider.value
-    df["iteration"] = iteration
+    df["version"] = Version.EDITED.value if Version else None
+    df["llm_provider"] = llm_provider.value if llm_provider else None
+    df["iteration"] = iteration if iteration is not None else None
 
     # Show the flattened DataFrame before insert
     logger.info("Preview of df before insert:\n%s", df.head().to_string(index=False))
@@ -382,48 +382,48 @@ def run_duckdb_ingestion_pipeline():
     as defined in `project_config.py`.
     """
     logger.info("🏗️ Creating DuckDB tables...")
-    create_all_duckdb_tables()
+    create_all_db_tables()
     logger.info("✅ DuckDB schema setup complete.")
 
-    # # 🔹 Preprocessing (single-file tables)
-    # ingest_job_urls_file_pipeline()
-    # ingest_job_postings_file_pipeline()
-    # ingest_extracted_requirements_file_pipeline()
+    # 🔹 Preprocessing (single-file tables)
+    ingest_job_urls_file_pipeline()
+    ingest_job_postings_file_pipeline()
+    ingest_extracted_requirements_file_pipeline()
 
-    # # 🔹 Flattened requirements & responsibilities (iteration 0)
-    # for file_path in REQS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
-    #     ingest_flattened_requirements_file(file_path)
+    # 🔹 Flattened requirements & responsibilities (iteration 0)
+    for file_path in REQS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
+        ingest_flattened_requirements_file(file_path)
 
-    # for file_path in RESPS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
-    #     ingest_flattened_responsibilities_file(file_path)
+    for file_path in RESPS_FILES_ITERATE_0_OPENAI_DIR.glob("*.json"):
+        ingest_flattened_responsibilities_file(file_path)
 
-    # # 🔹 Original similarity metrics (iteration 0)
-    # for file_path in SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR.glob("*.csv"):
-    #     ingest_similarity_metrics_file(
-    #         file_path=file_path,
-    #         version=Version.ORIGINAL,
-    #         stage=PipelineStage.SIM_METRICS_EVAL,
-    #         llm_provider=LLMProvider.OPENAI,
-    #         iteration=0,
-    #     )
+    # 🔹 Original similarity metrics (iteration 0)
+    for file_path in SIMILARITY_METRICS_ITERATE_0_OPENAI_DIR.glob("*.csv"):
+        ingest_similarity_metrics_file(
+            file_path=file_path,
+            version=Version.ORIGINAL,
+            stage=PipelineStage.SIM_METRICS_EVAL,
+            llm_provider=LLMProvider.OPENAI,
+            iteration=0,
+        )
 
-    # # 🔹 Edited responsibilities (iteration 1)
-    # for file_path in RESPS_FILES_ITERATE_1_OPENAI_DIR.glob("*.json"):
-    #     ingest_edited_responsibilities_file(
-    #         file_path=file_path,
-    #         llm_provider=LLMProvider.OPENAI,
-    #         iteration=0,
-    #     )
+    # 🔹 Edited responsibilities (iteration 1)
+    for file_path in RESPS_FILES_ITERATE_1_OPENAI_DIR.glob("*.json"):
+        ingest_edited_responsibilities_file(
+            file_path=file_path,
+            llm_provider=LLMProvider.OPENAI,
+            iteration=0,
+        )
 
-    # # 🔹 Edited similarity metrics (iteration 1)
-    # for file_path in SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR.glob("*.csv"):
-    #     ingest_similarity_metrics_file(
-    #         file_path=file_path,
-    #         version=Version.EDITED,
-    #         stage=PipelineStage.SIM_METRICS_REVAL,
-    #         llm_provider=LLMProvider.OPENAI,
-    #         iteration=0,
-    #     )
+    # 🔹 Edited similarity metrics (iteration 1)
+    for file_path in SIMILARITY_METRICS_ITERATE_1_OPENAI_DIR.glob("*.csv"):
+        ingest_similarity_metrics_file(
+            file_path=file_path,
+            version=Version.EDITED,
+            stage=PipelineStage.SIM_METRICS_REVAL,
+            llm_provider=LLMProvider.OPENAI,
+            iteration=0,
+        )
 
     # 🔹 Edited responsibilities (iteration 1 - Anthropic)
     for file_path in RESPS_FILES_ITERATE_1_ANTHROPIC_DIR.glob("*.json"):

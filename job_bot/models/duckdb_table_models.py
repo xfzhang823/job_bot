@@ -8,6 +8,10 @@ Each model corresponds to one table and includes a shared base class for metadat
 from datetime import datetime
 from typing import Optional, Union
 from pydantic import BaseModel, ConfigDict, HttpUrl, Field
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ✅ Import enums from schema_definitions
@@ -48,8 +52,8 @@ reprocessing).",
         default=Version.ORIGINAL,
         description="Version of the data (e.g., original, edited, final).",
     )
-    llm_provider: LLMProvider = Field(
-        default=LLMProvider.NONE,
+    llm_provider: Optional[LLMProvider] = Field(
+        default=None,
         description="LLM provider used to generate or process this row (e.g., openai).",
     )
 
@@ -196,26 +200,48 @@ class PrunedResponsibilitiesRow(BaseDBModel):
 
 # * ✅ Pipeline control table model
 class PipelineState(BaseDBModel):
-    """Tracks the lifecycle and status of a job posting as it progresses through the pipeline."""
+    """
+    Tracks the lifecycle and status of a job posting as it progresses through the pipeline.
 
-    stage: Optional[PipelineStage] = Field(
-        default=None,
-        exclude=True,
-        description="Excluded. Control model uses `last_stage` instead.",
-    )  # * ✅ control table uses last stage to infers last and next stages (state machine)
+    Differences from `BaseDBModel`:
+    - `llm_provider`: Defaults to "none" instead of `None` to prevent constraint errors.
+    - `version`: Optional but defaults to "original".
+    - `stage`: Completely removed as it is not relevant in the control table.
+    """
+
+    # Override with openai as default
+    llm_provider: LLMProvider = Field(
+        LLMProvider.OPENAI,
+        description="LLM provider used for processing; defaults to 'none'.",
+    )
+
+    # Override with original as default
+    version: str = Field(
+        "original", description="Version of the data (e.g., original, edited, etc.)."
+    )
 
     status: PipelineStatus = Field(
         default=PipelineStatus.NEW,
-        description="Pipeline status (new, in_progress, complete, skipped, error)",
-    )
-    last_stage: Optional[PipelineStage] = Field(
-        default=None, description="Last completed stage."
-    )
-    is_active: bool = Field(
-        default=True, description="Whether this job is currently active."
-    )
-    notes: Optional[str] = Field(
-        default=None, description="Optional notes or debug info."
+        description="Processing status (e.g., new, in_progress, complete).",
     )
 
-    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    last_stage: Optional[str] = Field(
+        None, description="The last stage completed in the pipeline."
+    )
+
+    is_active: bool = Field(
+        default=True, description="Whether the job is currently active."
+    )
+
+    notes: Optional[str] = Field(
+        default=None, description="Optional notes or debugging information."
+    )
+
+    model_config = ConfigDict(
+        extra="ignore",
+        str_strip_whitespace=True,
+        use_enum_values=False,  # ✅ Retain enums as enums, not strings
+        json_encoders={
+            pd.Timestamp: lambda v: v.strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    )

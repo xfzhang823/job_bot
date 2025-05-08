@@ -6,7 +6,7 @@ Manages creation, updating, bulk operations, and FSM steps for pipeline states.
 
 import logging
 from datetime import datetime
-from db_io.state_sync import persist_pipeline_state_to_duckdb, load_pipeline_state
+from db_io.state_sync import upsert_pipeline_state_to_duckdb, load_pipeline_state
 from db_io.pipeline_enums import PipelineStage, PipelineStatus, LLMProvider, Version
 from fsm.pipeline_fsm_manager import PipelineFSMManager
 from models.duckdb_table_models import PipelineState
@@ -64,7 +64,7 @@ class PipelineControl:
                         is_active=True,
                         notes=None,
                     )
-                    persist_pipeline_state_to_duckdb(new_state)
+                    upsert_pipeline_state_to_duckdb(new_state)
                     logger.info(f"✅ Initialized pipeline state for URL: {url}")
 
                 else:
@@ -120,7 +120,7 @@ class PipelineControl:
                     note_line = f"[{datetime.now().isoformat()}] {reason}"
                     state.notes = f"{note_line}\n{state.notes or ''}".strip()
 
-                persist_pipeline_state_to_duckdb(state)
+                upsert_pipeline_state_to_duckdb(state)
                 logger.info(f"✅ Updated state for {url}: {fields}")
             except Exception as e:
                 logger.error(f"❌ Failed to update {url}: {e}", exc_info=True)
