@@ -140,7 +140,8 @@ enhancements like LLM-driven state management.
 
 from datetime import datetime
 import pandas as pd
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
+from pydantic import ValidationError
 import logging
 
 # Project specific imports
@@ -149,7 +150,13 @@ from db_io.create_db_tables import create_single_db_table
 from db_io.state_sync import upsert_pipeline_state_to_duckdb
 from db_io.db_utils import get_urls_by_stage_and_status, get_pipeline_state
 from db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
-from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
+from db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    TableName,
+    LLMProvider,
+    Version,
+)
 from db_io.state_sync import upsert_pipeline_state_to_duckdb
 
 from fsm.fsm_integrity_checker import validate_fsm_integrity
@@ -159,24 +166,29 @@ from models.duckdb_table_models import PipelineState
 logger = logging.getLogger(__name__)
 
 
+VALID_LLM_PROVIDERS = {"openai", "anthropic", "llama"}
+DEFAULT_LLM_PROVIDER = "openai"
+
+
 def sync_table_to_pipeline_control(
     source_table: TableName,
+    stage: PipelineStage,
     defaults: Optional[Dict[str, Any]] = None,
-    status: PipelineStatus = PipelineStatus.NEW,
+    mode: Literal["append", "replace"] = "append",
     is_active: bool = True,
     notes: Optional[str] = None,
 ):
     """
-    Generic function to sync any source table to pipeline_control table.
-    This function reads records from a given source table and ensures that
-    corresponding entries exist in the `pipeline_control` table.
+    Sync records from a source table to the pipeline_control table.
 
     Args:
-        source_table (TableName): Enum value for the source table.
-        defaults (Optional[Dict[str, Any]]): Default values to fill missing fields.
-        status (PipelineStatus): Default pipeline status.
-        is_active (bool): Whether the row is active.
-        notes (Optional[str]): Optional note field.
+        source_table (TableName): The source table to sync from.
+        stage (PipelineStage): The pipeline stage for the record.
+        defaults (Optional[Dict[str, Any]]): Default values for missing fields.
+        mode (Literal["append", "replace"]): Insert mode; 'replace' deletes
+            existing records before inserting.
+        is_active (bool): Whether to mark the record as active.
+        notes (Optional[str]): Additional notes.
     """
     con = get_duckdb_connection()
 
@@ -184,128 +196,264 @@ def sync_table_to_pipeline_control(
     pipeline_schema = DUCKDB_SCHEMA_REGISTRY.get(TableName.PIPELINE_CONTROL)
 
     if not source_schema or not pipeline_schema:
-        logger.error(f"❌ Schema not found for {source_table} or pipeline_control.")
+        logger.error(f"Schema not found for {source_table} or pipeline_control.")
         return
 
     source_fields = set(source_schema.model.model_fields.keys())
-    pipeline_fields = set(pipeline_schema.model.model_fields.keys())
-
-    missing_fields = pipeline_fields - source_fields
     select_columns = ", ".join(source_fields)
 
-    query = f"SELECT DISTINCT {select_columns} FROM {source_table.value}"
-
+    # Fetch source data
     try:
-        records = con.execute(query).fetchdf().to_dict(orient="records")
+        records = (
+            con.execute(f"SELECT DISTINCT {select_columns} FROM {source_table.value}")
+            .fetchdf()
+            .to_dict(orient="records")
+        )
     except Exception as e:
-        logger.error(f"❌ Error querying {source_table.value}: {e}")
+        logger.error(f"Error querying {source_table.value}: {e}")
         return
 
+    # Base defaults
     base_defaults = {
-        "status": status.value,
+        "stage": stage,  # now use the Enum directly
+        "status": PipelineStatus.IN_PROGRESS,
         "is_active": is_active,
-        "notes": notes or "",
+        "notes": notes,
         "timestamp": datetime.now(),
+        "llm_provider": DEFAULT_LLM_PROVIDER,
+        "version": "original",
     }
 
+    # Merge in any overrides
     if defaults:
         base_defaults.update(defaults)
 
     synced_count = 0
-    for record in records:
-        state_data = {field: record.get(field) for field in source_fields}
-        for field in missing_fields:
-            state_data[field] = base_defaults.get(field)
 
+    for record in records:
+        # Start with whatever came from the source
+        state_data: Dict[str, Any] = {f: record.get(f) for f in source_fields}
+
+        # Apply defaults, but always overwrite 'stage' so it matches our argument
+        for field, value in base_defaults.items():
+            if field == "stage" or state_data.get(field) is None:
+                state_data[field] = value
+
+        # Always enforce 'status' default
+        state_data["status"] = base_defaults["status"]
+
+        logger.debug(f"Final state data before model construction: {state_data}")
+
+        # Build the Pydantic model (now expecting 'stage', not 'last_stage')
         try:
             pipeline_state = PipelineState(**state_data)
+        except ValidationError as e:
+            logger.warning(f"Data validation error for URL '{record.get('url')}': {e}")
+            continue
+
+        # Identify existing rows by the composite key
+        where_clause = (
+            f"url = '{pipeline_state.url}' AND "
+            f"iteration = {pipeline_state.iteration} AND "
+            f"version = '{pipeline_state.version}' AND "
+            f"llm_provider = '{pipeline_state.llm_provider}'"
+        )
+
+        if mode == "replace":
+            con.execute(f"DELETE FROM pipeline_control WHERE {where_clause};")
+
+        # Upsert via your existing helper
+        try:
             upsert_pipeline_state_to_duckdb(pipeline_state)
             synced_count += 1
         except Exception as e:
             logger.warning(
-                f"⚠️ Failed to upsert state for URL '{record.get('url')}': {e}"
+                f"Failed to upsert state for URL '{pipeline_state.url}': {e}"
             )
 
     logger.info(
-        f"✅ Synced {synced_count} records from '{source_table.value}' to pipeline_control."
+        f"Synced {synced_count} records from '{source_table.value}' "
+        f"to pipeline_control using '{mode}' mode."
     )
 
 
 # Helper functions for each table sync with enum-aligned stage/version values
+# def sync_job_urls_to_pipeline_control():
+#     sync_table_to_pipeline_control(
+#         source_table=TableName.JOB_URLS, stage=PipelineStage.JOB_URLS, mode="append"
+#     )
+
+
 def sync_job_urls_to_pipeline_control():
     sync_table_to_pipeline_control(
         source_table=TableName.JOB_URLS,
+        stage=PipelineStage.JOB_URLS,
         defaults={
-            "stage": PipelineStage.JOB_URLS.value,
-            "version": "original",
-            "llm_provider": None,
+            "stage": PipelineStage.JOB_URLS,
+            "llm_provider": LLMProvider.OPENAI,  # enum, not string
+            "status": PipelineStatus.NEW,  # enum, not NEW.value
         },
+        mode="replace",
     )
 
 
 def sync_job_postings_to_pipeline_control():
+    """
+    Sync job postings to pipeline_control and enforce status update.
+    """
     sync_table_to_pipeline_control(
         source_table=TableName.JOB_POSTINGS,
+        stage=PipelineStage.JOB_POSTINGS,
         defaults={
-            "stage": PipelineStage.JOB_POSTINGS.value,
-            "version": "original",
-            "llm_provider": None,
+            "stage": PipelineStage.JOB_POSTINGS,
+            "version": Version.ORIGINAL,  # enum
+            "llm_provider": LLMProvider.OPENAI,  # enum
+            "status": PipelineStatus.IN_PROGRESS,  # enum
         },
+        mode="replace",
     )
 
 
 def sync_extracted_requirements_to_pipeline_control():
     sync_table_to_pipeline_control(
         source_table=TableName.EXTRACTED_REQUIREMENTS,
+        stage=PipelineStage.EXTRACTED_REQUIREMENTS,
         defaults={
-            "stage": PipelineStage.EXTRACTED_REQUIREMENTS.value,
-            "version": "original",
-            "llm_provider": None,
+            "version": Version.ORIGINAL,
+            "llm_provider": LLMProvider.OPENAI,
         },
+        mode="replace",
     )
 
 
-def sync_flattend_requirements_to_pipeline_control():
+def sync_flattened_requirements_to_pipeline_control():
     sync_table_to_pipeline_control(
         source_table=TableName.FLATTENED_REQUIREMENTS,
+        stage=PipelineStage.FLATTENED_REQUIREMENTS,
         defaults={
-            "stage": PipelineStage.FLATTENED_REQUIREMENTS.value,
-            "version": "original",
-            "llm_provider": None,
+            "version": Version.ORIGINAL,
+            "llm_provider": LLMProvider.OPENAI,
         },
+        mode="replace",
     )
 
 
 def sync_flattened_responsibilities_to_pipeline_control():
     sync_table_to_pipeline_control(
         source_table=TableName.FLATTENED_RESPONSIBILITIES,
+        stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
         defaults={
-            "stage": PipelineStage.FLATTENED_RESPONSIBILITIES.value,
-            "version": "original",
-            "llm_provider": None,
+            "version": Version.ORIGINAL,
+            "llm_provider": LLMProvider.OPENAI,
         },
+        mode="replace",
     )
 
 
 def sync_edited_responsibilities_to_pipeline_control():
     sync_table_to_pipeline_control(
         source_table=TableName.EDITED_RESPONSIBILITIES,
+        stage=PipelineStage.EDITED_RESPONSIBILITIES,
         defaults={
-            "stage": PipelineStage.EDITED_RESPONSIBILITIES.value,
-            "version": "edited",
-            "llm_provider": "openai",
+            "version": None,  # Inherit from source data
+            "llm_provider": None,  # Inherit from source data
         },
+        mode="replace",
     )
 
 
-def sync_similarity_metrics_to_pipeline_control():
-    sync_table_to_pipeline_control(
-        source_table=TableName.SIMILARITY_METRICS,
-        defaults={
+def sync_similarity_metrics_to_pipeline_control(batch_size: int = 1000):
+    """
+    Sync similarity metrics to pipeline_control using primary key combination
+    based on schema registry.
+
+    Args:
+        batch_size (int): Number of records to process in each batch.
+    """
+    logger.info("Syncing similarity metrics to pipeline_control using primary keys...")
+
+    con = get_duckdb_connection()
+
+    # Get primary keys dynamically from schema registry
+    schema = DUCKDB_SCHEMA_REGISTRY.get(TableName.SIMILARITY_METRICS)
+    if not schema:
+        logger.error(f"Schema not found for {TableName.SIMILARITY_METRICS}")
+        return
+
+    primary_keys = schema.primary_keys
+
+    # Ensure primary keys are defined
+    if not primary_keys:
+        logger.error(f"No primary keys defined for {TableName.SIMILARITY_METRICS}")
+        return
+
+    logger.info(f"Primary Keys: {primary_keys}")
+
+    # Fetch the source data in batches
+    offset = 0
+    processed_count = 0
+
+    while True:
+        # Construct the SELECT query based on primary keys
+        select_columns = ", ".join(primary_keys)
+        query = f"""
+            SELECT DISTINCT {select_columns}
+            FROM similarity_metrics
+            LIMIT {batch_size} OFFSET {offset}
+        """
+
+        try:
+            df = con.execute(query).fetchdf()
+        except Exception as e:
+            logger.error(f"Error fetching similarity metrics: {e}")
+            break
+
+        if df.empty:
+            break
+
+        # Convert to records
+        records = df.to_dict(orient="records")
+
+        # Base defaults
+        base_defaults = {
             "stage": PipelineStage.SIM_METRICS_EVAL.value,
-            "version": "original",
-            "llm_provider": "openai",
-        },
+            "status": PipelineStatus.IN_PROGRESS.value,  # ✅ Explicitly set
+            "is_active": True,
+            "notes": "",
+            "timestamp": datetime.now(),
+        }
+
+        # Process each record
+        for record in records:
+            # Construct primary key clause dynamically
+            primary_key_clause = " AND ".join(
+                [f"{pk} = '{record[pk]}'" for pk in primary_keys]
+            )
+
+            # Prepare state data
+            state_data = {pk: record.get(pk) for pk in primary_keys}
+
+            # Apply base defaults
+            for field, value in base_defaults.items():
+                state_data[field] = value
+
+            logger.debug(f"State data before model construction: {state_data}")
+
+            # Construct the PipelineState object
+            try:
+                pipeline_state = PipelineState(**state_data)
+                upsert_pipeline_state_to_duckdb(pipeline_state)
+                processed_count += 1
+
+            except Exception as e:
+                logger.warning(f"Data validation error for record {state_data}: {e}")
+                continue
+
+        # Increment offset for next batch
+        offset += batch_size
+
+    logger.info(
+        f"✅ Synced {processed_count} similarity metrics to pipeline_control using primary keys."
     )
 
 
@@ -315,94 +463,29 @@ def run_state_orchestration_pipeline():
     This is the entry point for setting up or recovering FSM state.
     """
     logger.info("🧭 Starting pipeline state orchestration...")
-    create_single_db_table(TableName.PIPELINE_CONTROL)
 
-    sync_job_urls_to_pipeline_control()
+    # # Create table if not exist
+    # create_single_db_table(table_name=TableName.PIPELINE_CONTROL)
+
+    # # Sync job_urls -> pipeline_control
+    # sync_job_urls_to_pipeline_control()
+
+    # # Sync job_urls -> pipeline_control
     # sync_job_postings_to_pipeline_control()
+
+    # # Sync extracted_requirements -> pipeline_control
     # sync_extracted_requirements_to_pipeline_control()
-    # sync_flattend_requirements_to_pipeline_control()
+
+    # # Sync flattened_requirements -> pipeline_control
+    # sync_flattened_requirements_to_pipeline_control()
+
+    # # Sync flattened_responsibilities -> pipeline_control
     # sync_flattened_responsibilities_to_pipeline_control()
+
+    # # Sync edited_responsibilities -> pipeline_control
     # sync_edited_responsibilities_to_pipeline_control()
-    # sync_similarity_metrics_to_pipeline_control()
+
+    # Sync similarity_metrics -> pipeline_control
+    sync_similarity_metrics_to_pipeline_control()
 
     logger.info("✅ Pipeline control table sync complete.")
-
-
-# Commented out (older version)
-# def update_pipeline_control(
-#     stage: PipelineStage,
-#     source_file: str,
-#     iteration: int,
-#     version: str,
-#     llm_provider: str,
-#     status: PipelineStatus = PipelineStatus.NEW,
-#     notes: Optional[str] = None,
-# ):
-#     """
-#     Updates the control table for all URLs in a specific stage and iteration.
-
-#     Args:
-#         stage (PipelineStage): The pipeline stage being updated.
-#         source_file (str): The source file associated with the update.
-#         iteration (int): The iteration of the pipeline.
-#         version (str): The version identifier.
-#         llm_provider (str): The LLM provider.
-#         status (PipelineStatus, optional): The status to set. Defaults to 'new'.
-#         notes (Optional[str], optional): Additional notes to include.
-#           Defaults to None.
-#     """
-
-#     # Fetch URLs for the specified stage and iteration
-#     urls = get_urls_by_stage_and_status(
-#         stage=stage, iteration=iteration, version=version
-#     )
-
-#     # Initialize empty list for pipeline state objects
-#     pipeline_states = []
-
-#     # Create new pipeline states based on the provided parameters
-#     for url in urls:
-#         # Fetch the existing state
-#         state_df = get_pipeline_state(url)
-
-#         # If the state exists, update it; otherwise, create a new one
-#         if not state_df.empty:
-#             # Update existing state
-#             state_data = state_df.iloc[0].to_dict()
-#             state_data.update(
-#                 {
-#                     "stage": stage.value,
-#                     "source_file": source_file,
-#                     "timestamp": datetime.now(),
-#                     "version": version,
-#                     "llm_provider": llm_provider,
-#                     "iteration": iteration,
-#                     "status": status.value,
-#                     "notes": notes,
-#                 }
-#             )
-#         else:
-#             # Create new state
-#             state_data = {
-#                 "url": url,
-#                 "stage": stage.value,
-#                 "source_file": source_file,
-#                 "timestamp": datetime.now(),
-#                 "version": version,
-#                 "llm_provider": llm_provider,
-#                 "iteration": iteration,
-#                 "status": status.value,
-#                 "notes": notes,
-#             }
-
-#         # Convert to PipelineState and add to list
-#         pipeline_state = PipelineState(**state_data)
-#         pipeline_states.append(pipeline_state)
-
-#     # Save all states to DuckDB
-#     for state in pipeline_states:
-#         upsert_pipeline_state_to_duckdb(state)
-
-#     print(
-#         f"✅ Updated {len(pipeline_states)} records in pipeline_control for stage '{stage.value}'."
-#     )

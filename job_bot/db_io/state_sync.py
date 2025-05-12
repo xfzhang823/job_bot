@@ -80,9 +80,6 @@ def upsert_pipeline_state_to_duckdb(
         # Convert to a dictionary
         data = state.model_dump()
 
-        # Remove 'stage' field completely
-        data.pop("stage", None)
-
         # Handle llm_provider explicitly
         data["llm_provider"] = (
             data["llm_provider"].value if data["llm_provider"] else "none"

@@ -15,6 +15,22 @@ from models.duckdb_table_models import PipelineState
 logger = logging.getLogger(__name__)
 
 
+# fsm/fsm_state_control.py
+
+"""
+Manages creation, updating, bulk operations, and FSM steps for pipeline states.
+"""
+
+import logging
+from datetime import datetime
+from db_io.state_sync import upsert_pipeline_state_to_duckdb, load_pipeline_state
+from db_io.pipeline_enums import PipelineStage, PipelineStatus, LLMProvider, Version
+from fsm.pipeline_fsm_manager import PipelineFSMManager
+from models.duckdb_table_models import PipelineState
+
+logger = logging.getLogger(__name__)
+
+
 class PipelineControl:
     """
     PipelineControl is the controller and utility interface for managing
@@ -59,14 +75,13 @@ class PipelineControl:
                         timestamp=datetime.now(),
                         llm_provider=LLMProvider(llm_provider),
                         version=Version.ORIGINAL,
-                        last_stage=PipelineStage.JOB_URLS,
+                        stage=PipelineStage.JOB_URLS,
                         status=PipelineStatus.NEW,
                         is_active=True,
                         notes=None,
                     )
                     upsert_pipeline_state_to_duckdb(new_state)
                     logger.info(f"✅ Initialized pipeline state for URL: {url}")
-
                 else:
                     logger.info(f"🔁 URL already initialized: {url}")
 
@@ -94,10 +109,13 @@ class PipelineControl:
         reset_status: PipelineStatus = PipelineStatus.NEW,
         reason: str = "",
     ):
+        """
+        Roll back the stage for each URL and reset its status.
+        """
         self._bulk_update(
             urls,
             fields={
-                "last_stage": restart_stage,
+                "stage": restart_stage,
                 "status": reset_status,
             },
             reason=reason or f"Manual retry from {restart_stage}",

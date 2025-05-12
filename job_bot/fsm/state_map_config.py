@@ -1,5 +1,5 @@
 """
-state_map_config.py
+fsm/state_map_config.py
 
 This module defines a centralized config for managing the `state_map` JSON field
 in the pipeline_control table. It includes:

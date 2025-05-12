@@ -45,10 +45,8 @@ def get_log_file_path(logs_dir):
     Returns:
         str: Log file path with username, date, and time.
     """
-    username = getpass.getuser()  # Get the current username
-    current_time = datetime.now().strftime(
-        "%Y-%m-%d_%H-%M-%S"
-    )  # Format: YYYY-MM-DD_HH-MM-SS
+    username = getpass.getuser()
+    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_file_path = os.path.join(logs_dir, f"{username}_{current_time}_app.log")
     return log_file_path
 
@@ -74,7 +72,7 @@ log_file_path = get_log_file_path(logs_dir)
 # Initialize the rotating file handler
 file_handler = logging.handlers.RotatingFileHandler(
     log_file_path,
-    maxBytes=100 * 1024 * 1024,  # 100 MB
+    maxBytes=100 * 1024 * 1024,
     backupCount=5,
 )
 
@@ -102,3 +100,19 @@ root_logger.addHandler(console_handler)
 
 # Set the overall logging level (root level)
 root_logger.setLevel(logging.DEBUG)
+
+
+def log_and_flush(message: str, level: str = "info") -> None:
+    """
+    Log a message and immediately flush the log handlers.
+
+    Args:
+        message (str): The log message.
+        level (str): Log level ('info', 'debug', 'warning', 'error', 'critical').
+    """
+    log_func = getattr(logging, level.lower(), logging.info)
+    log_func(message)
+
+    # Explicitly flush each handler
+    for handler in logging.getLogger().handlers:
+        handler.flush()

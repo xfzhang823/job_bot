@@ -206,27 +206,26 @@ class PipelineState(BaseDBModel):
     Differences from `BaseDBModel`:
     - `llm_provider`: Defaults to "none" instead of `None` to prevent constraint errors.
     - `version`: Optional but defaults to "original".
-    - `stage`: Completely removed as it is not relevant in the control table.
     """
 
     # Override with openai as default
-    llm_provider: LLMProvider = Field(
+    llm_provider: LLMProvider = Field(  # type: ignore
         LLMProvider.OPENAI,
         description="LLM provider used for processing; defaults to 'none'.",
     )
 
     # Override with original as default
-    version: str = Field(
-        "original", description="Version of the data (e.g., original, edited, etc.)."
+    version: Version = Field(  # type: ignore
+        Version.ORIGINAL, description="Version of the data (original, edited, final)."
     )
 
     status: PipelineStatus = Field(
         default=PipelineStatus.NEW,
-        description="Processing status (e.g., new, in_progress, complete).",
+        description="Processing status (new, in_progress, completed, error, skipped).",
     )
 
-    last_stage: Optional[str] = Field(
-        None, description="The last stage completed in the pipeline."
+    stage: PipelineStage = Field(
+        ..., description="The stage completed in the pipeline."
     )
 
     is_active: bool = Field(

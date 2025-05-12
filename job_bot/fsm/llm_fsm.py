@@ -4,7 +4,7 @@
 
 from typing import Literal
 from fsm.pipeline_fsm import PipelineFSM
-from src.models.duckdb_table_models import PipelineState
+from models.duckdb_table_models import PipelineState
 from db_io.state_sync import load_pipeline_state, upsert_pipeline_state_to_duckdb
 
 
