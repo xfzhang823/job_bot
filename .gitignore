@@ -48,6 +48,7 @@ Thumbs.db
 *.iws
 
 # Logs and databases
+logs/
 *.log
 *.db
 *.sqlite
