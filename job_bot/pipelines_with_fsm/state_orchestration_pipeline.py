@@ -1,5 +1,5 @@
 """
-state_orchestration_pipeline.py
+pipelines_with_fsm/state_orchestration_pipeline.py
 
 This module serves as the central orchestrator for managing job postings pipeline state
 progression using a Finite State Machine (FSM). It coordinates initialization,
@@ -27,6 +27,12 @@ job posting URL is accurately tracked and progresses smoothly through each defin
    - Coordinates overall pipeline stage execution based on FSM state.
    - Interfaces with existing pipeline execution logic (`run_pipeline.py`,
    `pipeline_fsm_manager.py`).
+
+---
+What this module does NOT do:
+    - It does not execute the heavy stage work (scraping, LLM parsing, evaluation, editing).
+    Those are run by the stage pipelines; this module keeps the control table accurate
+    and consistent so those pipelines know what to work on next.
 
 ---
 
@@ -179,16 +185,33 @@ def sync_table_to_pipeline_control(
     notes: Optional[str] = None,
 ):
     """
-    Sync records from a source table to the pipeline_control table.
+    Sync rows from a **source stage table** into `pipeline_control`.
 
-    Args:
-        source_table (TableName): The source table to sync from.
-        stage (PipelineStage): The pipeline stage for the record.
-        defaults (Optional[Dict[str, Any]]): Default values for missing fields.
-        mode (Literal["append", "replace"]): Insert mode; 'replace' deletes
-            existing records before inserting.
-        is_active (bool): Whether to mark the record as active.
-        notes (Optional[str]): Additional notes.
+    Behavior
+    --------
+    - Reads distinct rows from `source_table` based on that table’s schema.
+    - Builds a `PipelineState` per record and upserts into `pipeline_control`
+      using the composite PK (url, iteration, version, llm_provider).
+    - If `mode="replace"`, deletes any existing matching control rows before upserting.
+    - Applies `defaults` and standard metadata (timestamp, is_active, etc.).
+    - **Important:** the `status` field in `defaults` (or the module default) is
+      always enforced on the upserted control rows.
+
+    Parameters
+    ----------
+    source_table : TableName
+        Stage/source table to sync from (e.g., JOB_POSTINGS).
+    stage : PipelineStage
+        Pipeline stage to assign in `pipeline_control` for these rows.
+    defaults : dict, optional
+        Default values to fill/override (e.g., llm_provider, version, status).
+    mode : {"append","replace"}
+        - "append": upsert without pre-delete
+        - "replace": delete matching control rows first, then upsert
+    is_active : bool
+        Whether to mark control rows active.
+    notes : str, optional
+        Free-text notes stored on the control rows.
     """
     con = get_duckdb_connection()
 
@@ -285,6 +308,7 @@ def sync_table_to_pipeline_control(
 
 
 def sync_job_urls_to_pipeline_control():
+    """Sync `job_urls` into `pipeline_control` (seed NEW rows for initial FSM)."""
     sync_table_to_pipeline_control(
         source_table=TableName.JOB_URLS,
         stage=PipelineStage.JOB_URLS,
@@ -298,9 +322,7 @@ def sync_job_urls_to_pipeline_control():
 
 
 def sync_job_postings_to_pipeline_control():
-    """
-    Sync job postings to pipeline_control and enforce status update.
-    """
+    """Sync `job_postings` into `pipeline_control` (mark IN_PROGRESS for postings stage)."""
     sync_table_to_pipeline_control(
         source_table=TableName.JOB_POSTINGS,
         stage=PipelineStage.JOB_POSTINGS,
@@ -315,6 +337,7 @@ def sync_job_postings_to_pipeline_control():
 
 
 def sync_extracted_requirements_to_pipeline_control():
+    """Sync `extracted_requirements` into `pipeline_control`."""
     sync_table_to_pipeline_control(
         source_table=TableName.EXTRACTED_REQUIREMENTS,
         stage=PipelineStage.EXTRACTED_REQUIREMENTS,
@@ -327,6 +350,7 @@ def sync_extracted_requirements_to_pipeline_control():
 
 
 def sync_flattened_requirements_to_pipeline_control():
+    """Sync `flattened_requirements` into `pipeline_control`."""
     sync_table_to_pipeline_control(
         source_table=TableName.FLATTENED_REQUIREMENTS,
         stage=PipelineStage.FLATTENED_REQUIREMENTS,
@@ -339,6 +363,7 @@ def sync_flattened_requirements_to_pipeline_control():
 
 
 def sync_flattened_responsibilities_to_pipeline_control():
+    """Sync `flattened_responsibilities` into `pipeline_control`."""
     sync_table_to_pipeline_control(
         source_table=TableName.FLATTENED_RESPONSIBILITIES,
         stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
@@ -351,6 +376,8 @@ def sync_flattened_responsibilities_to_pipeline_control():
 
 
 def sync_edited_responsibilities_to_pipeline_control():
+    """Sync `edited_responsibilities` into `pipeline_control`
+    (inherits version/provider where present)."""
     sync_table_to_pipeline_control(
         source_table=TableName.EDITED_RESPONSIBILITIES,
         stage=PipelineStage.EDITED_RESPONSIBILITIES,
@@ -364,11 +391,20 @@ def sync_edited_responsibilities_to_pipeline_control():
 
 def sync_similarity_metrics_to_pipeline_control(batch_size: int = 1000):
     """
-    Sync similarity metrics to pipeline_control using primary key combination
-    based on schema registry.
+    Sync **similarity_metrics** keys into `pipeline_control` using the registry PKs.
 
-    Args:
-        batch_size (int): Number of records to process in each batch.
+    Behavior
+    --------
+    - Loads batches of distinct primary keys from `similarity_metrics`.
+    - Creates minimal `PipelineState` rows (using PKs + standard metadata) and
+        upserts them.
+    - Sets `stage = SIM_METRICS_EVAL` and `status = IN_PROGRESS` for these rows;
+      status is not inherited from the source table.
+
+    Parameters
+    ----------
+    batch_size : int
+        Number of rows per SELECT batch.
     """
     logger.info("Syncing similarity metrics to pipeline_control using primary keys...")
 
@@ -457,35 +493,79 @@ def sync_similarity_metrics_to_pipeline_control(batch_size: int = 1000):
     )
 
 
-def run_state_orchestration_pipeline():
+def run_state_orchestration_pipeline(
+    *,
+    full: bool = True,
+    create_table: bool = True,
+    integrity_check: bool = True,
+) -> None:
     """
-    Orchestrates syncing all pipeline stages to the `pipeline_control` table.
-    This is the entry point for setting up or recovering FSM state.
+    Orchestrate syncing stage/source tables into `pipeline_control` (FSM control plane).
+
+    When to run
+    -----------
+    - **Bootstrap**: first-time setup to seed control rows from existing stage tables.
+    - **Recovery**: after failures or manual edits, to realign control rows.
+    - **Periodic refresh**: keep `pipeline_control` consistent with stage tables.
+
+    What it does
+    ------------
+    - Optionally ensures the `pipeline_control` table exists.
+    - If `full=True`, runs all stage syncs in order
+        (job_urls → edited_responsibilities).
+    - Always refreshes similarity metrics (often your gating signal).
+    - Optionally runs a quick FSM integrity check.
+
+    Notes
+    -----
+    - Each sync is isolated with its own try/except so one failure does not
+        halt the rest.
+    - This function does **not** execute the stage pipelines;
+        it only manages control state.
     """
     logger.info("🧭 Starting pipeline state orchestration...")
 
-    # # Create table if not exist
-    # create_single_db_table(table_name=TableName.PIPELINE_CONTROL)
+    if create_table:
+        try:
+            create_single_db_table(table_name=TableName.PIPELINE_CONTROL)
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Could not ensure pipeline_control table exists: {e}", exc_info=True
+            )
 
-    # # Sync job_urls -> pipeline_control
-    # sync_job_urls_to_pipeline_control()
+    if full:
+        sync_steps = [
+            ("job_urls", sync_job_urls_to_pipeline_control),
+            ("job_postings", sync_job_postings_to_pipeline_control),
+            ("extracted_requirements", sync_extracted_requirements_to_pipeline_control),
+            ("flattened_requirements", sync_flattened_requirements_to_pipeline_control),
+            (
+                "flattened_responsibilities",
+                sync_flattened_responsibilities_to_pipeline_control,
+            ),
+            (
+                "edited_responsibilities",
+                sync_edited_responsibilities_to_pipeline_control,
+            ),
+        ]
+        for name, func in sync_steps:
+            try:
+                func()
+            except Exception as e:
+                logger.error(f"❌ Failed syncing {name}: {e}", exc_info=True)
 
-    # # Sync job_urls -> pipeline_control
-    # sync_job_postings_to_pipeline_control()
+    # Similarity metrics are frequently the gating/control signal—always refresh them.
+    try:
+        sync_similarity_metrics_to_pipeline_control()
+    except Exception as e:
+        logger.error(f"❌ Failed syncing similarity_metrics: {e}", exc_info=True)
 
-    # # Sync extracted_requirements -> pipeline_control
-    # sync_extracted_requirements_to_pipeline_control()
-
-    # # Sync flattened_requirements -> pipeline_control
-    # sync_flattened_requirements_to_pipeline_control()
-
-    # # Sync flattened_responsibilities -> pipeline_control
-    # sync_flattened_responsibilities_to_pipeline_control()
-
-    # # Sync edited_responsibilities -> pipeline_control
-    # sync_edited_responsibilities_to_pipeline_control()
-
-    # Sync similarity_metrics -> pipeline_control
-    sync_similarity_metrics_to_pipeline_control()
+    if integrity_check:
+        try:
+            validate_fsm_integrity()
+        except Exception as e:
+            logger.warning(
+                f"⚠️ FSM integrity check encountered an issue: {e}", exc_info=True
+            )
 
     logger.info("✅ Pipeline control table sync complete.")

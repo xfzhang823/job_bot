@@ -26,7 +26,7 @@ from models.resume_job_description_io_models import (
     Responsibilities,
     Requirements,
 )
-from project_config import OPENAI, ANTHROPIC, GPT_4_TURBO, CLAUDE_HAIKU
+from project_config import OPENAI, ANTHROPIC, GPT_4_1_NANO, CLAUDE_HAIKU
 
 # Set up logger
 logger = logging.getLogger(__name__)

@@ -148,12 +148,6 @@ def add_all_metadata(
 
     df = df.copy()
 
-    # todo: need to fix this
-    # # Get metadata and full schema fields from registry
-    # schema = DUCKDB_SCHEMA_REGISTRY[table]
-    # metadata_fields = schema.metadata_fields
-    # all_columns = schema.column_order
-
     df["source_file"] = str(file_path) if file_path else None
     df["stage"] = stage.value
     df["timestamp"] = pd.Timestamp.now()

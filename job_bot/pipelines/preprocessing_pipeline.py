@@ -1,4 +1,4 @@
-""" 
+"""
 The pipeline module contains all high-level functions.
 
 This module is to be called by main.py.
@@ -27,7 +27,7 @@ from utils.webpage_reader import process_webpages_to_json
 from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
-from project_config import GPT_35_TURBO, GPT_4_TURBO
+from project_config import GPT_35_TURBO, GPT_4_1_NANO
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
 async def extract_job_requirements_with_gpt(
-    job_description: str, model_id: str = GPT_4_TURBO
+    job_description: str, model_id: str = GPT_4_1_NANO
 ):
     """
     Extracts key requirements from the job description using GPT, leveraging the async
@@ -161,7 +161,7 @@ def run_preprocessing_pipeline(
     job_descriptions_json_file: Union[Path, str],
     job_requirements_json_file: Union[Path, str],
     llm_provider: str = "openai",  # llm_provider is passed from the orchestrating function
-    model_id: str = GPT_4_TURBO,  # default to gpt 4 turbo
+    model_id: str = GPT_4_1_NANO,  # default to gpt 4 turbo
 ) -> None:
     """
     Orchestrates the preprocessing pipeline, checking for new URLs and processing them.

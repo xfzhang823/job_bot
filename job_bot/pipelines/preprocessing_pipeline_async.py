@@ -43,10 +43,10 @@ from models.resume_job_description_io_models import (
 from project_config import (
     OPENAI,
     ANTHROPIC,
-    GPT_4_TURBO,
+    GPT_4_1_NANO,
     GPT_35_TURBO,
     CLAUDE_HAIKU,
-    CLAUDE_SONNET,
+    CLAUDE_SONNET_3_5,
 )
 
 # Set up logging
@@ -63,7 +63,7 @@ async def process_single_url_async(
     lock: asyncio.Lock,
     semaphore: asyncio.Semaphore,  # limit # of concurrent worker (avoid rate limit)
     llm_provider: str = OPENAI,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
     web_scrape: bool = True,  # Flag to control whether to need to webscrape the content or not
@@ -252,7 +252,7 @@ async def run_preprocessing_pipeline_async(
     job_descriptions_json_file: Union[Path, str],
     job_requirements_json_file: Union[Path, str],
     llm_provider: str = "openai",  # llm_provider is passed from the orchestrating function
-    model_id: str = GPT_4_TURBO,  # default to gpt 4 turbo
+    model_id: str = GPT_4_1_NANO,  # default to gpt 4 turbo
     max_tokens: int = 4096,
     temperature: float = 0.3,
 ):

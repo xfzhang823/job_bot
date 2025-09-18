@@ -66,10 +66,10 @@ from project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_35_TURBO,
-    GPT_4,
-    GPT_4_TURBO,
+    GPT_4_1,
+    GPT_4_1_NANO,
     CLAUDE_HAIKU,
-    CLAUDE_SONNET,
+    CLAUDE_SONNET_3_5,
     CLAUDE_OPUS,
 )
 
@@ -324,7 +324,7 @@ async def call_api_async(
 # Async wrapper for OpenAI
 async def call_openai_api_async(
     prompt: str,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     expected_res_type: str = "str",
     json_type: str = "",
     temperature: float = 0.4,
@@ -362,7 +362,7 @@ async def call_openai_api_async(
 # Async wrapper for Anthropic
 async def call_anthropic_api_async(
     prompt: str,
-    model_id: str = CLAUDE_SONNET,
+    model_id: str = CLAUDE_SONNET_3_5,
     expected_res_type: str = "str",
     json_type: str = "",
     temperature: float = 0.4,

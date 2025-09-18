@@ -7,10 +7,10 @@ from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
 from project_config import (
     OPENAI,
     ANTHROPIC,
-    GPT_4_TURBO,
+    GPT_4_1_NANO,
     GPT_35_TURBO,
     CLAUDE_HAIKU,
-    CLAUDE_SONNET,
+    CLAUDE_SONNET_3_5,
 )
 
 # Set logger
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def run_pipeline(
     pipeline_id: str,
     llm_provider: str = OPENAI,
-    model_id: Optional[str] = GPT_4_TURBO,
+    model_id: Optional[str] = GPT_4_1_NANO,
     filter_keys: Optional[
         list[str]
     ] = None,  # ✅ NEW (for processing a small batch of urls)

@@ -15,22 +15,6 @@ from models.duckdb_table_models import PipelineState
 logger = logging.getLogger(__name__)
 
 
-# fsm/fsm_state_control.py
-
-"""
-Manages creation, updating, bulk operations, and FSM steps for pipeline states.
-"""
-
-import logging
-from datetime import datetime
-from db_io.state_sync import upsert_pipeline_state_to_duckdb, load_pipeline_state
-from db_io.pipeline_enums import PipelineStage, PipelineStatus, LLMProvider, Version
-from fsm.pipeline_fsm_manager import PipelineFSMManager
-from models.duckdb_table_models import PipelineState
-
-logger = logging.getLogger(__name__)
-
-
 class PipelineControl:
     """
     PipelineControl is the controller and utility interface for managing

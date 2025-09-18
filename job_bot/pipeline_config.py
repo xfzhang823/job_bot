@@ -121,12 +121,12 @@ from project_config import (
     OPENAI,
     GPT_35_TURBO,
     GPT_35_TURBO_16K,
-    GPT_4,
-    GPT_4_TURBO,
+    GPT_4_1,
+    GPT_4_1_NANO,
     GPT_4_TURBO_32K,
     GPT_4O,
     CLAUDE_HAIKU,
-    CLAUDE_SONNET,
+    CLAUDE_SONNET_3_5,
     CLAUDE_OPUS,
 )
 from db_io.pipeline_enums import PipelineStage

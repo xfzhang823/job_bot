@@ -33,7 +33,7 @@ from utils.generic_utils import (
     verify_file,
 )
 from utils.generic_utils_async import save_data_to_json_file_async
-from project_config import OPENAI, GPT_35_TURBO, GPT_4_TURBO
+from project_config import OPENAI, GPT_35_TURBO, GPT_4_1_NANO
 
 
 # Set up logging
@@ -232,7 +232,7 @@ async def run_resume_editing_pipeline_async(
     mapping_file_prev: Union[str, Path],
     mapping_file_curr: Union[str, Path],
     llm_provider: str = OPENAI,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     no_of_concurrent_workers: int = 3,
     filter_keys: list[str] | None = None,  # ✅ New: selected list of urls only!
 ) -> None:

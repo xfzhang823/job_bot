@@ -286,16 +286,35 @@ ANTHROPIC = "anthropic"
 # Model IDs
 # Anthropic (Claude) models
 CLAUDE_OPUS = "claude-3-opus-20240229"
-CLAUDE_SONNET = "claude-3-5-sonnet-20241022"
+CLAUDE_SONNET_3_5 = "claude-3-5-sonnet-20241022"
+CLAUDE_SONNET_4 = "claude-sonnet-4-20250514"
 CLAUDE_HAIKU = "claude-3-haiku-20240307"
 
-# OpenAI models
-GPT_35_TURBO = "gpt-3.5-turbo"
-GPT_35_TURBO_16K = "gpt-3.5-turbo-16k"
-GPT_4 = "gpt-4"
-GPT_4_TURBO = "gpt-4-turbo"
-GPT_4_TURBO_32K = "gpt-4-turbo-32k"
+# ── OpenAI models
+# Keep legacy constant so existing imports don't break (use only if you must)
+GPT_35_TURBO = "gpt-3.5-turbo"  # legacy; keep for backward compatibility
+
+# Preferred current options for cheap/fast alignment:
+GPT_4O_MINI = "gpt-4o-mini"  # ✅ recommended default for your pipelines
 GPT_4O = "gpt-4o"
+
+# Newer 4.1 family (mini for larger contexts with good price/perf)
+GPT_4_1 = "gpt-4.1"
+GPT_4_1_MINI = "gpt-4.1-mini"
+GPT_4_1_NANO = "gpt-4.1-nano"
+
+# Reasoning family (use sparingly for alignment tasks)
+GPT_O3 = "o3"
+GPT_O3_MINI = "o3-mini"
+GPT_O3_PRO = "o3-pro"
+
+# Back-compat alias: map older code expecting GPT_4_TURBO onto 4o-mini
+# (This avoids touching pipeline_config/main.py right now.)
+GPT_4_TURBO = GPT_4O_MINI
+
+# EMBEDDINGS (RAG etc.)
+EMBEDDING_3_SMALL = "text-embedding-3-small"
+EMBEDDING_3_LARGE = "text-embedding-3-large"
 
 
 # *LLM Provider configuration

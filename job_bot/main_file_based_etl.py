@@ -63,9 +63,9 @@ from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
 from project_config import (
     OPENAI,
     ANTHROPIC,
-    CLAUDE_SONNET,
+    CLAUDE_SONNET_3_5,
     GPT_35_TURBO,
-    GPT_4_TURBO,
+    GPT_4_1_NANO,
     CLAUDE_HAIKU,
 )
 

@@ -2,18 +2,21 @@
 Filename: validate_json_type_response.py
 Last updated: 2025 Feb
 
-This module contains the logic for processing and validating various types of response data 
-from the LLM API. 
+This module contains the logic for processing and validating various types
+of response data
+from the LLM API.
 
-It defines several functions that handle validation based on the response type 
-(e.g., JSON, tabular, text, or code). 
+It defines several functions that handle validation based on the response type
+(e.g., JSON, tabular, text, or code).
 
-The module ensures that the response data is appropriately structured and validated according to its type.
+The module ensures that the response data is appropriately structured and validated
+according to its type.
 
 *Key Functions:
 1. **`validate_response_type`**:
-   - The **first step** in the validation process. It validates and structures the raw response 
-   content based on the expected response type (e.g., "json", "tabular", "str", "code").
+   - The **first step** in the validation process. It validates and structures
+   the raw response content based on the expected response type (e.g., "json",
+   "tabular", "str", "code").
    - It checks the type of the response content and parses it accordingly:
      - If `json`, it cleans and extracts valid JSON.
      - If `tabular`, it parses the content as tabular data (CSV).
@@ -21,62 +24,62 @@ The module ensures that the response data is appropriately structured and valida
      - If `code`, it wraps the content as code.
 
 2. **`validate_json_type`**:
-   - Once the raw response has been structured by `validate_response_type`, this function 
-   is called to validate the **structured JSON data** based on the specific `json_type` 
+   - Once the raw response has been structured by `validate_response_type`, this function
+   is called to validate the **structured JSON data** based on the specific `json_type`
    (e.g., "job_site", "editing", "requirements").
-   - It ensures that the response conforms to the expected model (e.g., 
+   - It ensures that the response conforms to the expected model (e.g.,
    `JobSiteResponseModel`, `EditingResponseModel`, `RequirementsResponse`).
 
 3. **Specific Response Validation Functions**:
-   - `validate_editing_response`: Validates a response of type "editing" and ensures that 
+   - `validate_editing_response`: Validates a response of type "editing" and ensures that
    the `data` matches the `OptimizedTextData` model.
-   - `validate_job_site_response`: Validates a response of type "job_site" and ensures that 
+   - `validate_job_site_response`: Validates a response of type "job_site" and ensures that
    the `data` matches the `JobSiteData` model.
-   - `validate_requirements_response`: Validates a response of type "requirements" 
+   - `validate_requirements_response`: Validates a response of type "requirements"
    and ensures that the `data` matches the `Requirements` model.
 
 *Overview of json type validation logic:
 The module provides:
-- Specific validation functions for each type of response (e.g., `validate_job_site_response`, 
+- Specific validation functions for each type of response (e.g., `validate_job_site_response`,
 'validate_editing_response`, etc.).
-- A centralized `validate_json_type` function that maps the provided `json_type` to 
+- A centralized `validate_json_type` function that maps the provided `json_type` to
 the appropriate validation function.
-- A unified approach for handling validation for responses from the LLM API, 
+- A unified approach for handling validation for responses from the LLM API,
 regardless of their type.
 
 *Steps in Validation:
 1. **Validation Functions**:
-    - `validate_editing_response`: Validates responses of type "editing" and ensures 
+    - `validate_editing_response`: Validates responses of type "editing" and ensures
     the response `data` matches the expected structure of `OptimizedTextData`.
-    - `validate_job_site_response`: Validates responses of type "job_site" and ensures 
+    - `validate_job_site_response`: Validates responses of type "job_site" and ensures
     the response `data` matches the expected structure of `JobSiteData`.
-    - `validate_requirements_response`: Validates responses of type "requirements" 
+    - `validate_requirements_response`: Validates responses of type "requirements"
     and ensures the response `data` matches the expected structure of `Requirements`.
-   
+
 2. **Unified Validation Interface**:
-    - `validate_json_type`: This function is responsible for determining which validation 
-    function to call based on the provided `json_type`. It maps each `json_type` to 
-    the corresponding validation function and invokes it to validate the response. 
+    - `validate_json_type`: This function is responsible for determining which validation
+    function to call based on the provided `json_type`. It maps each `json_type` to
+    the corresponding validation function and invokes it to validate the response.
     This function returns the validated model instance.
 
 *Logic Flow:
-1. When a response is received, after it is validated as a JSON type, it is passed to 
-the `validate_json_type` function, specifying the type of the response (e.g., 
+1. When a response is received, after it is validated as a JSON type, it is passed to
+the `validate_json_type` function, specifying the type of the response (e.g.,
 "job_site", "editing", or "requirements").
-2. The function checks which validation function to use by mapping the `json_type` to 
+2. The function checks which validation function to use by mapping the `json_type` to
 the appropriate validation function in the `json_model_mapping` dictionary.
-3. The corresponding validation function is called, which processes and validates 
+3. The corresponding validation function is called, which processes and validates
 the response data.
 4. Each validation function performs the following:
     - Checks if the `data` field is present and of the expected type (usually a dictionary).
     - Validates the data using the appropriate Pydantic model.
-    - Returns the validated response model (e.g., `JobSiteResponseModel`, 
+    - Returns the validated response model (e.g., `JobSiteResponseModel`,
     `EditingResponseModel`, `RequirementsResponse`).
-5. If the data is invalid, an error is raised, and a `ValueError` is thrown indicating 
+5. If the data is invalid, an error is raised, and a `ValueError` is thrown indicating
 the specific issue.
 
 ### Example Usage:
-Once the module is imported, you can call the `validate_json_type` function in your code 
+Once the module is imported, you can call the `validate_json_type` function in your code
 to validate responses:
 
 ```python

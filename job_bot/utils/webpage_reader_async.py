@@ -33,10 +33,10 @@ from models.resume_job_description_io_models import JobPostingsBatch
 from project_config import (
     OPENAI,
     ANTHROPIC,
-    GPT_4_TURBO,
+    GPT_4_1_NANO,
     GPT_35_TURBO,
     CLAUDE_HAIKU,
-    CLAUDE_SONNET,
+    CLAUDE_SONNET_3_5,
 )
 import logging_config
 
@@ -411,7 +411,7 @@ def save_webpage_content(
 async def process_webpages_to_json_async(
     urls: Union[List[str], str],
     llm_provider: str = OPENAI,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
 ) -> JobPostingsBatch:

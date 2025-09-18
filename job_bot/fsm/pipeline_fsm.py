@@ -4,7 +4,9 @@ fsm/pipeline_fsm.py
 Finite State Machine (FSM) for managing pipeline stage progression.
 
 This module implements a state machine to control sequential advancement through
-a predefined pipeline workflow. Key features:
+a predefined pipeline workflow.
+
+Key features:
 
 1. Linear Stage Progression:
    - Defined stages: JOB_URLS → JOB_POSTINGS → ... → FINAL_RESPONSIBILITIES

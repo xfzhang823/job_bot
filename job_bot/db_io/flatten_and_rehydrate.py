@@ -410,14 +410,14 @@ def rehydrate_extracted_requirements_from_table(
     df: pd.DataFrame,
 ) -> ExtractedRequirementsBatch:
     """
-    Reconstructs a validated ExtractedRequirementsFile model from a flattened
+    Reconstructs a validated ExtractedRequirementsBatch model from a flattened
     requirements DataFrame.
 
     Args:
         df (pd.DataFrame): Flattened requirements with metadata columns.
 
     Returns:
-        ExtractedRequirementsFile: A Pydantic model ready for saving or re-processing.
+        ExtractedRequirementsBatch: A Pydantic model ready for saving or re-processing.
     """
     result = {}
 

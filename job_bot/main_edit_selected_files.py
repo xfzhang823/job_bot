@@ -16,7 +16,7 @@ from project_config import (
     ITERATE_1_ANTHROPIC_DIR,
     mapping_file_name,
     OPENAI,
-    GPT_4_TURBO,
+    GPT_4_1_NANO,
 )
 
 # Set up logging
@@ -174,7 +174,7 @@ def main() -> None:
 
     # LLM settings
     llm_provider: str = OPENAI  # Change to "anthropic" if needed
-    model_id: str = GPT_4_TURBO  # Adjust based on provider
+    model_id: str = GPT_4_1_NANO  # Adjust based on provider
 
     # Get correct mapping file paths
     try:

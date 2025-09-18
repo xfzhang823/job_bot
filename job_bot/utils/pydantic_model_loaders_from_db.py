@@ -66,6 +66,7 @@ from models.resume_job_description_io_models import (
     NestedResponsibilities,
     SimilarityMetrics,
 )
+from models.llm_response_models import RequirementsResponse
 from models.duckdb_table_models import PipelineState
 from db_io.duckdb_adapter import get_duckdb_connection
 from db_io.flatten_and_rehydrate import *

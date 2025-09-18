@@ -191,7 +191,7 @@ class ResponsibilityMatches(BaseModel):
 
     try:
         # Validate the JSON structure using the ResponsibilityMatches model
-        validated_data = ResponsibilityMatches.parse_obj({"responsibilities": json_data})
+        validated_data = ResponsibilityMatches.model_validate({"responsibilities": json_data})
         print("Validation successful:", validated_data)
 
     except ValidationError as e:
@@ -591,7 +591,7 @@ class JobFileMappings(RootModel[Dict[HttpUrl | str, JobFilePaths]]):
 
     try:
         # Validate the data using the JobFileMappings model
-        validated_data = JobFileMappings.parse_obj(example_data)
+        validated_data = JobFileMappings.model_validate(example_data)
         print("Validation successful:", validated_data)
     except ValidationError as e:
         print(f"Validation error: {e}")

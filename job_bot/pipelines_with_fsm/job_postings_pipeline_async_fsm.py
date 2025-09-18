@@ -1,12 +1,16 @@
 """
 job_postings_pipeline_async_fsm.py
 
+* Web → Job Description (DB)
+
 This module implements the asynchronous FSM-aware pipeline for scraping,
-parsing, validating, and persisting job posting webpages into DuckDB.
+parsing, validating, and persisting job posting webpages into job description
+content in DuckDB table.
 
 It is responsible for:
 - Querying the pipeline_control table for jobs at the `job_urls` stage
-- Concurrency-controlled processing of each job URL (scrape + LLM + validation)
+- Concurrency-controlled processing of each job URL
+    (scrape + LLM + validation)
 - Advancing the pipeline state via a Finite State Machine (FSM)
 - Storing parsed job data into the `job_postings` DuckDB table
 
@@ -42,11 +46,11 @@ Dependencies:
 +------------+--------------+
              |
              v
-+---------------------------+
++--------------------------------------+
 |  process_job_posting_batch_async_fsm |
-|  - uses FSM                        |
-|  - limits concurrency              |
-+------------+--------------+
+|  - uses FSM                          |
+|  - limits concurrency                |
++------------+-------------------------+
              |
              v
 +---------------------------+
@@ -86,7 +90,7 @@ from models.resume_job_description_io_models import (
 )
 from project_config import (
     OPENAI,
-    GPT_4_TURBO,
+    GPT_4_1_NANO,
 )
 
 from utils.webpage_reader_async import process_webpages_to_json_async
@@ -100,7 +104,7 @@ async def scrape_parse_persist_job_posting_async(
     url: str,
     fsm_manager: PipelineFSMManager,
     semaphore: asyncio.Semaphore,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     llm_provider: str = OPENAI,
     max_tokens: int = 2048,
     temperature: float = 0.3,
@@ -185,7 +189,7 @@ async def scrape_parse_persist_job_posting_async(
 async def process_job_postings_batch_async_fsm(
     urls: List[str],
     llm_provider: str = OPENAI,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
     no_of_concurrent_workers: int = 5,
@@ -242,7 +246,7 @@ async def process_job_postings_batch_async_fsm(
 
 async def run_job_postings_pipeline_async_fsm(
     llm_provider: str = OPENAI,
-    model_id: str = GPT_4_TURBO,
+    model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
     max_concurrent_tasks: int = 5,
