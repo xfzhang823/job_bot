@@ -1,16 +1,20 @@
 """metrics_evaluator.py"""
 
-# Dependencies
+# Standard & 3rd party
 import pandas as pd
 import logging
-import logging_config
 from typing import Dict
-from evaluation_optimization.text_similarity_finder import (
+
+# User defined
+from job_bot.evaluation_optimization.text_similarity_finder import (
     compute_bertscore_precision,
     AsymmetricTextSimilarity,
 )
-from llm_providers.llm_api_utils import get_openai_api_key
-from utils.field_mapping_utils import rename_df_columns, COLUMN_NAMES_TO_VARS_MAPPING
+from job_bot.llm_providers.llm_api_utils import get_openai_api_key
+from job_bot.utils.field_mapping_utils import (
+    rename_df_columns,
+    COLUMN_NAMES_TO_VARS_MAPPING,
+)
 
 
 # Set logger
@@ -298,8 +302,6 @@ def calculate_many_to_many_similarity_metrices(
         pd.DataFrame: DataFrame containing similarity metrics.
     """
     text_similarity = AsymmetricTextSimilarity()
-
-    logger.info("text_similarity instantiated")  # todo: debug; delete later
 
     similarity_results = []
 

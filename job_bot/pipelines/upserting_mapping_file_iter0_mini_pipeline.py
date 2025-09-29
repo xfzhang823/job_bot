@@ -5,12 +5,12 @@ import json
 from pathlib import Path
 import logging
 from typing import Union, Dict
-from evaluation_optimization.create_mapping_file import (
+from job_bot.evaluation_optimization.create_mapping_file import (
     load_existing_or_create_new_mapping,
 )
-from utils.generic_utils import read_from_json_file, save_to_json_file
-from evaluation_optimization.create_mapping_file import MappingConfig
-from models.resume_job_description_io_models import JobFileMappings
+from job_bot.utils.generic_utils import read_from_json_file, save_to_json_file
+from job_bot.evaluation_optimization.create_mapping_file import MappingConfig
+from job_bot.models.resume_job_description_io_models import JobFileMappings
 
 logger = logging.getLogger(__name__)
 

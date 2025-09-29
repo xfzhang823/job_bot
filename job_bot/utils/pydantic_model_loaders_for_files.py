@@ -1,11 +1,13 @@
+"""utils/pydantic_model_loaders_for_files.py"""
+
 from pathlib import Path
 import logging
-from typing import Union, Optional, cast, Dict
+from typing import Union, Optional
 import json
 import pandas as pd
-from pydantic import ValidationError, HttpUrl, TypeAdapter
+from pydantic import ValidationError, TypeAdapter
 
-from models.resume_job_description_io_models import (
+from job_bot.models.resume_job_description_io_models import (
     JobPostingsBatch,
     JobPostingUrlMetadata,
     JobPostingUrlsBatch,
@@ -16,8 +18,8 @@ from models.resume_job_description_io_models import (
     SimilarityMetrics,
     JobFileMappings,
 )
-from models.llm_response_models import JobSiteResponse, RequirementsResponse
-from utils.generic_utils import read_from_json_file
+from job_bot.models.llm_response_models import JobSiteResponse, RequirementsResponse
+from job_bot.utils.generic_utils import read_from_json_file
 
 logger = logging.getLogger(__name__)
 

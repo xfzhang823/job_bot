@@ -38,7 +38,7 @@ from typing import Optional
 
 # User-defined imports
 from utils.generic_utils import read_from_json_file
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
 from evaluation_optimization.evaluation_optimization_utils import create_file_name
@@ -46,7 +46,7 @@ from human_review_and_editing.create_resp_req_crosstab import (
     create_resp_req_crosstab,
     save_crosstab,
 )
-from project_config import (
+from job_bot.config.project_config import (
     RESPS_REQS_MATCHINGS_DIR,
     JOB_POSTING_URLS_FILE,
 )

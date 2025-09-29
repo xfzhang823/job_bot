@@ -4,7 +4,7 @@ import asyncio
 import inspect
 from typing import Optional
 from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-from project_config import (
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_4_1_NANO,

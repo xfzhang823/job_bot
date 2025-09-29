@@ -10,10 +10,10 @@ from joblib import Parallel, delayed
 from typing import Any, Tuple, Dict, Union
 from tqdm import tqdm
 from openai import OpenAI
-from evaluation_optimization.resume_editor import TextEditor
-from utils.generic_utils import save_to_json_file
-from llm_providers.llm_api_utils import get_openai_api_key
-from models.resume_job_description_io_models import (
+from job_bot.evaluation_optimization.resume_editor import TextEditor
+from job_bot.utils.generic_utils import save_to_json_file
+from job_bot.llm_providers.llm_api_utils import get_openai_api_key
+from job_bot.models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,

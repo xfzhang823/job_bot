@@ -1,6 +1,6 @@
 from pathlib import Path
 import json
-from project_config import JOB_POSTING_URLS_TO_EXCLUDE_FILE
+from job_bot.config.project_config import JOB_POSTING_URLS_TO_EXCLUDE_FILE
 
 
 def sort_json_by_company(json_file_path):

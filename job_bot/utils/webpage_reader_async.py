@@ -23,14 +23,16 @@ import time
 import json
 from typing import Any, Dict, List, Literal, Tuple, Union
 from playwright.async_api import async_playwright
-from llm_providers.llm_api_utils_async import (
+
+# User defined
+from job_bot.llm_providers.llm_api_utils_async import (
     call_openai_api_async,
     call_anthropic_api_async,
 )
-from prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
-from models.llm_response_models import JobSiteResponse
-from models.resume_job_description_io_models import JobPostingsBatch
-from project_config import (
+from job_bot.prompts.prompt_templates import CONVERT_JOB_POSTING_TO_JSON_PROMPT
+from job_bot.models.llm_response_models import JobSiteResponse
+from job_bot.models.resume_job_description_io_models import JobPostingsBatch
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_4_1_NANO,
@@ -38,7 +40,7 @@ from project_config import (
     CLAUDE_HAIKU,
     CLAUDE_SONNET_3_5,
 )
-import logging_config
+
 
 # Set up logging
 logger = logging.getLogger(__name__)

@@ -2,7 +2,7 @@ from enum import Enum
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
-from db_io.pipeline_enums import PipelineStage, Version, LLMProvider
+from job_bot.db_io.pipeline_enums import PipelineStage, Version, LLMProvider
 
 
 class MetadataField(str, Enum):

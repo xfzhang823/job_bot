@@ -12,9 +12,7 @@ import pandas as pd
 import demjson3
 
 # From project modules
-from utils.get_file_names import get_file_names
-import logging_config
-
+from job_bot.utils.get_file_names import get_file_names
 
 # Setup logger
 logger = logging.getLogger(__name__)

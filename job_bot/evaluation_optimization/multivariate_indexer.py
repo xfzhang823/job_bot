@@ -9,7 +9,6 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.decomposition import PCA
 from typing import List, Dict, Optional
 import logging
-import logging_config
 
 # Set logger
 logger = logging.getLogger(__name__)

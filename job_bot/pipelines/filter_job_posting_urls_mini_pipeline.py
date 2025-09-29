@@ -8,8 +8,8 @@ dictionary to a new JSON file.
 from pathlib import Path
 import logging
 
-from utils.generic_utils import read_from_json_file, save_to_json_file
-from project_config import (
+from job_bot.utils.generic_utils import read_from_json_file, save_to_json_file
+from job_bot.config.project_config import (
     JOB_POSTING_URLS_FILE,
     JOB_POSTING_URLS_TO_EXCLUDE_FILE,
     JOB_POSTING_URLS_FILTERED_FILE,

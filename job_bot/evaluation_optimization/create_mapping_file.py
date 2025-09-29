@@ -4,19 +4,23 @@ import os
 import json
 from pathlib import Path
 import logging
-import logging_config
 from dataclasses import dataclass
 from typing import Optional, Union, Dict, Any, cast
 from pydantic import ValidationError, HttpUrl
-from models.resume_job_description_io_models import JobFileMappings
-from utils.generic_utils import (
+
+from job_bot.utils.generic_utils import (
     save_to_json_file,
     read_from_json_file,
     get_company_and_job_title,
 )
-from evaluation_optimization.evaluation_optimization_utils import create_file_name
-from models.resume_job_description_io_models import JobFileMappings, JobFilePaths
-from utils.pydantic_model_loaders_from_files import load_job_file_mappings_model
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
+    create_file_name,
+)
+from job_bot.models.resume_job_description_io_models import (
+    JobFileMappings,
+    JobFilePaths,
+)
+from job_bot.utils.pydantic_model_loaders_for_files import load_job_file_mappings_model
 
 logger = logging.getLogger(__name__)
 

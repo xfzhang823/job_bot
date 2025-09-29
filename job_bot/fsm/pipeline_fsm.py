@@ -78,9 +78,9 @@ from datetime import datetime
 from typing import Optional
 
 # User defined
-from db_io.state_sync import upsert_pipeline_state_to_duckdb
-from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
-from models.duckdb_table_models import PipelineState
+from job_bot.db_io.state_sync import update_and_persist_pipeline_state
+from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
+from job_bot.models.db_table_models import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def _get_stage_names():
         PipelineStage.EDITED_RESPONSIBILITIES.value,
         PipelineStage.SIM_METRICS_EVAL.value,
         PipelineStage.SIM_METRICS_REVAL.value,
-        PipelineStage.CROSSTAB_REVIEW.value,
+        PipelineStage.ALIGNMENT_REVIEW.value,
         PipelineStage.FINAL_RESPONSIBILITIES.value,
     ]
 
@@ -136,46 +136,53 @@ class PipelineFSM:
     A finite state machine (FSM) controller for managing job progress through
     atomic pipeline stages.
 
-    This controller wraps a `PipelineState` model and tracks a job's current stage,
-    providing stepwise advancement through a linear sequence of well-defined stages
-    (e.g., job_urls → job_postings → extracted_requirements → ... → final_export).
+    This controller wraps a `PipelineState` model and tracks a job's current
+    `stage` and `status`, providing stepwise advancement through a linear sequence
+    of well-defined stages
+    (e.g., job_urls → job_postings → extracted_requirements → … → final_export).
 
-    After each successful transition, the FSM updates the associated `PipelineState` record
-    and persists it to the DuckDB `pipeline_control` table.
+    After each successful transition, the FSM updates the associated
+    `PipelineState` record and persists it to the DuckDB `pipeline_control` table.
 
     ---
-    * Workflow:
-        1. Initialize with a `PipelineState` object (defaults to the first stage if unset).
+    Workflow:
+        1. Initialize with a `PipelineState` object (defaults to the first stage
+           if unset).
         2. Call `.step()` to advance from the current stage to the next defined stage.
-        3. After advancing, the `PipelineState` is updated with the new stage and timestamp.
-        4. FSM persists the state to DuckDB using `save_pipeline_state_to_duckdb`.
+        3. After advancing, the `PipelineState` is updated with the new stage,
+           status, and `updated_at` timestamp.
+        4. FSM persists the state via the upsert helper
+           (`update_and_persist_pipeline_state`).
         5. If the job is already at the final stage, the FSM does not advance further.
 
     ---
     Class-level Constants:
-        STAGES (list[str]): Ordered list of atomic pipeline stages.
+        STAGES (list[PipelineStage]): Ordered list of atomic pipeline stages.
         TRANSITIONS (list[dict]): Advance transitions between each stage
-        (used by `transitions` Machine).
+        (used by the FSM engine).
 
     ---
     Instance Fields:
         state_model (PipelineState): Pydantic model containing job metadata and
-        pipeline tracking info.
-        _state (str): Internal tracker of the FSM's current stage
-        (mirrors state_model.last_stage).
+            pipeline tracking info.
+        _state (PipelineStage): Internal tracker of the FSM's current stage
+            (mirrors `state_model.stage`).
+        _status (PipelineStatus): Internal tracker of the FSM's current status
+            (mirrors `state_model.status`).
 
     ---
     Key Methods:
         step(): Advance to the next stage and persist updated state.
-        get_current_stage(): Returns the current stage from state_model or internal state.
-        get_next_stage(): Returns the next stage based on the defined transition map.
+        get_current_stage(): Returns the current stage (enum).
+        get_next_stage(): Returns the next stage based on the transition map.
+        mark_status(): Set a new status and persist the change.
 
     ---
     Example:
-    >>>    fsm = PipelineFSM(state)
-    >>>    fsm.step()  # Moves from current stage to the next one and updates DuckDB
-    >>>    fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Requirements parsed and stored.")
-
+        >>> fsm = PipelineFSM(state)
+        >>> fsm.step()  # Moves from current stage to the next one and updates DuckDB
+        >>> fsm.mark_status(PipelineStatus.IN_PROGRESS,
+        ...                 notes="Requirements parsed and stored.")
     """
 
     STAGES = _get_stage_names()
@@ -183,20 +190,29 @@ class PipelineFSM:
 
     def __init__(self, state: PipelineState):
         """
-        Initialize the FSM with the provided PipelineState.
+        Initialize the FSM with a given PipelineState.
+
+        The initializer stores the control-plane record (`stage`, `status`)
+        as strongly typed enums (`PipelineStage`, `PipelineStatus`) and keeps
+        a reference to the full Pydantic model for persistence.
 
         Args:
-            state (PipelineState): The Pydantic model representing the current
-            pipeline state.
+            state (PipelineState):
+                The current pipeline state record loaded from the
+                `pipeline_control` table.
         """
+        # New control-plane fields: stage/status (enums)
         self.state_model = state
-        self._state = state.last_stage or PipelineStage.JOB_URLS.value
-        self.machine = Machine(
-            model=self,
-            states=self.STAGES,
-            transitions=self.TRANSITIONS,
-            initial=self._state,
-            auto_transitions=False,
+        # Normalize to PipelineStage enum internally
+        self._state: PipelineStage = (
+            state.stage
+            if isinstance(state.stage, PipelineStage)
+            else PipelineStage(str(state.stage))
+        )
+        self._status: PipelineStatus = (
+            state.status
+            if isinstance(state.status, PipelineStatus)
+            else PipelineStatus(str(state.status))
         )
 
     @property
@@ -215,7 +231,7 @@ class PipelineFSM:
         Returns:
             str: The current pipeline stage.
         """
-        return self.state_model.last_stage or self._state
+        return self._state
 
     def get_next_stage(self) -> str | None:
         """
@@ -239,54 +255,81 @@ class PipelineFSM:
         self,
         status: PipelineStatus,
         notes: Optional[str] = None,
-        table_name: str = TableName.PIPELINE_CONTROL.value,
-    ):
+        table_name: TableName = TableName.PIPELINE_CONTROL,
+    ) -> None:
         """
-        Update the pipeline status and optional notes for the current pipeline stage,
-        without advancing the stage.
+        Update the pipeline status (without advancing the stage) and persist.
 
         Args:
-            - status (PipelineStatus): Enum representing job status (e.g. IN_PROGRESS, ERROR).
-            - notes (str): Optional message to attach to the current pipeline state.
-            table_name (str): DuckDB table to persist update (default: pipeline_control).
+            status: New PipelineStatus (e.g., IN_PROGRESS, ERROR, SKIPPED).
+            notes: Optional free-text note to append (timestamped).
+            table_name: Control-plane table name (default: pipeline_control).
         """
         try:
-            self.state_model.status = status.value
-            self.state_model.notes = notes
-            self.state_model.timestamp = datetime.now()
+            # Update internal and model status as enums
+            self._status = status
+            self.state_model.status = status
 
-            upsert_pipeline_state_to_duckdb(self.state_model, table_name)
+            # Append timestamped note (preserve prior notes)
+            if notes:
+                line = f"[{datetime.now().isoformat(timespec='seconds')}] {notes}"
+                self.state_model.notes = (
+                    f"{line}\n{self.state_model.notes}".strip()
+                    if self.state_model.notes
+                    else line
+                )
+
+            # Touch updated_at only (created_at is immutable after insert)
+            self.state_model.updated_at = datetime.now()
+
+            update_and_persist_pipeline_state(self.state_model, table_name)
+
             logger.info(
-                f"📝 Status updated for {self.state_model.url}: {status} — {notes}"
+                "📝 Status updated for %s: %s — %s",
+                self.state_model.url,
+                status.name,
+                notes or "",
             )
         except Exception as e:
             logger.error(
-                f"❌ Failed to update status for {self.state_model.url}: {e}",
+                "❌ Failed to update status for %s: %s",
+                self.state_model.url,
+                e,
                 exc_info=True,
             )
 
-    def step(self, table_name: str = TableName.PIPELINE_CONTROL.value):
+    def step(self, table_name: TableName = TableName.PIPELINE_CONTROL) -> None:
         """
         Advance to the next stage and persist the update.
-        Does not modify status or notes.
+        Does not modify status (only `stage` and `updated_at`).
         """
         try:
-            if self._state != PipelineStage.list()[-1]:
+            final_stage = PipelineStage.list()[-1]  # relies on your enum utility
+            if self._state == final_stage:
                 logger.info(
-                    f"⏩ Advancing {self.state_model.url} from stage '{self._state}'"
+                    "✅ Already at final stage for %s: %s",
+                    self.state_model.url,
+                    self._state.name,
                 )
+                return
 
-                self._advance()
-                self._state = self.state
-                self.state_model.last_stage = self._state
-                self.state_model.timestamp = datetime.now()
+            logger.info(
+                "⏩ Advancing %s from '%s'", self.state_model.url, self._state.name
+            )
 
-                upsert_pipeline_state_to_duckdb(self.state_model, table_name)
-                logger.info(f"✅ Advanced to: {self.state_model.last_stage}")
-            else:
-                logger.info(f"✅ Already at final stage: {self.state_model.url}")
+            # Advance internal FSM (your implementation should set the next stage)
+            self._advance()  # assumes this updates self._state internally
+
+            # Mirror internal stage to the persisted model
+            self.state_model.stage = self._state
+            self.state_model.updated_at = datetime.now()
+
+            update_and_persist_pipeline_state(self.state_model, table_name)
+            logger.info("✅ Advanced to: %s", self.state_model.stage.name)
         except Exception as e:
             logger.error(
-                f"❌ Failed to advance stage for {self.state_model.url}: {e}",
+                "❌ Failed to advance stage for %s: %s",
+                self.state_model.url,
+                e,
                 exc_info=True,
             )

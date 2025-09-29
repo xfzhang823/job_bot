@@ -10,11 +10,8 @@ Utils classes/methods for data extraction, parsing, and manipulation
 import os
 import json
 import logging
-import re
-from io import StringIO
 from typing import Optional, Union, cast
 from dotenv import load_dotenv
-import pandas as pd
 from pydantic import ValidationError
 
 # LLM imports
@@ -23,7 +20,7 @@ import ollama
 from anthropic import Anthropic
 
 # from own modules
-from models.llm_response_models import (
+from job_bot.models.llm_response_models import (
     CodeResponse,
     JSONResponse,
     TabularResponse,
@@ -34,12 +31,12 @@ from models.llm_response_models import (
     RequirementsResponse,
 )
 
-# from models.resume_job_description_io_models import Requirements
-from llm_providers.llm_response_validators import (
+
+from job_bot.llm_providers.llm_response_validators import (
     validate_json_type,
     validate_response_type,
 )
-from project_config import (
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_35_TURBO,

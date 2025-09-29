@@ -11,18 +11,17 @@ Each function returns raw values or DataFrames depending on the context.
 
 # Standard
 import logging
-from typing import Optional, List, get_origin
+from typing import Optional, List, get_origin, get_args, Union, Sequence
 from datetime import datetime
 import json
 from enum import Enum
 from pydantic import BaseModel, HttpUrl
 from pydantic_core import PydanticUndefined
-from typing import get_origin, get_args, Union
 import pandas as pd
 
 # Project level
-from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.pipeline_enums import PipelineStage, PipelineStatus
+from job_bot.db_io.get_db_connection import get_db_connection
+from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +114,7 @@ def get_urls_by_status(status: PipelineStatus) -> List[str]:
     Returns:
         List[str]: A list of matching URLs.
     """
-    con = get_duckdb_connection()
+    con = get_db_connection()
     df = con.execute(
         """
         SELECT url FROM pipeline_control WHERE status = ?
@@ -136,7 +135,7 @@ def get_urls_by_stage(stage: PipelineStage) -> List[str]:
     Returns:
         List[str]: A list of matching job posting URLs.
     """
-    con = get_duckdb_connection()
+    con = get_db_connection()
     df = con.execute(
         """
         SELECT url FROM pipeline_control WHERE stage = ?
@@ -148,30 +147,34 @@ def get_urls_by_stage(stage: PipelineStage) -> List[str]:
 
 def get_urls_by_stage_and_status(
     stage: PipelineStage,
-    status: PipelineStatus = PipelineStatus.NEW,
+    *,
+    status: Union[PipelineStatus, Sequence[PipelineStatus]] = PipelineStatus.NEW,
     version: Optional[str] = None,
     iteration: Optional[int] = None,
 ) -> List[str]:
     """
-    Return URLs from the pipeline_control table matching a specific stage and status,
-    with optional filtering by version and iteration.
+    Return URLs from the pipeline_control table matching a specific stage
+    and one or more status, with optional filtering by version and iteration.
 
     Args:
-        stage (PipelineStage): Pipeline stage (as Enum) to match.
-        status (PipelineStatus): Status to filter on (e.g., new, in_progress).
-        version (Optional[str]): Optional version filter (e.g., "original").
-        iteration (Optional[int]): Optional iteration number.
+        stage: Pipeline stage (Enum) to match.
+        status: Single status or sequence of status to include (default = NEW).
+        version: Optional version filter (e.g., "original").
+        iteration: Optional iteration number.
 
     Returns:
-        List[str]: A list of job posting URLs matching the criteria.
+        List[str]: A list of DISTINCT URLs matching the criteria.
     """
-    filters = ["stage = ?", "status = ?"]  # parameterized SQL query
-    params: List[str | int] = [
-        stage.value,
-        status.value,
-    ]  # Include int b/c iteration is int
+    # Normalize to a list of status
+    if isinstance(status, PipelineStatus):
+        status = [status]
+    else:
+        status = list(status)  # assumes iterable of PipelineStatus
 
-    if version:
+    filters = ["stage = ?", f"status IN ({', '.join(['?'] * len(status))})"]
+    params: List[object] = [stage.value, *(s.value for s in status)]
+
+    if version is not None:
         filters.append("version = ?")
         params.append(version)
     if iteration is not None:
@@ -182,8 +185,52 @@ def get_urls_by_stage_and_status(
         SELECT DISTINCT url
         FROM pipeline_control
         WHERE {' AND '.join(filters)}
+        ORDER BY updated_at DESC, created_at DESC
     """
-    con = get_duckdb_connection()
+
+    con = get_db_connection()
+    try:
+        df: pd.DataFrame = con.execute(sql, params).df()
+        return df["url"].tolist()
+    finally:
+        con.close()
+
+
+# URL pre-filtering utility
+def get_urls_from_pipeline_control(
+    status: PipelineStatus = PipelineStatus.IN_PROGRESS,
+    url: Optional[str] = None,
+    iteration: Optional[int] = None,
+) -> List[str]:
+    """
+    Returns a list of distinct URLs from the pipeline_control table
+    filtered by status and optional URL/iteration.
+
+    Args:
+        - status (PipelineStatus): Status to match (e.g., 'new', 'in_progress').
+        - url (Optional[str]): Optional job URL filter.
+        - iteration (Optional[int]): Optional iteration filter.
+
+    Returns:
+        List[str]: List of matching job posting URLs.
+    """
+    filters = ["status = ?"]
+    params: List[str | int] = [status.value]
+
+    if url:
+        filters.append("url = ?")
+        params.append(url)
+    if iteration is not None:
+        filters.append("iteration = ?")
+        params.append(iteration)
+
+    sql = f"""
+        SELECT DISTINCT url
+        FROM pipeline_control
+        WHERE {' AND '.join(filters)}
+    """
+
+    con = get_db_connection()
     df = con.execute(sql, params).df()
     return df["url"].tolist()
 
@@ -199,7 +246,7 @@ def get_pipeline_state(url: str) -> pd.DataFrame:
     Returns:
         pd.DataFrame: A single-row DataFrame containing the pipeline state for the given URL.
     """
-    con = get_duckdb_connection()
+    con = get_db_connection()
     return con.execute(
         """
         SELECT * FROM pipeline_control
@@ -233,7 +280,7 @@ def get_stage_progress_counts() -> pd.DataFrame:
     Returns:
         pd.DataFrame: A summary table showing (stage, status, count).
     """
-    con = get_duckdb_connection()
+    con = get_db_connection()
     return con.execute(
         """
         SELECT stage, status, COUNT(*) as count
@@ -254,7 +301,7 @@ def get_recent_urls(limit: int = 10) -> pd.DataFrame:
     Returns:
         pd.DataFrame: DataFrame with columns (url, stage, status, timestamp).
     """
-    con = get_duckdb_connection()
+    con = get_db_connection()
     return con.execute(
         """
         SELECT url, stage, status, timestamp
@@ -359,19 +406,3 @@ def generate_table_schema_from_model(
         f"    {field_block}"
         f"{pk_clause}\n);"
     )
-
-
-# ✅ DB Column Order Generation Utilities
-def generate_table_column_order_from_model(model: type[BaseModel]) -> list[str]:
-    """
-    Extracts DuckDB column order from a Pydantic model.
-
-    Args:
-        model (type[BaseModel]): A Pydantic model class
-
-    Returns:
-        list[str]: Ordered list of field names matching the model definition
-
-    * Column order is based on order in Pydantic model.
-    """
-    return list(model.model_fields.keys())

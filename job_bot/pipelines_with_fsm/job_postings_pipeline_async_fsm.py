@@ -7,12 +7,11 @@ This module implements the asynchronous FSM-aware pipeline for scraping,
 parsing, validating, and persisting job posting webpages into job description
 content in DuckDB table.
 
-It is responsible for:
-- Querying the pipeline_control table for jobs at the `job_urls` stage
-- Concurrency-controlled processing of each job URL
-    (scrape + LLM + validation)
-- Advancing the pipeline state via a Finite State Machine (FSM)
-- Storing parsed job data into the `job_postings` DuckDB table
+This pipeline:
+- Pulls NEW URLs at stage=JOB_URLS
+- Scrapes + parses each URL (LLM-assisted)
+- Validates + persists to DuckDB (job_postings)
+- Steps FSM → JOB_POSTINGS (IN_PROGRESS on success)
 
 Pipeline Stage:
     PipelineStage.JOB_URLS → PipelineStage.JOB_POSTINGS
@@ -29,7 +28,7 @@ Concurrency:
 Dependencies:
     - process_webpages_to_json_async(): Core scraping + parsing logic
     - flatten_model_to_df(): Converts parsed model to DuckDB-ready DataFrame
-    - insert_df_dedup(): Inserts deduplicated records into DuckDB
+    - insert_df_with_config(): Inserts deduplicated records into DuckDB
     - PipelineFSMManager: Controls per-URL state and stage progression
 
 ---
@@ -53,13 +52,13 @@ Dependencies:
 +------------+-------------------------+
              |
              v
-+---------------------------+
++----------------------------------------+
 | scrape_parse_persist_job_posting_async |
-| - scrape + LLM parse         |
-| - validate content           |
-| - flatten + insert to DB     |
-| - fsm.step() if success      |
-+------------+--------------+
+| - scrape + LLM parse                   |
+| - validate content                     |
+| - flatten + insert to DB               |
+| - fsm.step() if success                |
++------------+---------------------------+
              |
              v
 +----------------------------+
@@ -77,23 +76,28 @@ import logging
 from typing import List, Optional
 
 # Project-level imports
-from db_io.db_insert import insert_df_dedup
-from db_io.db_transform import flatten_model_to_df
-from db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
-from db_io.state_sync import load_pipeline_state
-from db_io.db_utils import get_urls_by_stage_and_status
-from fsm.pipeline_fsm_manager import PipelineFSMManager
+from job_bot.db_io.db_inserters import insert_df_with_config
+from job_bot.db_io.flatten_and_rehydrate import flatten_model_to_df
+from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
+from job_bot.db_io.state_sync import load_pipeline_state
+from job_bot.db_io.db_utils import get_urls_by_stage_and_status
 
-from models.resume_job_description_io_models import (
+# --- IO surface: function-style db_loaders ---
+# from job_bot.db_io.db_loaders import (
+#     persist_job_postings_batch,
+# )
+from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
+
+from job_bot.models.resume_job_description_io_models import (
     JobPostingsBatch,
     JobSiteResponse,
 )
-from project_config import (
+from job_bot.config.project_config import (
     OPENAI,
     GPT_4_1_NANO,
 )
 
-from utils.webpage_reader_async import process_webpages_to_json_async
+from job_bot.utils.webpage_reader_async import process_webpages_to_json_async
 
 
 # Set logger
@@ -104,8 +108,9 @@ async def scrape_parse_persist_job_posting_async(
     url: str,
     fsm_manager: PipelineFSMManager,
     semaphore: asyncio.Semaphore,
-    model_id: str = GPT_4_1_NANO,
+    *,
     llm_provider: str = OPENAI,
+    model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
 ) -> Optional[JobSiteResponse]:
@@ -125,6 +130,7 @@ async def scrape_parse_persist_job_posting_async(
         Optional[JobSiteResponse]: Parsed job posting model, or None on failure.
     """
     logger.info(f"🌐 Starting scrape/parse for: {url}")
+
     fsm = fsm_manager.get_fsm(url)
 
     # Step 1: Scrape + LLM parse (inside semaphore)
@@ -145,16 +151,20 @@ async def scrape_parse_persist_job_posting_async(
     # Step 2: Validation + Flattening + Persistence
     try:
         jobposting_model = job_postings_batch_model.root[url]  # type: ignore[attr-defined]
-        data_section = jobposting_model.data
-        content = data_section.get("content")
 
-        # Validate content
-        if not isinstance(content, dict) or not any(
-            isinstance(v, str) and v.strip() for v in content.values()
-        ):
+        # ✅ Data is a Pydantic model, not a dict
+        data = jobposting_model.data
+        content = data.content
+
+        # Check for content richness
+        has_text = bool(
+            isinstance(content, dict)
+            and any(isinstance(v, str) and v.strip() for v in content.values())
+        )
+        if not has_text:
             jobposting_model.status = "error"
-            jobposting_model.message = "Empty or uninformative content extracted"
-            logger.warning(f"🚫 Skipping URL due to empty content: {url}")
+            jobposting_model.message = "Empty/uninformative content extracted"
+            logger.warning(f"🚫 Skipping (empty content): {url}")
         else:
             jobposting_model.status = "success"
             jobposting_model.message = "Job description parsed successfully"
@@ -164,11 +174,15 @@ async def scrape_parse_persist_job_posting_async(
         job_df = flatten_model_to_df(
             model=job_posting_batch,
             table_name=TableName.JOB_POSTINGS,
-            stage=PipelineStage.JOB_POSTINGS,
+            iteration=None,
+            llm_provider=llm_provider,
+            model_id=model_id,
         )
-        insert_df_dedup(job_df, TableName.JOB_POSTINGS.value)
+        insert_df_with_config(
+            job_df, TableName.JOB_POSTINGS, url=url
+        )  # pass url so iteration inherits correctly
 
-        # FSM Step + Status update
+        # Advance FSM (FSM Step + Status update)
         fsm.step()
         fsm.mark_status(
             PipelineStatus.IN_PROGRESS,
@@ -180,8 +194,8 @@ async def scrape_parse_persist_job_posting_async(
         )
         return jobposting_model
 
-    except Exception as e:
-        logger.exception(f"💾 Failed to post-process or persist job posting: {url}")
+    except Exception:
+        logger.exception("💾 Post-process or persist failed: %s", url)
         fsm.mark_status(PipelineStatus.ERROR, notes="Post-processing/persist failed")
         return None
 
@@ -228,7 +242,7 @@ async def process_job_postings_batch_async_fsm(
         fsm = fsm_manager.get_fsm(url)
 
         if fsm.state != PipelineStage.JOB_URLS.value:
-            logger.info(f"⏩ Skipping {url} — current stage: {fsm.state}")
+            logger.info("⏩ Skip (stage=%s): %s", fsm.state, url)
             return
 
         await scrape_parse_persist_job_posting_async(
@@ -245,12 +259,15 @@ async def process_job_postings_batch_async_fsm(
 
 
 async def run_job_postings_pipeline_async_fsm(
+    *,
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
     temperature: float = 0.3,
     max_concurrent_tasks: int = 5,
     filter_keys: Optional[list[str]] = None,
+    iteration: int = 0,
+    retry_errors: bool = False,
 ):
     """
     FSM-aware pipeline to scrape and parse job postings asynchronously.
@@ -269,14 +286,25 @@ async def run_job_postings_pipeline_async_fsm(
         - temperature (float): Sampling temperature.
         - max_concurrent_tasks (int): Max number of parallel workers.
         - filter_keys (Optional[list[str]]): Subset of URLs to process.
-        If None, all matching URLs are processed.
-    """
+            If None, all matching URLs are processed.
+        - retry_errors (bool): if retry_errors=True, also includes rows
+            currently marked ERROR.
 
+    """
+    # Decide which status to pull
+    status = (
+        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        if retry_errors
+        else (PipelineStatus.NEW,)
+    )
+    # Fetch worklist
     urls = get_urls_by_stage_and_status(
         stage=PipelineStage.JOB_URLS,
-        status=PipelineStatus.NEW,
+        status=status,  # accepts singular or sequence
+        iteration=iteration,
     )
 
+    # Optional sebset filter
     if filter_keys:
         urls = [url for url in urls if url in filter_keys]
 

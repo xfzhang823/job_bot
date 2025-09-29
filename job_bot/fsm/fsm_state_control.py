@@ -6,10 +6,17 @@ Manages creation, updating, bulk operations, and FSM steps for pipeline states.
 
 import logging
 from datetime import datetime
-from db_io.state_sync import upsert_pipeline_state_to_duckdb, load_pipeline_state
-from db_io.pipeline_enums import PipelineStage, PipelineStatus, LLMProvider, Version
-from fsm.pipeline_fsm_manager import PipelineFSMManager
-from models.duckdb_table_models import PipelineState
+from job_bot.db_io.state_sync import (
+    update_and_persist_pipeline_state,
+    load_pipeline_state,
+)
+from job_bot.db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    # Version,
+)
+from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
+from job_bot.models.db_table_models import PipelineState
 
 
 logger = logging.getLogger(__name__)
@@ -33,20 +40,18 @@ class PipelineControl:
         self,
         urls: list[str],
         iteration: int = 0,
-        llm_provider: str = "openai",
-    ):
+    ) -> None:
         """
         Initializes pipeline state for a list of job URLs if they are not already present.
 
         For each URL:
         - Checks if a PipelineState exists in DuckDB.
-        - If not, creates a new record with default metadata.
+        - If not, creates a new record with default metadata (created_at auto-filled).
         - Skips already-initialized URLs.
 
         Args:
             urls (list[str]): Job posting URLs to initialize.
             iteration (int): Optional iteration count (default: 0).
-            llm_provider (str): LLM provider to associate with the state (default: "openai").
         """
         for url in urls:
             try:
@@ -56,15 +61,15 @@ class PipelineControl:
                         url=url,
                         iteration=iteration,
                         source_file=None,
-                        timestamp=datetime.now(),
-                        llm_provider=LLMProvider(llm_provider),
-                        version=Version.ORIGINAL,
+                        # version is optional on control-plane; start as None.
+                        version=None,
                         stage=PipelineStage.JOB_URLS,
                         status=PipelineStatus.NEW,
-                        is_active=True,
                         notes=None,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now(),
                     )
-                    upsert_pipeline_state_to_duckdb(new_state)
+                    update_and_persist_pipeline_state(new_state)
                     logger.info(f"✅ Initialized pipeline state for URL: {url}")
                 else:
                     logger.info(f"🔁 URL already initialized: {url}")
@@ -75,7 +80,7 @@ class PipelineControl:
     def skip(self, urls: list[str], reason: str = ""):
         self._bulk_update(
             urls,
-            fields={"status": PipelineStatus.SKIPPED, "is_active": False},
+            fields={"status": PipelineStatus.SKIPPED},
             reason=reason or "Manually skipped",
         )
 
@@ -122,7 +127,10 @@ class PipelineControl:
                     note_line = f"[{datetime.now().isoformat()}] {reason}"
                     state.notes = f"{note_line}\n{state.notes or ''}".strip()
 
-                upsert_pipeline_state_to_duckdb(state)
+                # Touch updated_at (TimestampedMixin field on PipelineState)
+                state.updated_at = datetime.now()
+
+                update_and_persist_pipeline_state(state)
                 logger.info(f"✅ Updated state for {url}: {fields}")
             except Exception as e:
                 logger.error(f"❌ Failed to update {url}: {e}", exc_info=True)

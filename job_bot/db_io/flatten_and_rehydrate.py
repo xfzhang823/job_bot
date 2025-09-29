@@ -1,51 +1,46 @@
 """
-Module: flatten_and_rehydrate.py
-Author: Xiao-Fei Zhang
+flatten_and_rehydrate.py
 
-This module provides utilities to flatten and rehydrate complex nested data structures
-used in a resume-job alignment pipeline. It supports:
+Utilities to convert between nested, validated models (Pydantic) and
+relational tables (pandas → DuckDB) used in a resume–job alignment pipeline.
 
-- Job postings and extracted requirements
-- Flattened, pruned, and edited responsibilities
-- Pydantic-validated models for both requirements and responsibilities
-- Conversion between JSON-like dicts and tabular formats (pandas DataFrames)
-- Logging and error-handling for robust pipeline integration
+Supported data:
+- Job posting URLs and postings
+- Extracted & flattened requirements
+- Flattened, pruned, and edited responsibilities (incl. nested alignments)
 
-The goal is to allow all pipeline stages to work with relational tables (like DuckDB)
-while preserving the ability to round-trip the data back to its original nested form.
+Highlights:
+- Model → DataFrame “flatteners” for DuckDB inserts
+- DataFrame → Model “rehydrators” for round-trips and pipeline reuse
+- Consistent keys/columns for stable joins (url, iteration, *_key)
+- Logging and light validation at IO boundaries
 
----
-
-Includes:
-
-- `flatten_keyed_dict` / `unflatten_to_keyed_dict`: Generic utilities for converting
-dict-of-dicts to DataFrame
-- `flatten_job_postings_wide` / `rehydrate_job_postings_wide`
-- `flatten_extracted_requirements` / `rehydrate_extracted_requirements`
-- `flatten_responsibilities` / `rehydrate_responsibilities`
-- `flatten_pruned_responsibilities` / `rehydrate_pruned_responsibilities`
-- `flatten_requirements_model`: For Pydantic `Requirements` model
-- `flatten_nested_responsibilities_model`: For Pydantic `NestedResponsibilities` model
-
-Each function includes logging, validation, and structured keys to support robust
-database integration and round-trip JSON transforms.
-
-todo: leave the table data validation with table specific models for rehydrate functions
-todo: for now, because:
-todo: The ingestion pipeline already adds metadata and aligns columns using align_df_with_schema()
-todo: The risk of schema mismatch is low if ingestion is the only entry point into the DBit's.
-todo: The risk of schema mismatch is low.
-todo: evisit this when batch validation, QA reporting, dashboard or audit tooling,
-todo: writing comprehensive unit tests
+Notes
+-----
+Schema enforcement and metadata stamping are handled by the ingestion layer
+(e.g., `align_df_with_schema()` and insert config). Rehydrators assume tables
+conform to the registry schema and are primarily responsible for structure,
+not per-column validation.
 """
 
+from __future__ import annotations
+
 # Imports
-from typing import Any, cast, Dict, List, Union
+from pathlib import Path
 import json
 import logging
+from typing import Any, cast, Dict, Callable, Mapping, Type, TypeVar, Tuple, List, Union
 import pandas as pd
-from pydantic import HttpUrl, ValidationError
-from models.resume_job_description_io_models import (
+from pydantic import BaseModel, HttpUrl, ValidationError
+
+# User defined
+from job_bot.db_io.pipeline_enums import (
+    TableName,
+    LLMProvider,
+    Version,
+)
+from job_bot.db_io.db_transform import add_metadata
+from job_bot.models.resume_job_description_io_models import (
     NestedResponsibilities,
     Requirements,
     Responsibilities,
@@ -54,30 +49,110 @@ from models.resume_job_description_io_models import (
     JobPostingsBatch,
     ExtractedRequirementsBatch,
 )
-from models.llm_response_models import (
+from job_bot.models.llm_response_models import (
     JobSiteResponse,
     JobSiteData,
     RequirementsResponse,
     NestedRequirements,
 )
+from job_bot.models.model_type import ModelType
 
+# from job_bot.models.resume_job_description_io_models import ExtractedRequirementsBatch
+# from job_bot.models.llm_response_models import
 # Set up logger for this module
 logger = logging.getLogger(__name__)
+
+
+# utils: shared normalizer
+T = TypeVar("T", bound=BaseModel)
+FlattenFuncTyped = Callable[[Any], pd.DataFrame]  # accepts batch or single
+# Accept a single type OR a tuple of types
+ExpectedTypes = Union[Type[T], tuple[Type[Any], ...]]
+FlattenDispatch = Dict[TableName, Tuple[ExpectedTypes, FlattenFuncTyped]]
+
+
+def get_flatten_dispatch() -> FlattenDispatch:
+    """
+    Map DuckDB tables to their expected input model types and flattener functions.
+
+    Returns
+    -------
+    dict[TableName, tuple[ExpectedTypes, FlattenFuncTyped]]
+        A dispatch map used to route a validated model (or batch RootModel) to
+        the correct flattening function.
+    """
+    return {
+        TableName.JOB_URLS: (JobPostingUrlsBatch, flatten_job_urls_to_table),
+        # 👇 accept BOTH batch and single for these two:
+        TableName.JOB_POSTINGS: (
+            (JobPostingsBatch, JobSiteResponse),
+            flatten_job_postings_to_table,
+        ),
+        TableName.EXTRACTED_REQUIREMENTS: (
+            (ExtractedRequirementsBatch, RequirementsResponse),
+            flatten_extracted_requirements_to_table,
+        ),
+        TableName.FLATTENED_REQUIREMENTS: (
+            Requirements,
+            flatten_requirements_to_table,
+        ),
+        TableName.FLATTENED_RESPONSIBILITIES: (
+            Responsibilities,
+            flatten_responsibilities_to_table,
+        ),
+        TableName.PRUNED_RESPONSIBILITIES: (
+            NestedResponsibilities,
+            flatten_nested_responsibilities_to_table,
+        ),
+        TableName.EDITED_RESPONSIBILITIES: (
+            NestedResponsibilities,
+            flatten_nested_responsibilities_to_table,
+        ),
+    }
+
+
+def _as_url_mapping(model: Any, *, url_of: Callable[[Any], str]) -> Dict[str, Any]:
+    """
+    Normalize heterogeneous inputs to {url: item}.
+
+    Accepts:
+      • RootModel[dict[url, item]] → returns the dict
+      • dict[url, item]            → returns as-is
+      • single item                → { url_of(item): item }
+
+    Raises
+    ------
+    ValueError
+        If a single item does not yield a URL via `url_of`.
+    """
+    raw = getattr(model, "root", model)  # handle RootModel
+    if isinstance(raw, dict):
+        return raw
+
+    url = url_of(model)  # single item
+    if not url:
+        raise ValueError(
+            f"Cannot derive URL from single item of type {type(model).__name__}"
+        )
+    return {url: model}
 
 
 def flatten_keyed_dict(
     d: Dict[str, Dict[str, Any]], key_col: str = "url"
 ) -> pd.DataFrame:
     """
-    Converts a dict-of-dicts into a flat DataFrame with the outer key as a new column.
+    Convert a dict-of-dicts into a DataFrame, lifting the outer key into `key_col`.
 
-    Args:
-        d (dict): A dictionary where each value is a dictionary, and the key (e.g. URL)
-                  should be lifted into its own column.
-        key_col (str): The name of the column to store the outer key.
+    Parameters
+    ----------
+    d : dict[str, dict[str, Any]]
+        Mapping of identifiers (e.g., URLs) to row dicts.
+    key_col : str, default "url"
+        Name of the column that stores the outer key.
 
-    Returns:
-        pd.DataFrame: Flattened data.
+    Returns
+    -------
+    pd.DataFrame
     """
     return pd.DataFrame([{key_col: k, **v} for k, v in d.items()])
 
@@ -86,14 +161,16 @@ def unflatten_to_keyed_dict(
     df: pd.DataFrame, key_col: str = "url"
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Converts a flat DataFrame back into a dict-of-dicts using a column as the key.
+    Convert a DataFrame back into {key: row_dict}, using `key_col` as the key.
 
-    Args:
-        df (pd.DataFrame): The DataFrame to convert.
-        key_col (str): The column to use as the outer key.
+    Parameters
+    ----------
+    df : pd.DataFrame
+    key_col : str, default "url"
 
-    Returns:
-        dict: Nested dictionary.
+    Returns
+    -------
+    dict[str, dict[str, Any]]
     """
     return {
         row[key_col]: row.drop(labels=[key_col]).to_dict() for _, row in df.iterrows()
@@ -138,6 +215,77 @@ def flatten_job_urls_to_table(model: JobPostingUrlsBatch) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# * ✔️ Jobpostings
+def flatten_job_postings_to_table(
+    model: Union["JobPostingsBatch", "JobSiteResponse", Dict[str, "JobSiteResponse"]],
+) -> pd.DataFrame:
+    """
+    Flatten job postings (batch or single) to a wide table.
+
+    Input
+    -----
+    - RootModel[dict[url, JobSiteResponse]]  OR
+    - dict[url, JobSiteResponse]             OR
+    - JobSiteResponse
+
+    Output columns
+    --------------
+    url, job_title, company, location, salary_info, posted_date, content (JSON str)
+
+    Returns
+    -------
+    pd.DataFrame
+    """
+    rows: List[Dict[str, Any]] = []
+
+    # --- Normalize to Mapping[str, JobSiteResponse] ---
+    # unwrap RootModel if present (a neat Pydantic trick - no need for if/elfi)
+
+    raw = getattr(model, "root", model)  # unwrap RootModel if present
+
+    if isinstance(raw, Mapping):
+        # Tell the type checker that values are JobSiteResponse
+        mapping: Mapping[str, JobSiteResponse] = cast(
+            Mapping[str, JobSiteResponse], raw
+        )
+    else:
+        # single item path
+        single = cast(JobSiteResponse, raw)
+        url = getattr(single, "url", None) or getattr(
+            getattr(single, "data", None), "url", None
+        )
+        if not url:
+            raise ValueError(
+                f"Cannot derive URL from single item of type {type(single).__name__}"
+            )
+        mapping = {url: single}
+
+    for url_key, outer in mapping.items():
+        try:
+            data = outer.data  # JobSiteResponse.data
+            rows.append(
+                {
+                    "url": getattr(data, "url", url_key),
+                    "job_title": getattr(data, "job_title", None),
+                    "company": getattr(data, "company", None),
+                    "location": getattr(data, "location", None),
+                    "salary_info": getattr(data, "salary_info", None),
+                    "posted_date": getattr(data, "posted_date", None),
+                    "content": (
+                        json.dumps(getattr(data, "content", None), ensure_ascii=False)
+                        if getattr(data, "content", None) is not None
+                        else None
+                    ),
+                }
+            )
+        except ValidationError as e:
+            logger.warning(f"❌ Validation error in job posting at {url_key}: {e}")
+        except Exception as e:
+            logger.warning(f"❌ Skipping malformed posting at {url_key}: {e}")
+
+    return pd.DataFrame(rows)
+
+
 def rehydrate_job_urls_from_table(df: pd.DataFrame) -> JobPostingUrlsBatch:
     """
     Rehydrates a DataFrame from the `job_urls` table into
@@ -148,7 +296,7 @@ def rehydrate_job_urls_from_table(df: pd.DataFrame) -> JobPostingUrlsBatch:
         and 'job_title' columns.
 
     Returns:
-        JobPostingUrlsFile: Root model with validated mapping of URL -> metadata.
+        JobPostingUrlsBatch: Root model with validated mapping of URL -> metadata.
     """
     if df.empty:
         return JobPostingUrlsBatch({})
@@ -166,66 +314,6 @@ def rehydrate_job_urls_from_table(df: pd.DataFrame) -> JobPostingUrlsBatch:
             continue  # optionally log or raise
 
     return JobPostingUrlsBatch(validated)
-
-
-# * ✔️ Jobpostings
-def flatten_job_postings_to_table(model: JobPostingsBatch) -> pd.DataFrame:
-    """
-    Flattens a validated JobPostingsFile model into a wide-format DataFrame,
-    where each row corresponds to a job posting.
-
-    This function preserves structure while transforming content into a
-    tabular format suitable for DuckDB ingestion.
-
-    * Notes:
-    - The 'content' field is stored as a JSON string.
-    - Invalid entries are skipped with a warning.
-
-    Each row corresponds to a job posting, and the 'content' field is stored as
-    a JSON string in a single column rather than being split into multiple rows.
-
-    Records that do not match the expected format are skipped with a warning.
-
-    Args:
-        data (Dict[str, Dict[str, Any]]): A dictionary where each key is a job URL
-        and the value is a nested dictionary with job posting metadata and content.
-
-    Returns:
-        pd.DataFrame: A DataFrame with columns corresponding to job metadata
-        and content, suitable for insertion into a DuckDB 'job_postings' table.
-    """
-    rows: List[Dict[str, Any]] = []
-
-    for url_key, outer_data in model.items():
-        try:
-            inner_data = outer_data.data
-
-            rows.append(
-                {
-                    "url": inner_data.url,
-                    "status": outer_data.status,
-                    "message": outer_data.message,
-                    "job_title": inner_data.job_title,
-                    "company": inner_data.company,
-                    "location": inner_data.location,
-                    "salary_info": inner_data.salary_info,
-                    "posted_date": inner_data.posted_date,
-                    "content": (
-                        json.dumps(inner_data.content, ensure_ascii=False)
-                        if inner_data.content
-                        else None
-                    ),
-                }
-            )
-
-        except ValidationError as e:
-            logger.warning(f"❌ Validation error in job posting at {url_key}: {e}")
-        except Exception as e:
-            logger.error(f"❌ Unexpected error at {url_key}: {e}", exc_info=True)
-
-    logger.info(f"✅ Flattened {len(rows)} job postings into wide format.")
-
-    return pd.DataFrame(rows)
 
 
 def rehydrate_job_postings_from_table(df: pd.DataFrame) -> JobPostingsBatch:
@@ -348,28 +436,62 @@ def rehydrate_requirements_from_table(df: pd.DataFrame) -> Requirements:
 
 
 def flatten_extracted_requirements_to_table(
-    model: ExtractedRequirementsBatch,
+    model: Union[
+        "ExtractedRequirementsBatch",
+        "RequirementsResponse",
+        Dict[str, "RequirementsResponse"],
+    ],
 ) -> pd.DataFrame:
     """
-    Flattens a validated ExtractedRequirementsFile model into a long-format DataFrame.
+    Flatten extracted (tiered) requirements into a long table.
 
-    Each requirement within a category becomes a row with associated metadata like
-    index and status.
+    Input
+    -----
+    - RootModel[dict[url, RequirementsResponse]] OR
+    - dict[url, RequirementsResponse]           OR
+    - RequirementsResponse
 
-    Args:
-        model (ExtractedRequirementsFile): The root model representing all extracted
-        requirements.
+    Output columns
+    --------------
+    url, status, message, requirement_category, requirement_category_key,
+    requirement, requirement_key
 
-    Returns:
-        pd.DataFrame: Flattened format suitable for DuckDB ingestion.
+    Returns
+    -------
+    pd.DataFrame
     """
-    rows = []
+    rows: List[Dict[str, Any]] = []
 
-    for url_key, validated in model.items():
+    # Normalize to dict[url -> item], inline (no helper)
+    mapping = getattr(model, "root", model)  # handle RootModel
+    if not isinstance(mapping, dict):
+        single = mapping
+        url = getattr(single, "url", None)
+        if url is None:
+            data = getattr(single, "data", None)
+            url = getattr(data, "url", None)
+        if not url:
+            raise ValueError(
+                f"Cannot derive URL from single item of type {type(single).__name__}"
+            )
+        mapping = {url: single}
+
+    for url_key, validated in mapping.items():
         try:
+            data_obj = getattr(validated, "data", None)
+            if not data_obj:
+                logger.warning(f"No 'data' found for {url_key}; skipping.")
+                continue
+
+            # categories -> list[str]; allow dict or Pydantic model
             reqs_dict = (
-                validated.data.model_dump()
-            )  # * have to use data_dump() b/c there are no fixed attributes in the model
+                data_obj
+                if isinstance(data_obj, dict)
+                else data_obj.model_dump(exclude_none=True)
+            )
+            if not isinstance(reqs_dict, dict):
+                logger.warning(f"'data' not dict-like for {url_key}; skipping.")
+                continue
 
             for cat_idx, (category, items) in enumerate(reqs_dict.items()):
                 if not isinstance(items, list):
@@ -381,19 +503,19 @@ def flatten_extracted_requirements_to_table(
                 for item_idx, requirement in enumerate(items):
                     if not isinstance(requirement, str):
                         logger.warning(
-                            f"Skipping non-string item in {category}[{item_idx}] at {url_key}"
+                            f"Skipping non-string {category}[{item_idx}] at {url_key}"
                         )
                         continue
 
                     rows.append(
                         {
                             "url": url_key,
-                            "status": validated.status,
-                            "message": validated.message,
+                            "status": getattr(validated, "status", None),
+                            "message": getattr(validated, "message", None),
                             "requirement_category": category,
-                            "requirement_category_idx": cat_idx,
+                            "requirement_category_key": cat_idx,
                             "requirement": requirement,
-                            "requirement_idx": item_idx,
+                            "requirement_key": item_idx,
                         }
                     )
 
@@ -410,14 +532,15 @@ def rehydrate_extracted_requirements_from_table(
     df: pd.DataFrame,
 ) -> ExtractedRequirementsBatch:
     """
-    Reconstructs a validated ExtractedRequirementsBatch model from a flattened
-    requirements DataFrame.
+    Rehydrate a long extracted-requirements table into `ExtractedRequirementsBatch`.
 
-    Args:
-        df (pd.DataFrame): Flattened requirements with metadata columns.
+    Grouping
+    --------
+    Rows are grouped by (url, requirement_category) and ordered by requirement_key.
 
-    Returns:
-        ExtractedRequirementsBatch: A Pydantic model ready for saving or re-processing.
+    Returns
+    -------
+    ExtractedRequirementsBatch
     """
     result = {}
 
@@ -426,7 +549,7 @@ def rehydrate_extracted_requirements_from_table(
             categories: Dict[str, List[str]] = {}
 
             for category, cat_group in group.groupby("requirement_category"):
-                sorted_items = cat_group.sort_values("requirement_idx")[
+                sorted_items = cat_group.sort_values("requirement_key")[
                     "requirement"
                 ].tolist()
                 categories[str(category)] = sorted_items
@@ -527,17 +650,15 @@ def flatten_pruned_responsibilities_to_table(
     model: Responsibilities, pruned_by: str
 ) -> pd.DataFrame:
     """
-    Flattens a validated Responsibilities model into a pruned responsibilities table.
+    Flatten responsibilities into a pruned table with provenance.
 
-    Adds an extra 'pruned_by' column to identify the pruning method used.
+    Output columns
+    --------------
+    url, responsibility_key, responsibility, pruned_by
 
-    Args:
-        model (Responsibilities): Validated input of pruned responsibilities.
-        pruned_by (str): Method of pruning (e.g., 'manual', 'llm', 'rule_based').
-
-    Returns:
-        pd.DataFrame: Flattened table with 'url', 'responsibility_key', 'responsibility',
-        'pruned_by'.
+    Returns
+    -------
+    pd.DataFrame
     """
     df = flatten_responsibilities_to_table(model)
     df["pruned_by"] = pruned_by
@@ -546,15 +667,16 @@ def flatten_pruned_responsibilities_to_table(
 
 def rehydrate_pruned_responsibilities_from_table(df: pd.DataFrame) -> Responsibilities:
     """
-    Reconstructs a Responsibilities model from a pruned responsibilities table.
+    Rehydrate pruned responsibilities into `Responsibilities`.
 
-    Drops 'pruned_by' before reconstruction since it's not needed in the nested model.
+    Notes
+    -----
+    Drops `pruned_by` before rehydration since it is metadata, not part of the
+    nested responsibilities model.
 
-    Args:
-        df (pd.DataFrame): Flattened pruned responsibilities with a 'pruned_by' column.
-
-    Returns:
-        Responsibilities: Reconstructed Responsibilities model.
+    Returns
+    -------
+    Responsibilities
     """
     # Drop metadata columns if they exist
     if "pruned_by" in df.columns:
@@ -583,7 +705,8 @@ def flatten_nested_responsibilities_to_table(
         pd.DataFrame: Long-format table of responsibility–requirement alignments.
 
     Note:
-        The model attribute 'optimized_text' is stored as 'responsibility' in the flattened output.
+        The model attribute 'optimized_text' is stored as 'responsibility' in
+            the flattened output.
     """
 
     try:
@@ -670,3 +793,230 @@ def rehydrate_nested_responsibilities_from_table(
     except Exception as e:
         logger.exception(f"❌ Unexpected error rehydrating NestedResponsibilities: {e}")
         raise
+
+
+# Single choke function to call flatten functions
+def flatten_model_to_df(
+    model: ModelType,
+    table_name: TableName,
+    *,
+    source_file: Path | str | None = None,
+    iteration: int | None = None,
+    version: Version | str | None = None,
+    llm_provider: LLMProvider | str | None = None,
+    model_id: str | None = None,
+) -> pd.DataFrame:
+    """
+    Flatten a validated Pydantic model into a DataFrame and enrich it with
+    table-appropriate metadata.
+
+    This function routes the model through the correct flattening function
+    (per `FLATTEN_DISPATCH`), then applies metadata stamping according to
+    the target table’s schema in the registry.
+
+    Notes:
+        • No `stage` stamping here — that belongs only in `pipeline_control`.
+        • Timestamps come from DDL/mixins; they are not set explicitly here.
+        • LLM artifact tables (e.g., EDITED_RESPONSIBILITIES) require both
+          `llm_provider` and `model_id`.
+
+    Args:
+        model (ModelType):
+            A validated Pydantic model instance (e.g., JobPostingsBatch,
+            RequirementsResponse, Responsibilities, etc.).
+        table_name (TableName):
+            The DuckDB table enum identifying the destination.
+        source_file (Path | str | None, optional):
+            Originating file path, stamped into metadata if provided.
+        iteration (int | None):
+            Pipeline iteration index. Required for most non-seed tables.
+        version (Version | str | None, optional):
+            Editorial version (e.g., ORIGINAL, EDITED). Only stamped if the
+            target table has a `version` column.
+        llm_provider (LLMProvider | str | None, optional):
+            Name of the LLM provider (e.g., "openai", "anthropic").
+            Required only for LLM artifact tables.
+        model_id (str | None, optional):
+            Specific model identifier (e.g., "gpt-4o-mini", "claude-haiku").
+            Required only for LLM artifact tables.
+
+    Returns:
+        pd.DataFrame:
+            A DataFrame containing the flattened table rows plus metadata,
+            aligned with the schema defined in the registry.
+    """
+    logger.info(
+        "🪄 Flattening model '%s' → table '%s'", type(model).__name__, table_name
+    )
+
+    FLATTEN_DISPATCH = get_flatten_dispatch()
+
+    if table_name not in FLATTEN_DISPATCH:
+        raise ValueError(f"Unsupported table: {table_name}")
+
+    expected_types, flatten_func = FLATTEN_DISPATCH[table_name]
+
+    ok = False
+    # 1) direct type match(s)
+    if isinstance(
+        model, expected_types if isinstance(expected_types, tuple) else expected_types
+    ):
+        ok = True
+    # 2) mapping (plain dict) accepted by flexible flatteners
+    elif isinstance(model, Mapping):
+        ok = True
+    # 3) RootModel with a mapping `.root`
+    elif hasattr(model, "root") and isinstance(getattr(model, "root"), Mapping):
+        ok = True
+
+    if not ok:
+        # pretty error message
+        if isinstance(expected_types, tuple):
+            exp_names = ", ".join(t.__name__ for t in expected_types)
+            exp_str = f"({exp_names})"
+        else:
+            exp_str = expected_types.__name__
+        raise TypeError(
+            f"Expected {exp_str} (or Mapping / RootModel with mapping .root) for table '{table_name}', "
+            f"got '{type(model).__name__}'"
+        )
+
+    df = flatten_func(model)
+
+    # Enforce LLM metadata where required
+    if table_name in {TableName.EDITED_RESPONSIBILITIES}:  # add others if applicable
+        if llm_provider is None or model_id is None:
+            raise ValueError(
+                f"{table_name} requires llm_provider and model_id (LLM artifact table)."
+            )
+
+    # Normalize source_file
+    path = (
+        Path(source_file)
+        if isinstance(source_file, str) and source_file
+        else source_file
+    )
+
+    # Table-aware stamping only (no global stage/timestamp)
+    df = add_metadata(
+        df=df,
+        table=table_name,
+        source_file=path,
+        iteration=iteration,
+        version=version,  # will be ignored if table doesn't have 'version'
+        llm_provider=llm_provider,  # ignored if table doesn't have it
+        model_id=model_id,  # ignored if table doesn't have it
+    )
+    return df
+
+
+# todo: commented out; old code; delete later
+# def flatten_job_postings_to_table(
+#     model: Union[JobPostingsBatch, JobSiteResponse, Dict[str, "JobSiteResponse"]],
+# ) -> pd.DataFrame:
+
+#     rows: List[Dict[str, Any]] = []
+
+#     # Normalize to dict[url -> item], inline (no helper)
+#     mapping = getattr(model, "root", model)  # handle RootModel
+#     if not isinstance(mapping, dict):
+#         # treat as single item; derive URL from .url or .data.url
+#         single = mapping
+#         url = getattr(single, "url", None)
+#         if url is None:
+#             data = getattr(single, "data", None)
+#             url = getattr(data, "url", None)
+#         if not url:
+#             raise ValueError(
+#                 f"Cannot derive URL from single item of type {type(single).__name__}"
+#             )
+#         mapping = {url: single}
+
+#     for url_key, metadata in model.root.items():
+#         try:
+#             rows.append(
+#                 {
+#                     "url": str(metadata.url),  # even if it's an HttpUrl, convert to str
+#                     "company": metadata.company,
+#                     "job_title": metadata.job_title,
+#                 }
+#             )
+#         except ValidationError as e:
+#             logger.warning(f"Validation error for job URL {url_key}: {e}")
+#         except Exception as e:
+#             logger.error(f"Error processing job URL {url_key}: {e}", exc_info=True)
+
+#     logger.info(f"✅ Flattened {len(rows)} job posting URLs.")
+#     return pd.DataFrame(rows)
+
+# def flatten_extracted_requirements_to_table(
+#     model: ExtractedRequirementsBatch,
+# ) -> pd.DataFrame:
+#     """
+#     Flattens a validated ExtractedRequirementsFile model into a long-format DataFrame.
+
+#     Each requirement within a category becomes a row with associated metadata like
+#     index and status.
+
+#     Args:
+#         model (ExtractedRequirementsFile): The root model representing all extracted
+#         requirements.
+
+#     Returns:
+#         pd.DataFrame: Flattened format suitable for DuckDB ingestion.
+#     """
+#     rows = []
+
+#     # Normalize: support RootModel and plain dict
+#     raw = getattr(model, "root", model)
+#     if not isinstance(raw, dict):
+#         try:
+#             raw = model.model_dump()
+#         except Exception as e:
+#             raise TypeError(
+#                 f"Expected a dict-like batch; got {type(model).__name__}"
+#             ) from e
+#         if not isinstance(raw, dict):
+#             raise TypeError(
+#                 f"model_dump did not yield a dict (got {type(raw).__name__})"
+#             )
+
+#     for url_key, validated in raw.items():
+#         try:
+#             reqs_dict = (
+#                 validated.data.model_dump()
+#             )  # * have to use data_dump() b/c there are no fixed attributes in the model
+
+#             for cat_idx, (category, items) in enumerate(reqs_dict.items()):
+#                 if not isinstance(items, list):
+#                     logger.warning(
+#                         f"Skipping non-list category '{category}' at {url_key}"
+#                     )
+#                     continue
+
+#                 for item_idx, requirement in enumerate(items):
+#                     if not isinstance(requirement, str):
+#                         logger.warning(
+#                             f"Skipping non-string item in {category}[{item_idx}] at {url_key}"
+#                         )
+#                         continue
+
+#                     rows.append(
+#                         {
+#                             "url": url_key,
+#                             "status": validated.status,
+#                             "message": validated.message,
+#                             "requirement_category": category,
+#                             "requirement_category_key": cat_idx,
+#                             "requirement": requirement,
+#                             "requirement_key": item_idx,
+#                         }
+#                     )
+
+#         except ValidationError as e:
+#             logger.warning(f"Validation failed for {url_key}: {e}")
+#         except Exception as e:
+#             logger.error(f"Unexpected error flattening {url_key}: {e}", exc_info=True)
+
+#     logger.info(f"✅ Flattened {len(rows)} extracted requirements.")
+#     return pd.DataFrame(rows)

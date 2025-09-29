@@ -6,7 +6,7 @@ alignment pipeline.
 
 It centralizes canonical value definitions for:
 - Pipeline stages (FSM state tracking)
-- Pipeline statuses (job progression)
+- Pipeline status (job progression)
 - LLM providers (used during editing/evaluation)
 - Versioning (original vs. edited content)
 - DuckDB table names (typed reference to all tables)
@@ -31,7 +31,7 @@ Included Components:
 """
 
 from enum import Enum
-from project_config import OPENAI, ANTHROPIC
+from job_bot.config.project_config import OPENAI, ANTHROPIC
 
 
 # * ✅ Metadata ENUM Classes
@@ -79,7 +79,7 @@ class PipelineStage(str, Enum):
     SIM_METRICS_REVAL = "similarity_metrics_reval"  # edited responsibilities vs reqs
 
     # ✅ Human Review (optional stages to be added)
-    CROSSTAB_REVIEW = "crosstab_review"  # cross-tab visualization + feedback
+    ALIGNMENT_REVIEW = "alignment_review"  # cross-tab visualization + feedback
 
     # ✅ Export
     FINAL_RESPONSIBILITIES = "final_responsibilities"  # manually trimmed/pruned output
@@ -161,6 +161,10 @@ class TableName(str, Enum):
 
     SIMILARITY_METRICS = "similarity_metrics"
     """Similarity scores and entailment metrics between responsibilities and requirements."""
+
+    ALIGNMENT_CROSSTAB = "alignment_crosstab"
+    """Cross-tabulated similarity and entailment metrics mapping requirements \
+to responsibilities."""
 
     @classmethod
     def list(cls) -> list[str]:

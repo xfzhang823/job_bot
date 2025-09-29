@@ -3,7 +3,6 @@ Class to compare metrics for each iteration of responsibilities to requirements 
 """
 
 import logging
-import logging_config
 from typing import List
 import pandas as pd
 import numpy as np

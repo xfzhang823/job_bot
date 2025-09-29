@@ -1,6 +1,6 @@
 import os
 import logging
-import logging_config
+import job_bot.config.logging_config
 
 logger = logging.getLogger(__name__)
 

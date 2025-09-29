@@ -1,162 +1,144 @@
 """
 db_io/state_sync.py
 
+Control-plane helpers that delegate to the unified loaders/inserters.
+
+- load_pipeline_state(url): returns the latest PipelineState for a URL
+  using db_loaders.load_table with table-level order_by config.
+
+- update_and_persist_pipeline_state(state): YAML-driven insert via
+  db_inserters.insert_df_with_config (dedup + stamps handled centrally).
 """
 
-# Standard Imports
-from typing import Optional
+from __future__ import annotations
+
 import logging
+from typing import Any, Optional
+
 import pandas as pd
 
-# Project level
-from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.pipeline_enums import (
-    TableName,
-    Version,
-    LLMProvider,
-    PipelineStage,
-    PipelineStatus,
-)
-from models.duckdb_table_models import PipelineState
-
+from job_bot.db_io.pipeline_enums import TableName
+from job_bot.models.db_table_models import PipelineState
+from job_bot.db_io.db_loaders import load_table
+from job_bot.db_io.db_inserters import insert_df_with_config
 
 logger = logging.getLogger(__name__)
 
 
+def _enum_val(x: Any) -> Any:
+    """Return Enum.value for Enum instances; identity otherwise."""
+    try:
+        from enum import Enum
+
+        if isinstance(x, Enum):
+            return x.value
+    except Exception:
+        pass
+    return x
+
+
 def load_pipeline_state(
-    url: str, table_name: TableName = TableName.PIPELINE_CONTROL
+    url: str,
+    table_name: TableName = TableName.PIPELINE_CONTROL,
 ) -> Optional[PipelineState]:
     """
-    Load a PipelineState from DuckDB by URL.
-    """
-    con = get_duckdb_connection()
-    df = con.execute(f"SELECT * FROM {table_name.value} WHERE url = ?", (url,)).df()
-    con.close()  # ✅ close after you're done reading from the DB
+    Load the current (latest) PipelineState for a given URL.
 
-    if df.empty:
-        return None
-    return PipelineState(**df.iloc[0].to_dict())
-
-
-def upsert_pipeline_state_to_duckdb(
-    state: PipelineState,
-    table_name: TableName = TableName.PIPELINE_CONTROL,
-):
-    """
-    Upsert a `PipelineState` record into the DuckDB `pipeline_control` table.
-
-    This function synchronizes the state of a specific job posting URL with the
-    centralized `pipeline_control` table in DuckDB. It ensures that the record
-    is either inserted as new or updated if an existing entry matches the
-    primary key fields (url, iteration, version, llm_provider).
+    This leverages `db_loaders.load_table`, which applies the loader YAML:
+      • filters:   (url, iteration, etc.)
+      • order_by:  table/default order (e.g., updated_at DESC, created_at DESC)
+      • rehydrate: returns a PipelineState model when configured
 
     Args:
-        state (PipelineState): The pipeline state to persist.
-        table_name (TableName): The DuckDB table to insert into.
+        url: The job URL to fetch.
+        table_name: Target table (default: PIPELINE_CONTROL).
 
-    Key Operations:
-    - Converts enums (`version`, `llm_provider`, `status`) to strings for compatibility
-      with DuckDB.
-    - Formats the `timestamp` field to the required `YYYY-MM-DD HH:MM:SS` format.
-    - Reorders DataFrame columns to match the table schema in DuckDB, preventing
-      field misalignment during insertion.
-    - Executes a safe "upsert" operation: deletes the existing record with matching
-      primary key fields and inserts the new record.
-
-    Example Usage:
-        >>> state = PipelineState(
-                url="https://example.com/job/12345",
-                iteration=0,
-                version=Version.ORIGINAL,
-                llm_provider=None,
-                timestamp=datetime.now(),
-                status=PipelineStatus.NEW,
-            )
-        >>> upsert_pipeline_state_to_duckdb(state)
+    Returns:
+        PipelineState if found; otherwise None.
     """
-    logger.info(f"Upserting data to '{table_name.value}' table in DuckDB...")
+    try:
+        model = load_table(table_name, url=url)
+        # When a single URL is requested and a rehydrator exists, load_table
+        # returns the typed model (not a DataFrame).
+        if isinstance(model, PipelineState):
+            return model
+        # If your loader for pipeline_control isn’t modeled yet, `model` could be a DF.
+        if isinstance(model, pd.DataFrame) and not model.empty:
+            # Take first row (loader should already order newest first)
+            return PipelineState(**model.iloc[0].to_dict())
+        return None
+    except Exception as e:
+        logger.error(
+            "❌ Failed to load pipeline state for %s: %s", url, e, exc_info=True
+        )
+        return None
+
+
+def update_and_persist_pipeline_state(
+    state_model: PipelineState,
+    table_name: TableName = TableName.PIPELINE_CONTROL,
+) -> None:
+    """
+    Update and persist a PipelineState by delegating to `insert_df_with_config`.
+
+    FSM semantics
+    -------------
+    • Called whenever a PipelineState is initialized, advanced, retried, or marked.
+    • Guarantees a single authoritative row per (url, iteration) in `pipeline_control`.
+
+    DB semantics
+    ------------
+    • Implemented as an upsert (update-or-insert) via `insert_df_with_config`.
+    • Central inserter applies:
+        1. Deduplication (e.g., pk_scoped → delete existing PK rows before insert).
+        2. Stamping (created_at/updated_at, iteration, etc., per YAML config).
+        3. Schema alignment (column order, defaults).
+
+    Notes
+    -----
+    • The state is converted to a one-row DataFrame; enums are flattened to `.value`.
+    • If you need to carry an existing `created_at`, include it explicitly;
+        the inserter’s stamping rules will set it on first insert.
+
+    Args
+    ----
+    state_model : PipelineState
+        The validated PipelineState to persist.
+    table_name : TableName, default = PIPELINE_CONTROL
+        Target DuckDB table.
+    """
 
     try:
-        # Convert to a dictionary
-        data = state.model_dump()
+        row = {
+            "url": state_model.url,
+            "iteration": state_model.iteration,
+            "stage": _enum_val(state_model.stage),
+            "status": _enum_val(state_model.status),
+            "version": _enum_val(getattr(state_model, "version", None)),
+            "source_file": getattr(state_model, "source_file", None),
+            "notes": getattr(state_model, "notes", None),
+            # If the schema includes created_at/updated_at and you want to
+            # explicitly carry them through, you can add them here.
+            # Otherwise, let YAML config handle them:
+            # "created_at": getattr(state_model, "created_at", None),
+            # "updated_at": getattr(state_model, "updated_at", None),
+        }
+        df = pd.DataFrame([row])
 
-        # Handle llm_provider explicitly
-        data["llm_provider"] = (
-            data["llm_provider"].value if data["llm_provider"] else "none"
+        insert_df_with_config(
+            df,
+            table_name,
+            # Provide url so inserter can resolve iteration inheritance
+            url=str(state_model.url),
+            # Any stamp:param fields can be supplied via kwargs here if needed:
+            # iteration=state_model.iteration, resp_llm_provider=..., resp_model_id=...
         )
-
-        # Convert enums to strings
-        data["version"] = (
-            data["version"].value
-            if isinstance(data["version"], Version)
-            else data["version"]
-        )
-        data["status"] = (
-            data["status"].value
-            if isinstance(data["status"], PipelineStatus)
-            else data["status"]
-        )
-
-        # Format timestamp
-        if isinstance(data["timestamp"], pd.Timestamp):
-            data["timestamp"] = data["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-
-        # Create DataFrame
-        df = pd.DataFrame([data])
-
-        # Debug output
-        logger.debug(f"Processed data before insertion: {data}")
-        logger.debug(f"DataFrame columns before reordering: {list(df.columns)}")
-
-        # Connect to DuckDB
-        con = get_duckdb_connection()
-
-        # Fetch column order from DuckDB
-        column_order = [
-            row[1]
-            for row in con.execute(
-                f"PRAGMA table_info('{table_name.value}')"
-            ).fetchall()
-        ]
-        logger.debug(f"Expected column order: {column_order}")
-
-        # Ensure all expected columns exist in DataFrame
-        for col in column_order:
-            if col not in df.columns:
-                df[col] = None  # Set missing columns to None
-
-        # Reorder DataFrame columns
-        df = df[column_order]
-
-        # Debug: Verify DataFrame structure before insertion
-        logger.debug(f"DataFrame columns after reordering: {list(df.columns)}")
-        logger.debug(f"DataFrame head before insertion:\n{df.head()}")
-
-        # Register DataFrame
-        con.register("df", df)
-
-        # Safe upsert: delete then insert
-        con.execute(
-            f"""
-            DELETE FROM {table_name.value}
-            WHERE url = ? AND iteration = ? AND version = ? AND llm_provider = ?
-            """,
-            (
-                data["url"],
-                data["iteration"],
-                data["version"],
-                data["llm_provider"],
-            ),
-        )
-
-        # Insert the record
-        con.execute(f"INSERT INTO {table_name.value} SELECT * FROM df")
-
-        logger.info(f"✅ Saved state for {data['url']} to '{table_name.value}'")
-
+        logger.info("✅ Upserted pipeline state for %s", state_model.url)
     except Exception as e:
-        logger.exception(f"❌ Failed to upsert pipeline state for {data['url']}: {e}")
-
-    finally:
-        if "con" in locals():
-            con.close()
+        logger.error(
+            "❌ Failed to upsert pipeline state for %s: %s",
+            getattr(state_model, "url", "<unknown>"),
+            e,
+            exc_info=True,
+        )
+        raise

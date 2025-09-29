@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import os
 import logging
-import logging_config
+import job_bot.config.logging_config as logging_config
 from typing import Union
 from evaluation_optimization.create_mapping_file import (
     load_existing_or_create_new_mapping,

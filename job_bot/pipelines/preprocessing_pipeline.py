@@ -27,7 +27,7 @@ from utils.webpage_reader import process_webpages_to_json
 from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
 from preprocessing.resume_preprocessor import ResumeParser
 from preprocessing.requirements_preprocessor import JobRequirementsParser
-from project_config import GPT_35_TURBO, GPT_4_1_NANO
+from job_bot.config.project_config import GPT_35_TURBO, GPT_4_1_NANO
 
 # Set up logging
 logger = logging.getLogger(__name__)

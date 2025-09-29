@@ -42,7 +42,7 @@ import os
 import shutil
 import logging
 from pathlib import Path
-import logging_config
+import job_bot.config.logging_config as logging_config
 from utils.find_project_root import find_project_root
 
 logger = logging.getLogger(__name__)

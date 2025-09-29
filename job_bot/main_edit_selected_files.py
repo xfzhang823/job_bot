@@ -4,12 +4,13 @@ import logging
 import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, List
-from pydantic import HttpUrl
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from pipelines.resume_editing_pipeline_async import run_resume_editing_pipeline_async
-from project_config import (
+from job_bot.pipelines.resume_editing_pipeline_async import (
+    run_resume_editing_pipeline_async,
+)
+from job_bot.config.project_config import (
     ITERATE_0_OPENAI_DIR,
     ITERATE_0_ANTHROPIC_DIR,
     ITERATE_1_OPENAI_DIR,

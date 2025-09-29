@@ -2,7 +2,10 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Union
 from pydantic import ValidationError
-from models.resume_job_description_io_models import NestedResponsibilities, Requirements
+from job_bot.models.resume_job_description_io_models import (
+    NestedResponsibilities,
+    Requirements,
+)
 
 # Set up logger for this module
 logger = logging.getLogger(__name__)

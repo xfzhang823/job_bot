@@ -1,31 +1,34 @@
-import os
 from pathlib import Path
 import logging
 from typing import Union
 from tqdm import tqdm
 
 # from joblib import Parallel, delayed
-from models.resume_job_description_io_models import (
+from job_bot.models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
     Responsibilities,
     Requirements,
 )
-from evaluation_optimization.resume_editor import TextEditor
-from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
+from job_bot.evaluation_optimization.resume_editor import TextEditor
+from job_bot.evaluation_optimization.text_similarity_finder import (
+    AsymmetricTextSimilarity,
+)
 from evaluation_optimization.metrics_calculator import categorize_scores
 
 # Import from non parallell version for now!
 # from evaluation_optimization.resumes_editing import modify_multi_resps_based_on_reqs
-from evaluation_optimization.resumes_editing_seq import (
+from job_bot.evaluation_optimization.resumes_editing_seq import (
     modify_multi_resps_based_on_reqs,
 )
-from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
+    check_mapping_keys,
+)
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from utils.generic_utils import (
+from job_bot.utils.generic_utils import (
     read_from_json_file,
     save_to_json_file,
     verify_dir,

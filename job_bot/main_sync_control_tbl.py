@@ -1,15 +1,15 @@
 from pathlib import Path
 import logging
-import logging_config
-from pipelines_with_fsm.state_orchestration_pipeline import (
-    run_state_orchestration_pipeline,
+import job_bot.config.logging_config
+from job_bot.fsm.pipeline_control_sync import (
+    sync_all_tables_to_pipeline_control,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def main():
-    run_state_orchestration_pipeline()
+    sync_all_tables_to_pipeline_control()
 
 
 if __name__ == "__main__":

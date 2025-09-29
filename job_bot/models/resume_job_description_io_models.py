@@ -19,9 +19,7 @@ from pydantic import (
 from pydantic_core import Url
 
 # User defined
-from models.llm_response_models import JobSiteResponse, RequirementsResponse
-import logging_config
-
+from job_bot.models.llm_response_models import JobSiteResponse, RequirementsResponse
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -395,9 +393,10 @@ class SimilarityMetrics(BaseModel):
     - Optional fields can be left as `None` if not present in the data.
 
     Note:
-    There is no need to specify file types explicitly when loading CSV files with Pandas,
-    as this model operates on the loaded data. It is assumed that the data is provided as
-    Python dictionaries, such as the rows returned by `pandas.DataFrame.iterrows()`.
+    There is no need to specify file types explicitly when loading CSV files
+    with Pandas, as this model operates on the loaded data. It is assumed that
+    the data is provided as Python dictionaries, such as the rows returned by
+    `pandas.DataFrame.iterrows()`.
 
     Usage Example:
 
@@ -646,61 +645,64 @@ class JobPostingUrlsBatch(RootModel[dict[str, JobPostingUrlMetadata]]):
     pass
 
 
-class JobPostingsBatch(Dict[Union[HttpUrl, str], JobSiteResponse]):
+class JobPostingsBatch(RootModel[dict[Union[HttpUrl, str], JobSiteResponse]]):
     """
-    Represents the full structured job postings file.
+    Container model for a whole file of job postings keyed by URL.
 
-    This model is designed to wrap a dictionary mapping job posting URLs
-    (as HttpUrl or string) to validated `JobSiteResponse` objects, which
-    contain extracted metadata and content from scraped webpages.
+    Why RootModel?
+        - Keeps the JSON structure flat (the *batch is the dict*).
+        - Still gives you full Pydantic v2 validation + `.model_validate()` / `.model_dump()`.
 
-    Structure:
-    {
-        "https://company.com/job123": JobSiteResponse(...),
-        "https://another.com/role456": JobSiteResponse(...)
-    }
+    Expected structure:
+        {
+            "https://company.com/job123": JobSiteResponse(...),
+            "https://another.com/role456": JobSiteResponse(...)
+        }
 
-    Notes:
-    - The keys are not forced to be strings, so downstream processing can
-    access structured components of the URL (scheme, host, path).
-    - Useful for further filtering or trimming query parameters like
-    `?source=...`.
+    Usage:
+        batch = JobPostingsBatch.model_validate(raw_dict)
+        raw_again = batch.model_dump()
+        urls = list(batch.root.keys())  # `.root` holds the underlying dict
     """
 
     pass
 
 
-class ExtractedRequirementsBatch(Dict[Union[HttpUrl, str], RequirementsResponse]):
+class ExtractedRequirementsBatch(
+    RootModel[dict[Union[HttpUrl, str], RequirementsResponse]]
+):
     """
-    Represents a batch of structured, LLM-extracted job requirements aligned by job URL.
+    Container model for the full set of extracted job requirements keyed by URL.
 
-    This model wraps a root dictionary where each key is a job posting URL
-    (`HttpUrl` or `str`), and the value is a `RequirementsResponse` containing
-    categorized requirement clusters (e.g., "bare_minimum", "down_to_earth", etc.).
+    Why RootModel?
+        - No extra nesting key (clean, dict-like batch).
+        - Validates each value as a `RequirementsResponse`.
 
-    Intended for use after preprocessing or scraping, this batch model enables
-    consistent downstream ingestion into DuckDB or other tabular systems.
+    Expected structure:
+        {
+            "https://company.com/job123": {
+                "status": "success",
+                "message": "Job site data processed successfully.",
+                "data": {
+                    "bare_minimum": ["Bachelor's degree..."],
+                    "down_to_earth": ["3+ years experience..."],
+                    "pie_in_the_sky": ["PhD preferred..."],
+                    ...
+                },
+            "https://another.com/role456": RequirementsResponse(...),
+            ...
+        }
 
-    Example structure (before model validation):
-
-    {
-        "https://company.com/job123": {
-            "status": "success",
-            "message": "Job site data processed successfully.",
-            "data": {
-                "bare_minimum": ["Bachelor's degree..."],
-                "down_to_earth": ["3+ years experience..."],
-                "pie_in_the_sky": ["PhD preferred..."],
-                ...
-            }
-        },
-        ...
-    }
+    Usage:
+        batch = ExtractedRequirementsBatch.model_validate(raw_dict)
+        as_dict = batch.model_dump()
+        first_url, first_req = next(iter(batch.root.items()))
 
     Notes:
-    - Validates each response independently using `RequirementsResponse`.
-    - Enables keyed access and filtering based on URL (e.g., domain-level grouping).
-    - Used in both JSON-based pipelines and DB-driven ingestion stages.
+        - Validates each response independently using `RequirementsResponse`.
+        - Enables keyed access and filtering based on URL
+            (e.g., domain-level grouping).
+        - Used in both JSON-based pipelines and DB-driven ingestion stages.
     """
 
     pass

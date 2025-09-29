@@ -11,30 +11,28 @@ This manager encapsulates:
 - Querying the current stage without manual SQL.
 """
 
+# Standard
 from pathlib import Path
 from typing import Optional, Union
 
-from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.db_schema_registry import TableName
-from db_io.pipeline_enums import PipelineStage
-from fsm.pipeline_fsm import PipelineFSM
-from models.duckdb_table_models import PipelineState
+# From project modules
+from job_bot.db_io.get_db_connection import get_db_connection
+from job_bot.db_io.pipeline_enums import TableName, PipelineStage
+from job_bot.fsm.pipeline_fsm import PipelineFSM
+from job_bot.models.db_table_models import PipelineState
 
 
 class PipelineFSMManager:
     """
     PipelineFSMManager
 
-    A utility wrapper for managing and interacting with the `pipeline_control` table
-    in DuckDB. Responsibilities include:
+    A utility wrapper for reading the `pipeline_control` table in DuckDB.
+    Responsibilities:
+       • Retrieve the most recent `PipelineState` for a URL (by updated_at/created_at).
+       • Convert raw rows to validated Pydantic models.
+       • Construct and return `PipelineFSM` instances.
 
-      - Retrieving the most recent active `PipelineState` for a job URL.
-      - Converting raw DuckDB rows into validated Pydantic models.
-      - Constructing and returning `PipelineFSM` instances.
-      - Exposing helper methods for querying current stage or stepping the FSM.
-
-    This class does NOT itself implement the FSM transitions — it delegates
-    that to `PipelineFSM`, which enforces valid stage steps and persistence.
+    FSM transition rules are implemented by `PipelineFSM`; this manager only loads state.
     """
 
     def __init__(
@@ -53,16 +51,15 @@ class PipelineFSMManager:
                 Name of the DuckDB table that holds pipeline states.
                 Defaults to the value of TableName.PIPELINE_CONTROL.
         """
-        self.conn = get_duckdb_connection(db_path)
+        self.conn = get_db_connection(db_path)
         self.table_name = table_name
 
     def get_state_model(self, url: Union[str, Path]) -> PipelineState:
         """
-        Load and return the latest active PipelineState for a given URL.
+        Load and return the latest PipelineState for a given URL.
 
-        This method performs a SQL query against the `pipeline_control`
-        table, filters by URL and `is_active = TRUE`, orders by
-        `timestamp DESC`, and returns the first result as a Pydantic model.
+        Ordering uses the most recent non-null timestamp:
+          ORDER BY COALESCE(updated_at, created_at) DESC
 
         Args:
             url (str | Path):
@@ -83,10 +80,11 @@ class PipelineFSMManager:
         """
         url_str = str(url)
         query = f"""
-        SELECT * FROM {self.table_name}
-        WHERE url = ? AND is_active = TRUE
-        ORDER BY timestamp DESC
-        LIMIT 1
+            SELECT *
+            FROM {self.table_name}
+            WHERE url = ?
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT 1
         """
         df = self.conn.execute(query, [url_str]).fetchdf()
         if df.empty:
@@ -97,11 +95,8 @@ class PipelineFSMManager:
 
     def get_fsm(self, url: Union[str, Path]) -> PipelineFSM:
         """
-        Construct and return a PipelineFSM for the given job URL.
-
-        This method loads the current PipelineState via `get_state_model`,
-        then wraps it in a `PipelineFSM` instance which provides `step()`,
-        `get_current_stage()`, and other transition methods.
+        Construct and return a PipelineFSM for the given URL.
+        Loads current state via `get_state_model` and wraps it.
 
         Args:
             url (str | Path):
@@ -122,10 +117,7 @@ class PipelineFSMManager:
 
     def get_stage(self, url: Union[str, Path]) -> PipelineStage:
         """
-        Return the current pipeline stage as a PipelineStage enum.
-
-        This method delegates to the PipelineFSM instance to fetch the
-        raw stage string, then casts it to the PipelineStage enum.
+        Return the current pipeline stage (PipelineStage enum).
 
         Args:
             url (str | Path):
@@ -135,5 +127,7 @@ class PipelineFSMManager:
             PipelineStage:
                 The current pipeline stage, as defined in `pipeline_enums.PipelineStage`.
         """
-        raw_stage = self.get_fsm(url).get_current_stage()
-        return PipelineStage(raw_stage)
+        fsm = self.get_fsm(url)
+        stage = fsm.get_current_stage()
+        # If get_current_stage() already returns a PipelineStage, just return it.
+        return stage if isinstance(stage, PipelineStage) else PipelineStage(stage)

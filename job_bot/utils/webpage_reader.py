@@ -10,7 +10,6 @@ Dependencies: llama_index, ollama
 """
 
 import logging
-import logging_config
 import sys
 import json
 import requests

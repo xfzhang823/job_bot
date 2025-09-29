@@ -112,15 +112,15 @@ All tables use a shared base schema defined in `BaseDBModel`, with the following
 | `company` | `str` | Company name. |
 | `job_title` | `str` | Job title. |
 
-### `ExtractedRequirementRow`
+### `ExtractedRequirementsRow`
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | `str` | Extraction status. |
 | `message` | `Optional[str]` | Notes. |
 | `requirement_category` | `str` | Tier (e.g., pie_in_the_sky). |
-| `requirement_category_idx` | `int` | Order of the category. |
+| `requirement_category_key` | `int` | Order of the category. |
 | `requirement` | `str` | Text content. |
-| `requirement_idx` | `int` | Order in the list. |
+| `requirement_key` | `int` | Order in the list. |
 
 ### `PrunedResponsibilitiesRow`
 | Field | Type | Description |
@@ -134,11 +134,8 @@ All tables use a shared base schema defined in `BaseDBModel`, with the following
 |-------|------|-------------|
 | `url` | `str` | Job posting URL. |
 | `iteration` | `int` | Pipeline pass count. |
-| `llm_provider` | `str` | Provider for LLM-powered steps. |
 | `version` | `Literal` | One of: `original`, `edited`, `final`. |
 | `status` | `Literal` | Status: `new`, `in_progress`, `complete`, `skipped`, `error`. |
-| `last_stage` | `Optional[str]` | Last known completed stage. |
-| `is_active` | `bool` | Whether it is in-scope. |
 | `notes` | `Optional[str]` | Optional notes (e.g., override flags). |
 
 ```

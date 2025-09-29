@@ -1,39 +1,30 @@
-import os
 import json
 from pathlib import Path, WindowsPath
 import logging
 from typing import Union
-import asyncio
 from pydantic import HttpUrl
 
-from models.resume_job_description_io_models import (
-    ResponsibilityMatch,
-    ResponsibilityMatches,
+from job_bot.models.resume_job_description_io_models import (
     Responsibilities,
     Requirements,
     NestedResponsibilities,
 )
-from evaluation_optimization.resume_editor import TextEditor
-from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
-from evaluation_optimization.metrics_calculator import categorize_scores
 
 # Import from non parallell version for now!
-# from evaluation_optimization.resumes_editing import modify_multi_resps_based_on_reqs
-from evaluation_optimization.resumes_editing_async import (
+from job_bot.evaluation_optimization.resumes_editing_async import (
     modify_multi_resps_based_on_reqs_async,
 )
 
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from utils.generic_utils import (
+from job_bot.utils.generic_utils import (
     inspect_json_structure,
     read_from_json_file,
-    verify_dir,
     verify_file,
 )
-from utils.generic_utils_async import save_data_to_json_file_async
-from project_config import OPENAI, GPT_35_TURBO, GPT_4_1_NANO
+from job_bot.utils.generic_utils_async import save_data_to_json_file_async
+from job_bot.config.project_config import OPENAI, GPT_35_TURBO, GPT_4_1_NANO
 
 
 # Set up logging

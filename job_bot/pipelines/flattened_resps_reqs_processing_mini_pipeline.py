@@ -3,11 +3,12 @@
 from pathlib import Path
 from typing import Union, Callable
 import logging
-from evaluation_optimization.evaluation_optimization_utils import (
+
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
     process_and_save_requirements_by_url,
     process_and_save_responsibilities_from_resume,
 )
-from utils.generic_utils import read_from_json_file
+from job_bot.utils.generic_utils import read_from_json_file
 
 # Setup logger
 logger = logging.getLogger(__name__)

@@ -35,15 +35,9 @@ from transformers import (
 )
 import spacy
 import subprocess
-from utils.generic_utils import find_project_root
+from job_bot.utils.generic_utils import find_project_root
 
 # Logger
-# Setup logging to capture DEBUG messages
-logging.basicConfig(
-    level=logging.DEBUG,  # ✅ Ensures DEBUG-level messages are logged
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-
 logger = logging.getLogger(__name__)
 
 logger.debug("🚀 DEBUG: Logging setup is working!")

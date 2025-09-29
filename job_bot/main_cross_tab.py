@@ -18,10 +18,10 @@ Last Updated: 2025 Feb
 from pathlib import Path
 import logging
 import asyncio
-from pipelines.resps_reqs_crosstab_pipeline_async import (
+from job_bot.pipelines.resps_reqs_crosstab_pipeline_async import (
     run_resps_reqs_crosstab_pipeline_async,
 )
-from project_config import (
+from job_bot.config.project_config import (
     ITERATE_0_ANTHROPIC_DIR,
     ITERATE_1_ANTHROPIC_DIR,
     mapping_file_name,
@@ -29,7 +29,7 @@ from project_config import (
     ITERATE_1_OPENAI_DIR,
     RESPS_REQS_MATCHINGS_DIR,
 )
-import logging_config
+import job_bot.config.logging_config
 
 
 # Set up logger

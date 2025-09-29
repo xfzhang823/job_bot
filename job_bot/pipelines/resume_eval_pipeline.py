@@ -5,42 +5,39 @@ Last updated: 2024 Oct 25
 
 # TODO: Not fully debugged yet. Fix later. Async function is the primary one for this process!
 
-
-import os
 from pathlib import Path
-import pandas as pd
-import re
 import logging
-import logging_config
-import json
+import re
+from typing import Callable, Union, Optional
 import pandas as pd
 from pydantic import ValidationError, HttpUrl
-from typing import Callable, Union, Optional
-from models.resume_job_description_io_models import JobFileMappings
-from preprocessing.resume_preprocessor import ResumeParser
-from preprocessing.requirements_preprocessor import JobRequirementsParser
-from evaluation_optimization.text_similarity_finder import TextSimilarity
-from evaluation_optimization.metrics_calculator import (
+
+# From user defined
+from job_bot.models.resume_job_description_io_models import JobFileMappings
+from job_bot.preprocessing.resume_preprocessor import ResumeParser
+from job_bot.preprocessing.requirements_preprocessor import JobRequirementsParser
+from job_bot.evaluation_optimization.text_similarity_finder import TextSimilarity
+from job_bot.evaluation_optimization.metrics_calculator import (
     calculate_many_to_many_similarity_metrices,
     categorize_scores_for_df,
     calculate_text_similarity_metrics,
 )
-from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.evaluation_optimization.multivariate_indexer import MultivariateIndexer
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from utils.generic_utils import (
+from job_bot.utils.generic_utils import (
     read_from_json_file,
     validate_json_file,
     save_to_json_file,
 )
-from evaluation_optimization.evaluation_optimization_utils import (
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
     add_multivariate_indices,
     get_new_urls_and_file_names,
     get_new_urls_and_metrics_file_paths,
     get_files_wo_multivariate_indices,
 )
-from models.resume_job_description_io_models import (
+from job_bot.models.resume_job_description_io_models import (
     ResponsibilityMatches,
     Responsibilities,
     Requirements,

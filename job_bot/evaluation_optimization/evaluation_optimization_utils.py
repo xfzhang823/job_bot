@@ -11,13 +11,15 @@ import pandas as pd
 from pydantic import ValidationError
 
 # User defined
-from models.resume_job_description_io_models import Requirements, Responsibilities
-from utils.generic_utils import read_from_json_file, save_to_json_file
-from utils.get_file_names import get_file_names
-from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from preprocessing.resume_preprocessor import ResumeParser
-from preprocessing.requirements_preprocessor import JobRequirementsParser
-import logging_config
+from job_bot.models.resume_job_description_io_models import (
+    Requirements,
+    Responsibilities,
+)
+from job_bot.utils.get_file_names import get_file_names
+from job_bot.evaluation_optimization.multivariate_indexer import MultivariateIndexer
+from job_bot.preprocessing.resume_preprocessor import ResumeParser
+from job_bot.preprocessing.requirements_preprocessor import JobRequirementsParser
+
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -498,46 +500,28 @@ def process_and_save_requirements_by_url(
     )
 
 
-def process_and_save_responsibilities_from_resume(
+def process_responsibilities_from_resume(
     resume_json_file: Union[Path, str],
-    responsibilities_flat_json_file: Union[Path, str],
     url: Optional[str] = None,
-) -> None:
+) -> Responsibilities:
     """
-    Extract, flatten, validate, and save responsibilities from the resume JSON file.
+    Extract & flatten responsibilities from a resume JSON, wrap with metadata,
+    and VALIDATE (no persistence).
 
-    This function reads a resume JSON file (containing a single record), extracts
-    and flattens the nested responsibilities, validates them using Pydantic, and
-    saves the processed data to a JSON file.
-
-    If no `url` is provided, a default value ("Not Available") will be used.
+    This is side-effect free (no writes). Intended for reuse in DB ingestion /
+    pipelines that persist to DuckDB (or elsewhere).
 
     Args:
-        - url (Optional[str]): The URL of the job posting this resume's responsibilities
-          are matching to (for traceability).
-          * If not provided, it defaults to `"Not Available"`.
-        - resume_json_file (Union[str, Path]): The file path to the resume JSON file.
-        - responsibilities_flat_json_file (Union[str, Path]): The file path to save
-          the flattened responsibilities JSON.
+        resume_json_file: Path to the resume JSON (single-record structure).
+        url: Optional job posting URL for traceability; defaults to "Not Available".
 
     Returns:
-        None
+        A validated `Responsibilities` Pydantic model.
 
     Raises:
-        - `ValidationError`: If the flattened data does not match the expected format.
+        ValidationError: If the wrapped, flattened payload fails schema validation.
     """
-
-    # Convert file paths to Path obj if str
-    resume_json_file, responsibilities_flat_json_file = Path(resume_json_file), Path(
-        responsibilities_flat_json_file
-    )
-
-    # Check if the flattened JSON file already exists
-    if responsibilities_flat_json_file.exists():
-        logger.info(
-            f"Flattened responsibilities JSON file already exists: {responsibilities_flat_json_file}"
-        )
-        return
+    resume_json_file = Path(resume_json_file)
 
     # Parse and flatten responsibilities from the resume
     resume_parser = ResumeParser(resume_json_file)
@@ -545,21 +529,67 @@ def process_and_save_responsibilities_from_resume(
 
     # Wrap under `responsibilities` and include the URL
     wrapped_resps_flat = {
-        "url": url or "Not Available",  # Unique identifier for tracking
+        "url": url or "Not Available",
         "responsibilities": resps_flat,
     }
 
-    # Validate the structure using the correct Pydantic model
-    try:
-        Responsibilities.model_validate(wrapped_resps_flat)
-    except ValidationError as ve:
-        logger.error(f"Responsibilities validation failed for {url}: {ve}")
-        return  # Exit early if validation fails
+    # Validate and return the Pydantic model (let ValidationError bubble up)
+    return Responsibilities.model_validate(wrapped_resps_flat)
 
-    # Save the validated flattened responsibilities to a JSON file
-    save_to_json_file(wrapped_resps_flat, responsibilities_flat_json_file)
+
+def process_and_save_responsibilities_from_resume(
+    resume_json_file: Union[Path, str],
+    responsibilities_flat_json_file: Union[Path, str],
+    url: Optional[str] = None,
+) -> None:
+    """
+    FILE-ETL version: process + persist to JSON.
+
+    Extracts, flattens, and validates responsibilities from a resume JSON file.
+    If validation succeeds, saves the processed payload to
+        `responsibilities_flat_json_file`.
+    If the output file already exists, it is NOT overwritten.
+
+    Args:
+        resume_json_file: Path to the resume JSON (single-record structure).
+        responsibilities_flat_json_file: Destination path for flattened output JSON.
+        url: Optional job posting URL for traceability; defaults to "Not Available".
+
+    Returns:
+        None
+
+    Notes (backward compatibility):
+        - Mirrors the original behavior: if validation fails,
+            logs an error and returns.
+        - If the destination file already exists, logs and returns without
+            re-processing.
+    """
+    resume_json_file = Path(resume_json_file)
+    responsibilities_flat_json_file = Path(responsibilities_flat_json_file)
+
+    # Preserve original "skip if exists" behavior
+    if responsibilities_flat_json_file.exists():
+        logger.info(
+            "Flattened responsibilities JSON file already exists: %s",
+            responsibilities_flat_json_file,
+        )
+        return
+
+    try:
+        # Reuse the pure processing function
+        model = process_responsibilities_from_resume(
+            resume_json_file=resume_json_file,
+            url=url,
+        )
+    except ValidationError as ve:
+        logger.error("Responsibilities validation failed for %s: %s", url, ve)
+        return  # keep original early-exit behavior on validation failure
+
+    # Persist the validated payload
+    save_to_json_file(model.model_dump(), responsibilities_flat_json_file)
     logger.info(
-        f"Responsibilities flattened, validated, and saved to {responsibilities_flat_json_file}"
+        "Responsibilities flattened, validated, and saved to %s",
+        responsibilities_flat_json_file,
     )
 
 

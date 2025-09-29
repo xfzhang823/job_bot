@@ -3,7 +3,7 @@ from typing import Optional
 from datetime import datetime
 
 
-# You can import enums like LLMProvider or PipelineStage if you prefer stronger types
+# Import enums like LLMProvider or PipelineStage if we need stronger types
 class MasterFieldModel(BaseModel):
     # Standard metadata fields
     url: Optional[str] = None
@@ -26,8 +26,7 @@ class MasterFieldModel(BaseModel):
     requirement_key: Optional[str] = None
     requirement: Optional[str] = None
     requirement_category: Optional[str] = None
-    requirement_idx: Optional[int] = None
-    requirement_category_idx: Optional[int] = None
+    requirement_category_key: Optional[int] = None
 
     # Responsibilities
     responsibility_key: Optional[str] = None

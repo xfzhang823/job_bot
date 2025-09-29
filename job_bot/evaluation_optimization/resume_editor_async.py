@@ -5,12 +5,7 @@ Last updated: 2024 Sep 12
 """
 
 import logging
-from dotenv import load_dotenv
-import os
-import json
-import jsonschema
 import uuid
-import logging_config
 from pydantic import BaseModel, ValidationError
 from typing import Dict, Union, Optional, cast
 
@@ -18,29 +13,29 @@ import openai
 from openai import OpenAI, AsyncOpenAI
 from anthropic import Anthropic, AsyncAnthropic
 
-from prompts.prompt_templates import (
+from job_bot.prompts.prompt_templates import (
     SEMANTIC_ALIGNMENT_PROMPT,
     ENTAILMENT_ALIGNMENT_PROMPT,
     SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
-from llm_providers.llm_api_utils import get_openai_api_key
-from llm_providers.llm_api_utils_async import (
+from job_bot.llm_providers.llm_api_utils import get_openai_api_key
+from job_bot.llm_providers.llm_api_utils_async import (
     call_openai_api_async,
     call_llama3_async,
     call_anthropic_api_async,
 )
-from utils.validation_utils import validate_json_response
-from models.llm_response_models import (
+from job_bot.utils.validation_utils import validate_json_response
+from job_bot.models.llm_response_models import (
     EditingResponse,
     JobSiteResponse,
-    TextResponse,
     JSONResponse,
     TabularResponse,
     CodeResponse,
+    TextResponse,
     RequirementsResponse,
 )
-from project_config import OPENAI, ANTHROPIC
+from job_bot.config.project_config import OPENAI, ANTHROPIC
 
 # logging
 logger = logging.getLogger(__name__)

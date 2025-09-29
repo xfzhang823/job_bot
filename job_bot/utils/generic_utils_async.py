@@ -13,7 +13,6 @@ from pydantic import BaseModel, ValidationError
 # User defined
 from utils.get_file_names import get_file_names
 from utils.generic_utils import convert_keys_and_paths_to_str
-import logging_config
 
 # Setup logger
 logger = logging.getLogger(__name__)

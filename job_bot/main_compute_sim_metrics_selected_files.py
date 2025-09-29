@@ -10,13 +10,15 @@ from pipelines.hf_cache_refresh_and_lock_pipeline import (
 # from the local cache only!
 run_hf_cache_refresh_and_lock_pipeline(refresh_cache=False)
 
-import asyncio
-import json
 import logging
 from pathlib import Path
 from typing import List, Dict
+import asyncio
+import json
 from pydantic import ValidationError
-from project_config import (
+
+
+from job_bot.config.project_config import (
     ITERATE_0_OPENAI_DIR,
     ITERATE_0_ANTHROPIC_DIR,
     ITERATE_1_OPENAI_DIR,
@@ -25,23 +27,25 @@ from project_config import (
     OPENAI,
     ANTHROPIC,
 )
-from pipelines.resume_eval_pipeline_async import (
+from job_bot.pipelines.resume_eval_pipeline_async import (
     run_metrics_processing_pipeline_async,
     run_metrics_re_processing_pipeline_async,
     run_multivariate_indices_processing_mini_pipeline_async,
 )
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from utils.generic_utils_async import read_and_validate_json_async, read_json_file_async
-from models.resume_job_description_io_models import (
+from job_bot.utils.generic_utils_async import (
+    read_and_validate_json_async,
+    read_json_file_async,
+)
+from job_bot.models.resume_job_description_io_models import (
     Requirements,
     NestedResponsibilities,
     JobFileMappings,
 )
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ✅ Define URL Lists (Easier Selection)

@@ -11,7 +11,12 @@ from llm_providers.llm_api_utils_async import (
 )
 from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
 from models.llm_response_models import RequirementsResponse
-from project_config import GPT_35_TURBO, GPT_4_1_NANO, CLAUDE_HAIKU, CLAUDE_SONNET_3_5
+from job_bot.config.project_config import (
+    GPT_35_TURBO,
+    GPT_4_1_NANO,
+    CLAUDE_HAIKU,
+    CLAUDE_SONNET_3_5,
+)
 
 
 # Set logger

@@ -4,7 +4,7 @@ from db_io.db_utils import get_stage_progress_counts, get_recent_urls
 
 
 def print_pipeline_summary():
-    """Print a quick summary of pipeline stages/statuses"""
+    """Print a quick summary of pipeline stages/status"""
     summary_df = get_stage_progress_counts()
     print(summary_df)
 

@@ -19,32 +19,33 @@ and the LLM provider, ensuring the correct processing
 steps are followed for each pipeline.
 """
 
-from enum import Enum
 import logging
 
 # * User defined: import pipeline functions
 # Proprocessing
-from pipelines.preprocessing_pipeline import run_preprocessing_pipeline
-from pipelines.preprocessing_pipeline_async import run_preprocessing_pipeline_async
+from job_bot.pipelines.preprocessing_pipeline import run_preprocessing_pipeline
+from job_bot.pipelines.preprocessing_pipeline_async import (
+    run_preprocessing_pipeline_async,
+)
 
 # Create/upsert mapping file for iteration 0
-from pipelines.upserting_mapping_file_iter0_mini_pipeline import (
+from job_bot.pipelines.upserting_mapping_file_iter0_mini_pipeline import (
     run_upserting_mapping_file_iter0_mini_pipeline,
 )
 
 # Create flatttened files
-from pipelines.flattened_resps_reqs_processing_mini_pipeline import (
+from job_bot.pipelines.flattened_resps_reqs_processing_mini_pipeline import (
     run_flatten_resps_reqs_processing_mini_pipeline,
 )
 
 # Compute & save similarity/entailment metrics & indices
-from pipelines.resume_eval_pipeline import (
+from job_bot.pipelines.resume_eval_pipeline import (
     run_metrics_processing_pipeline,
     generate_metrics_from_flat_json,
     generate_metrics_from_nested_json,
     run_multivariate_indices_processing_mini_pipeline,
 )
-from pipelines.resume_eval_pipeline_async import (
+from job_bot.pipelines.resume_eval_pipeline_async import (
     generate_metrics_from_flat_json_async,
     generate_metrics_from_nested_json_async,
     run_metrics_processing_pipeline_async,
@@ -52,39 +53,43 @@ from pipelines.resume_eval_pipeline_async import (
     run_metrics_re_processing_pipeline_async,
 )
 
-from evaluation_optimization.evaluation_optimization_utils import (
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
     add_multivariate_indices,
 )
 
 # Clean metric files (couldn't get it cleaned in previous pipelines)
-from pipelines.cleaning_metrics_files_pipeline import (
+from job_bot.pipelines.cleaning_metrics_files_pipeline import (
     run_cleaning_similarity_metrics_files_pipeline,
 )
 
 # Copy responsibilities over to pruned resps dir (for consistency)
-from pipelines.copying_resps_to_pruned_resps_dir_mini_pipeline import (
+from job_bot.pipelines.copying_resps_to_pruned_resps_dir_mini_pipeline import (
     run_copying_resps_to_pruned_resps_dir_mini_pipeline,
 )
 
 # Exclude some resume items
-from pipelines.excluding_resps_mini_pipeline import run_excluding_resps_mini_pipeline
+from job_bot.pipelines.excluding_resps_mini_pipeline import (
+    run_excluding_resps_mini_pipeline,
+)
 
 # Create/upsert mapping file for iteration 1
-from pipelines.upserting_mapping_file_iter1_mini_pipeline import (
+from job_bot.pipelines.upserting_mapping_file_iter1_mini_pipeline import (
     run_upserting_mapping_file_iter1_mini_pipeline,
 )
 
 # Edidting responsitibilites by matching requirements: iter 0 -> iter 1
-from pipelines.resume_editing_pipeline import run_resume_editing_pipeline
-from pipelines.resume_editing_pipeline_async import run_resume_editing_pipeline_async
+from job_bot.pipelines.resume_editing_pipeline import run_resume_editing_pipeline
+from job_bot.pipelines.resume_editing_pipeline_async import (
+    run_resume_editing_pipeline_async,
+)
 
-from pipelines.copying_reqs_to_next_iter_mini_pipeline import (
+from job_bot.pipelines.copying_reqs_to_next_iter_mini_pipeline import (
     run_copying_reqs_to_next_iter_mini_pipeline,
 )
 
 
 # File & dir paths
-from project_config import (
+from job_bot.config.project_config import (
     RESUME_JSON_FILE,
     JOB_POSTING_URLS_FILE,
     JOB_POSTING_URLS_FILTERED_FILE,
@@ -116,7 +121,7 @@ from project_config import (
 )
 
 # LLM providers & model ids
-from project_config import (
+from job_bot.config.project_config import (
     ANTHROPIC,
     OPENAI,
     GPT_35_TURBO,

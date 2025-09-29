@@ -1,4 +1,7 @@
-"""Data Input/Output dir/file configuration
+"""
+config/project_config.py
+
+Data Input/Output dir/file configuration
 
 # example_usagage (from modules)
 
@@ -91,7 +94,7 @@ JOB_REQUIREMENTS_JSON_FILE = (
     PREPROCESSING_INPUT_OUTPUT_DIR / "extracted_job_requirements.json"
 )
 description_text_holder = PREPROCESSING_INPUT_OUTPUT_DIR / "jobposting_text_holder.txt"
-responsibilities_flat_json_file = (
+RESPONSIBILITIES_FLAT_JSON_FILE = (
     PREPROCESSING_INPUT_OUTPUT_DIR / "responsibilities_flat.json"
 )
 requirements_flat_json_file = PREPROCESSING_INPUT_OUTPUT_DIR / "requirements_flat.json"
@@ -276,7 +279,7 @@ PIPELINE_DATA_DIR = BASE_DIR / "pipeline_data"  # input/output data folder
 DB_DIR = PIPELINE_DATA_DIR / "db"
 DUCKDB_FILE = DB_DIR / "pipeline_data.duckdb"
 
-
+"db_io/db_loaders_config.yaml"
 # *LLM Models
 
 # llm_providers
@@ -340,3 +343,10 @@ LLM_CONFIG = {
     },
     # Add configurations for other LLM providers here
 }
+
+# Config Files
+SRC_ROOT_DIR = BASE_DIR / "job_bot"
+DB_IO_DIR = SRC_ROOT_DIR / "db_io"
+CONFIG_DIR = SRC_ROOT_DIR / "config"
+DB_LOADERS_YAML = CONFIG_DIR / "db_loaders.yaml"
+DB_INSERTERS_YAML = CONFIG_DIR / "db_inserters.yaml"

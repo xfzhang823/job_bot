@@ -27,25 +27,24 @@ with multiple LLM providers.
 """
 
 # Built-in & External libraries
+import logging
 import asyncio
-import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Union, Optional, cast
 import json
-import logging
+from random import uniform
 from pydantic import ValidationError
 import httpx
-from random import uniform
+from httpx import Timeout, Limits
 from aiolimiter import AsyncLimiter
 
 # LLM imports
 from openai import AsyncOpenAI
-from anthropic import AsyncAnthropic, Anthropic
-from anthropic._exceptions import RateLimitError
+from anthropic import AsyncAnthropic
 import ollama  # ollama remains synchronous as there’s no async client yet
 
 # From own modules
-from models.llm_response_models import (
+from job_bot.models.llm_response_models import (
     CodeResponse,
     JSONResponse,
     TabularResponse,
@@ -54,15 +53,15 @@ from models.llm_response_models import (
     JobSiteResponse,
     RequirementsResponse,
 )
-from llm_providers.llm_api_utils import (
+from job_bot.llm_providers.llm_api_utils import (
     get_anthropic_api_key,
     get_openai_api_key,
 )
-from llm_providers.llm_response_validators import (
+from job_bot.llm_providers.llm_response_validators import (
     validate_json_type,
     validate_response_type,
 )
-from project_config import (
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_35_TURBO,
@@ -76,14 +75,25 @@ from project_config import (
 
 logger = logging.getLogger(__name__)
 
-# Global clients (instantiated once at module load)
-OPENAI_CLIENT = AsyncOpenAI(api_key=get_openai_api_key(), timeout=httpx.Timeout(10.0))
+# Global HTTP client config (reused by both SDKs)
+_HTTP_LIMITS = Limits(max_connections=40, max_keepalive_connections=20)
+_HTTP_TIMEOUT = Timeout(connect=15.0, read=60.0, write=30.0, pool=60.0)
+_OPENAI_HTTP = httpx.AsyncClient(limits=_HTTP_LIMITS, timeout=_HTTP_TIMEOUT)
+_ANTHROPIC_HTTP = httpx.AsyncClient(limits=_HTTP_LIMITS, timeout=_HTTP_TIMEOUT)
+
+# # Provider-specific rate limiters (requests per minute)
+# Adjust based on your OpenAI tier and Anthropic plan
+OPENAI_CLIENT = AsyncOpenAI(
+    api_key=get_openai_api_key(),
+    http_client=_OPENAI_HTTP,
+    max_retries=4,  # give the SDK some internal retries too
+)
 ANTHROPIC_CLIENT = AsyncAnthropic(
-    api_key=get_anthropic_api_key(), timeout=httpx.Timeout(10.0)
+    api_key=get_anthropic_api_key(),
+    http_client=_ANTHROPIC_HTTP,
+    max_retries=4,
 )
 
-# Provider-specific rate limiters (requests per minute)
-# Adjust based on your OpenAI tier and Anthropic plan
 RATE_LIMITERS = {
     OPENAI: AsyncLimiter(max_rate=1000, time_period=60),
     ANTHROPIC: AsyncLimiter(
@@ -92,7 +102,6 @@ RATE_LIMITERS = {
 }
 
 
-# Todo: keep this function for now to run local LLMs
 # Helper function to run synchronous API calls in an executor
 async def run_in_executor_async(func, *args):
     """
@@ -111,27 +120,54 @@ async def run_in_executor_async(func, *args):
 
 
 async def with_rate_limit_and_retry(api_func, llm_provider: str):
-    """Apply rate limiting and retries with exponential backoff."""
+    """Apply rate limiting and retries with jittered backoff for 429/5xx/timeouts."""
     async with RATE_LIMITERS[llm_provider]:
         max_retries = 5
-        base_delay = 1
+        base = 1.25  # backoff base
+        cap = 12.0  # max sleep seconds
         for attempt in range(max_retries):
             try:
                 return await api_func()
+
             except httpx.HTTPStatusError as e:
-                if e.response.status_code in [429, 529] and attempt < max_retries - 1:
-                    retry_after = int(e.response.headers.get("Retry-After", base_delay))
-                    wait_time = min(
-                        10, retry_after + (attempt * base_delay) + uniform(0, 1)
-                    )
+                status = e.response.status_code
+                retriable = (status == 429) or (500 <= status < 600)
+                if retriable and attempt < max_retries - 1:
+                    # Respect Retry-After if present; else exponential backoff with jitter
+                    ra = e.response.headers.get("Retry-After")
+                    ra_secs = float(ra) if ra and ra.isdigit() else None
+                    wait = min(cap, (ra_secs or (base**attempt)) + uniform(0, 0.75))
                     logger.warning(
-                        f"Rate limit hit for {llm_provider}, retrying in {wait_time:.2f}s..."
+                        "HTTP %s for %s, retrying in %.2fs (attempt %d/%d)…",
+                        status,
+                        llm_provider,
+                        wait,
+                        attempt + 1,
+                        max_retries,
                     )
-                    await asyncio.sleep(wait_time)
-                else:
-                    raise
-            except httpx.TimeoutException as e:
-                logger.error(f"Timeout for {llm_provider}: {e}")
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                # Network flake or read timeout: back off and retry
+                if attempt < max_retries - 1:
+                    wait = min(cap, (base**attempt) + uniform(0, 0.75))
+                    logger.warning(
+                        "Network/timeout for %s: %s — retrying in %.2fs (attempt %d/%d)…",
+                        llm_provider,
+                        str(e),
+                        wait,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error(
+                    "Timeout/transport error for %s (final attempt): %s",
+                    llm_provider,
+                    e,
+                )
                 raise
 
 
@@ -424,47 +460,3 @@ async def call_llama3_async(
         max_tokens=max_tokens,
         llm_provider="llama3",
     )
-
-
-# todo: comment out for now; delete later once the other function works out fine
-# async def with_rate_limit_and_retry(api_func):
-#     """Apply rate limiting and retries with exponential backoff."""
-#     global last_request_time
-
-#     min_interval = 1.5  # Ensure at least 1500ms between requests
-#     max_retries = 6  # Allow up to 6 retries
-#     base_delay = 2  # Initial backoff delay (1 sec, 2 sec, 3 sec...)
-
-#     for attempt in range(max_retries):
-#         async with rate_limit_lock:  # Prevent multiple requests at the same time
-#             current_time = time.time()
-#             time_since_last = current_time - last_request_time
-
-#             if time_since_last < min_interval:
-#                 await asyncio.sleep(min_interval - time_since_last)
-
-#             try:
-#                 result = await api_func()  # Execute API function
-#                 last_request_time = time.time()  # Update only after success
-#                 return result
-
-#             except httpx.HTTPStatusError as e:
-#                 if e.response.status_code in [429, 529] and attempt < max_retries - 1:
-#                     retry_after = int(
-#                         e.response.headers.get("Retry-After", base_delay + attempt)
-#                     )
-#                     wait_time = min(30, retry_after + (attempt * base_delay))
-#                     jitter = wait_time * 0.1 * (1 + uniform(-1, 1))  # Add jitter
-#                     total_wait = wait_time + jitter
-
-#                     logger.warning(
-#                         f"Rate limit hit, retrying in {total_wait:.2f} seconds..."
-#                     )
-#                     await asyncio.sleep(total_wait)
-#                     continue  # Retry after delay
-#                 raise  # Stop retrying if max retries exceeded
-
-
-# Global variables for rate limiting
-# last_request_time = 0
-# rate_limit_lock = asyncio.Lock()

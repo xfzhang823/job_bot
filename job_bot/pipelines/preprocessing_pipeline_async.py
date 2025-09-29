@@ -4,43 +4,32 @@ The pipeline module contains all high-level functions.
 This module is to be called by main.py.
 """
 
-# Import libraries
-import os
+# Standard or 3rd party
 import json
 import logging
-from dotenv import load_dotenv
 from typing import List, Union
 from pathlib import Path
 import asyncio
-import openai
-from llm_providers.llm_api_utils_async import (
-    call_anthropic_api_async,
-    call_openai_api_async,
-)
-from utils.generic_utils import (
-    fetch_new_urls,
-    pretty_print_json,
-    load_or_create_json,
+
+# From user defined
+from job_bot.utils.generic_utils import (
     read_from_json_file,
-    add_to_json_file,
-    save_to_json_file,
 )
-from utils.webpage_reader_async import process_webpages_to_json_async
-from utils.generic_utils_async import add_new_data_to_json_file_async
-from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
-from preprocessing.resume_preprocessor import ResumeParser
-from preprocessing.requirements_preprocessor import JobRequirementsParser
-from preprocessing.extract_requirements_with_llms_async import (
+from job_bot.utils.webpage_reader_async import process_webpages_to_json_async
+from job_bot.utils.generic_utils_async import add_new_data_to_json_file_async
+
+from job_bot.preprocessing.extract_requirements_with_llms_async import (
     extract_job_requirements_with_anthropic_async,
     extract_job_requirements_with_openai_async,
 )
-from preprocessing.preprocessing_utils import find_new_urls
-from models.llm_response_models import JobSiteResponse, RequirementsResponse
-from models.resume_job_description_io_models import (
+from job_bot.preprocessing.preprocessing_utils import find_new_urls
+from job_bot.models.llm_response_models import JobSiteResponse
+from job_bot.models.resume_job_description_io_models import (
     JobPostingsBatch,
     ExtractedRequirementsBatch,
 )
-from project_config import (
+
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_4_1_NANO,
@@ -182,16 +171,24 @@ async def process_single_url_async(
                 job_requirements_json_file
             )
 
-            job_desc_batch = JobPostingsBatch.model_validate(
+            job_desc_batch: JobPostingsBatch = JobPostingsBatch.model_validate(
                 existing_job_descriptions_dict
-            )  # type: ignore[attr-defined]
+            )
+
             job_reqs_batch = ExtractedRequirementsBatch.model_validate(
                 existing_job_requirements_dict
             )  # type: ignore[attr-defined]
 
             # ✅ Add new entries directly to the .root dicts (preserves model integrity)
+            # Ensure the value is a JobSiteResponse (not an untyped dict)
+            job_description_value: JobSiteResponse = (
+                job_description_model
+                if isinstance(job_description_model, JobSiteResponse)
+                else JobSiteResponse.model_validate(job_description_model)
+            )
+
             if job_description_url not in job_desc_batch.root:
-                job_desc_batch.root[job_description_url] = job_description_model
+                job_desc_batch.root[job_description_url] = job_description_value
 
             if job_description_url not in job_reqs_batch.root:
                 job_reqs_batch.root[job_description_url] = requirements_model

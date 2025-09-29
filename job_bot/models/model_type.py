@@ -1,6 +1,6 @@
 # models/model_type.py
 from typing import Union
-from models.resume_job_description_io_models import (
+from job_bot.models.resume_job_description_io_models import (
     NestedResponsibilities,
     Requirements,
     Responsibilities,
@@ -9,7 +9,7 @@ from models.resume_job_description_io_models import (
     ExtractedRequirementsBatch,
     SimilarityMetrics,
 )
-from models.llm_response_models import RequirementsResponse
+from job_bot.models.llm_response_models import RequirementsResponse
 
 ModelType = Union[
     RequirementsResponse,

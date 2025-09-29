@@ -5,17 +5,17 @@ Lst updated on: 2024 Oct 9
 *Still working on!!!!
 """
 
-import os
-from pathlib import Path
+# Standard and 3rd party
 import logging
-from joblib import Parallel, delayed
 from typing import Any
+from joblib import Parallel, delayed
 from tqdm import tqdm
 from openai import OpenAI
-from evaluation_optimization.resume_editor import TextEditor
-from utils.generic_utils import save_to_json_file
-from llm_providers.llm_api_utils import get_openai_api_key
-from models.resume_job_description_io_models import (
+
+# User defined
+from job_bot.evaluation_optimization.resume_editor import TextEditor
+from job_bot.llm_providers.llm_api_utils import get_openai_api_key
+from job_bot.models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,

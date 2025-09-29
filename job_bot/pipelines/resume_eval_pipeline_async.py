@@ -80,46 +80,34 @@ import pandas as pd
 from pydantic import HttpUrl, ValidationError, TypeAdapter
 
 # User defined
-from preprocessing.resume_preprocessor import ResumeParser
-from preprocessing.requirements_preprocessor import JobRequirementsParser
-from models.resume_job_description_io_models import (
+from job_bot.models.resume_job_description_io_models import (
     JobFileMappings,
     Requirements,
     Responsibilities,
     NestedResponsibilities,
-    ResponsibilityMatches,
     SimilarityMetrics,
 )
 
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from evaluation_optimization.metrics_calculator import (
+from job_bot.evaluation_optimization.metrics_calculator import (
     calculate_many_to_many_similarity_metrices,
     categorize_scores_for_df,
-    SimilarityScoreCalculator,
     calculate_text_similarity_metrics,
 )
-from evaluation_optimization.multivariate_indexer import MultivariateIndexer
-from evaluation_optimization.text_similarity_finder import TextSimilarity
-from evaluation_optimization.evaluation_optimization_utils import (
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
     add_multivariate_indices,
 )
-from utils.generic_utils import (
-    read_from_json_file,
-    save_to_json_file,
-)
-from utils.generic_utils_async import (
-    read_json_file_async,
+from job_bot.utils.generic_utils_async import (
     read_csv_file_async,
     read_and_validate_json_async,
     save_df_to_csv_file_async,
-    save_data_to_json_file_async,
 )
 
 
 # from config import job_descriptions_json_file
-from evaluation_optimization.evaluation_optimization_utils import (
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
     get_files_wo_multivariate_indices,
 )
 

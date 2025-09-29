@@ -41,8 +41,7 @@ from models.llm_response_models import (
     NestedRequirements,
     RequirementsResponse,
 )
-from project_config import ANTHROPIC, OPENAI, GPT_35_TURBO, GPT_4_1_NANO
-import logging_config
+from job_bot.config.project_config import ANTHROPIC, OPENAI, GPT_35_TURBO, GPT_4_1_NANO
 
 
 # logging

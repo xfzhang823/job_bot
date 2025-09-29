@@ -60,7 +60,7 @@ from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
 # From own modules
-from models.llm_response_models import (
+from job_bot.models.llm_response_models import (
     CodeResponse,
     JSONResponse,
     TabularResponse,
@@ -69,15 +69,15 @@ from models.llm_response_models import (
     JobSiteResponse,
     RequirementsResponse,
 )
-from llm_providers.llm_api_utils import (
+from job_bot.llm_providers.llm_api_utils import (
     get_anthropic_api_key,
     get_openai_api_key,
 )
-from llm_providers.llm_response_validators import (
+from job_bot.llm_providers.llm_response_validators import (
     validate_json_type,
     validate_response_type,
 )
-from project_config import (
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     GPT_35_TURBO,

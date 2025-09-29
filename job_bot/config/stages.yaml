@@ -1,0 +1,51 @@
+# config/stages.yaml
+# --------------------------------------------------------
+# FSM stage graph for the DuckDB pipeline.
+# Each stage defines:
+#   - runner: Python function to execute (module:function)
+#   - reads_from: how to select worklist (control-table query DSL or SQL snippet)
+#   - writes_to: target DuckDB tables
+#   - concurrency: max parallel tasks
+#   - batch_size: number of items per task
+#   - on_success/on_error: state transitions (optional)
+# --------------------------------------------------------
+
+defaults:
+  concurrency: 4
+  batch_size: 1
+
+stages:
+
+  JOB_POSTINGS:
+    runner: job_bot.pipelines.job_postings:run_job_postings_pipeline_async_fsm
+    reads_from: "pipeline_control:stage=JOB_URLS,status=READY"
+    writes_to: ["job_postings"]
+    concurrency: 8
+    on_success: { stage: JOB_POSTINGS, status: DONE }
+    on_error:   { stage: JOB_POSTINGS, status: ERROR }
+
+  EXTRACTED_REQUIREMENTS:
+    runner: job_bot.pipelines.extracted_requirements:run_extract_job_requirements_pipeline_async_fsm
+    reads_from: "pipeline_control:stage=JOB_POSTINGS,status=DONE"
+    writes_to: ["extracted_requirements"]
+    concurrency: 8
+    on_success: { stage: EXTRACTED_REQUIREMENTS, status: DONE }
+    on_error:   { stage: EXTRACTED_REQUIREMENTS, status: ERROR }
+
+  FLATTENED_RESPONSIBILITIES:
+    runner: job_bot.pipelines.flattened_responsibilities:run_flatten_responsibilities_pipeline_async_fsm
+    reads_from: "pipeline_control:stage=RESUME,status=READY"
+    writes_to: ["flattened_responsibilities"]
+    concurrency: 4
+
+  EDITED_RESPONSIBILITIES:
+    runner: job_bot.pipelines.edited_responsibilities:run_edit_responsibilities_pipeline_async_fsm
+    reads_from: "pipeline_control:stage=FLATTENED_RESPONSIBILITIES,status=DONE"
+    writes_to: ["edited_responsibilities"]
+    concurrency: 4
+
+  SIMILARITY_METRICS:
+    runner: job_bot.pipelines.similarity_metrics:run_similarity_metrics_pipeline_async_fsm
+    reads_from: "pipeline_control:stage=EDITED_RESPONSIBILITIES,status=DONE"
+    writes_to: ["similarity_metrics"]
+    concurrency: 4

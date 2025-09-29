@@ -1,5 +1,5 @@
 import logging
-import logging_config
+import job_bot.config.logging_config as logging_config
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

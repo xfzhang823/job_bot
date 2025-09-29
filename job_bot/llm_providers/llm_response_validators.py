@@ -92,12 +92,12 @@ validated_response = validate_json_type(response_model, json_type="requirements"
 from io import StringIO
 import re
 import json
-import pandas as pd
+import logging
 from typing import Any, Union, Optional, List, Dict
 from pydantic import ValidationError
+import pandas as pd
 
-import logging
-from models.llm_response_models import (
+from job_bot.models.llm_response_models import (
     JobSiteData,
     OptimizedTextData,
     CodeResponse,
@@ -109,8 +109,6 @@ from models.llm_response_models import (
     NestedRequirements,
     RequirementsResponse,
 )
-
-# from models.resume_job_description_io_models import Requirements
 
 
 logger = logging.getLogger(__name__)

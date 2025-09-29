@@ -5,28 +5,23 @@ Lst updated on: 2024 Oct 21
 Not tested/debugged yet
 """
 
-import os
-from pathlib import Path
+# Import from standard & 3rd party
 import logging
 from typing import Dict, Tuple
-from pydantic import ValidationError
-from tqdm import tqdm
 import asyncio
-from openai import AsyncOpenAI
-from anthropic import AsyncAnthropic
+from pydantic import ValidationError
 
-from evaluation_optimization.resume_editor_async import TextEditorAsync
 
-# from utils.generic_utils import save_to_json_file
-from llm_providers.llm_api_utils import get_openai_api_key, get_anthropic_api_key
-from models.resume_job_description_io_models import (
+# User defined
+from job_bot.evaluation_optimization.resume_editor_async import TextEditorAsync
+from job_bot.models.resume_job_description_io_models import (
     OptimizedText,
     ResponsibilityMatch,
     ResponsibilityMatches,
     Responsibilities,
     Requirements,
 )
-from project_config import OPENAI, ANTHROPIC, GPT_4_1_NANO, CLAUDE_HAIKU
+from job_bot.config.project_config import OPENAI, ANTHROPIC, GPT_4_1_NANO, CLAUDE_HAIKU
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -191,22 +186,22 @@ async def modify_multi_resps_based_on_reqs_async(
     responsibility text is preserved while aligning it with the job requirement.
 
     Args:
-        - responsibilities (dict): A dictionary of responsibility texts, where keys are
-        unique identifiers and values are the responsibility texts.
-        - requirements (dict): A dictionary of job requirement texts, where keys
-        are unique requirement identifiers and values are the requirement texts.
-        - llm_provider (str, optional): The name of the model to be used (e.g., "openai").
-        - model_id (str, optional): The specific model version to be used
-        (e.g., "gpt-3.5-turbo").
-        Defaults to "gpt-3.5-turbo".
-        -n_jobs (int, optional): The number of parallel jobs to run. Defaults to -1,
+        responsibilities (dict): A dictionary of responsibility texts, where keys are
+            unique identifiers and values are the responsibility texts.
+        requirements (dict): A dictionary of job requirement texts, where keys
+            are unique requirement identifiers and values are the requirement texts.
+        llm_provider (str, optional): The name of the model to be used (e.g., "openai").
+        model_id (str, optional): The specific model version to be used
+            (e.g., "gpt-3.5-turbo").
+            Defaults to "gpt-4.1-nano".
+        n_jobs (int, optional): The number of parallel jobs to run. Defaults to -1,
             which means using all available processors.
 
     Returns:
         * ResponsibilityMatches:
-        Pydantic object of a dictionary where keys are responsibility identifiers
-        and values are dictionaries of modified responsibility texts, each aligned
-        with multiple job requirements.
+            Pydantic object of a dictionary where keys are responsibility identifiers
+            and values are dictionaries of modified responsibility texts, each aligned
+            with multiple job requirements.
 
     Example:
         >>> modify_multi_resps_based_on_reqs(
@@ -214,7 +209,7 @@ async def modify_multi_resps_based_on_reqs_async(
                 requirements={"req1": "Experience leading software development teams."},
                 TextEditor=TextEditor,
                 model="openai",
-                model_id="gpt-3.5-turbo",
+                model_id="gpt-4.1-nano",
                 n_jobs=-1
             )
     """

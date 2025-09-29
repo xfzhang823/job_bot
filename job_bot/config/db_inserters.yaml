@@ -1,0 +1,63 @@
+defaults:
+  mode: append
+  dedup: pk_scoped
+  stamp:
+    created_at: now
+    updated_at: now
+  inherit:
+    iteration: pipeline_control     # resolve from control by default
+  llm_defaults:
+    llm_provider: OPENAI
+    model_id: GPT_4_1_NANO
+
+tables:
+  job_urls:
+    dedup: pk_scoped
+    stamp:
+      created_at: now
+      updated_at: now
+      iteration: none
+      llm_provider: none
+      model_id: none
+
+  job_postings:
+    dedup: pk_scoped
+    stamp:
+      llm_provider: none
+      model_id: none
+
+  extracted_requirements:
+    dedup: pk_scoped
+    stamp:
+      llm_provider: default
+      model_id: default
+
+  flattened_responsibilities:
+    dedup: pk_scoped
+    stamp:
+      llm_provider: default
+      model_id: default
+
+  edited_responsibilities:
+    dedup: pk_scoped
+    stamp:
+      llm_provider: none
+      model_id: none
+
+  extracted_responsibilities:
+    dedup: pk_scoped
+    stamp:
+      llm_provider: default
+      model_id: default
+
+  similarity_metrics:
+    dedup: pk_scoped
+    stamp:
+      resp_llm_provider: param
+      resp_model_id: param
+
+  pipeline_control:
+    dedup: pk_scoped
+    stamp:
+      iteration: none         # FSM sets this explicitly
+

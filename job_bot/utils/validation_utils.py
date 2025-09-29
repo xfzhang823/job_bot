@@ -6,8 +6,7 @@ from typing import Type, TypeVar, Any
 from pydantic import BaseModel, ValidationError
 import pandas as pd
 import logging
-import logging_config
-from models.resume_job_description_io_models import SimilarityMetrics
+from job_bot.models.resume_job_description_io_models import SimilarityMetrics
 
 
 logger = logging.getLogger(__name__)

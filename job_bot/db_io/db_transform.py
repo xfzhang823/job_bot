@@ -1,29 +1,8 @@
 """
 transform.py
 
-This module defines a generic model-to-table transformation interface for
-inserting JSON objects into DuckDB.
-
-It provides:
-- A dispatch dictionary (`FLATTEN_DISPATCH`) that maps logical DuckDB table names
-to their corresponding Pydantic model types and flattening functions.
-- A single entrypoint function `flatten_model_to_df()` that validates model
-compatibility, flattens structured data into tabular format, and appends
-standardized metadata fields (`source_file`, `stage`, `timestamp`, etc.).
-
-This module supports the ingestion of multiple structured content types, including:
-- Job postings
-- Extracted and flattened job requirements
-- Responsibilities (nested and flattened)
-- Similarity metrics
-- Other table schemas defined in DUCKDB_SCHEMAS
-
-Usage:
-    df = flatten_model_to_df(model, table_name, stage=PipelineStage.STAGING)
-
-Raises:
-    ValueError: If an unsupported table name is provided.
-    TypeError: If the model does not match the expected type for the table.
+This module contains tools such as add_metadata, helping transformating pyd models
+to df, and vice versa.
 
 This utility is central to ensuring schema-aligned ingestion and downstream
 consistency across the DuckDB database.
@@ -31,179 +10,93 @@ consistency across the DuckDB database.
 
 from pathlib import Path
 import logging
-from typing import Dict, Optional, Union, Callable, Tuple, Type, TypeVar
-from pydantic import BaseModel
 import pandas as pd
 
 # User defined
-from db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
-from db_io.pipeline_enums import (
+from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
+from job_bot.db_io.pipeline_enums import (
     TableName,
-    PipelineStage,
     LLMProvider,
-    PipelineStatus,
     Version,
 )
-from db_io.flatten_and_rehydrate import (
-    flatten_job_postings_to_table,
-    flatten_requirements_to_table,
-    flatten_responsibilities_to_table,
-    flatten_nested_responsibilities_to_table,
-    flatten_extracted_requirements_to_table,
-    flatten_job_urls_to_table,
-)
-from models.resume_job_description_io_models import (
-    NestedResponsibilities,
-    Requirements,
-    Responsibilities,
-    JobPostingsBatch,
-    JobPostingUrlsBatch,
-    ExtractedRequirementsBatch,
-    SimilarityMetrics,
-)
-from models.llm_response_models import RequirementsResponse
-from models.model_type import ModelType
 
 logger = logging.getLogger(__name__)
-
-
-T = TypeVar("T", bound=BaseModel)
-FlattenFuncTyped = Callable[[T], pd.DataFrame]
-FlattenDispatch = Dict[TableName, Tuple[Type[T], FlattenFuncTyped[T]]]
-
-FLATTEN_DISPATCH: FlattenDispatch = {
-    TableName.JOB_URLS: (JobPostingUrlsBatch, flatten_job_urls_to_table),
-    TableName.JOB_POSTINGS: (JobPostingsBatch, flatten_job_postings_to_table),
-    TableName.EXTRACTED_REQUIREMENTS: (
-        ExtractedRequirementsBatch,
-        flatten_extracted_requirements_to_table,
-    ),
-    TableName.FLATTENED_REQUIREMENTS: (Requirements, flatten_requirements_to_table),
-    TableName.FLATTENED_RESPONSIBILITIES: (
-        Responsibilities,
-        flatten_responsibilities_to_table,
-    ),
-    TableName.PRUNED_RESPONSIBILITIES: (
-        NestedResponsibilities,
-        flatten_nested_responsibilities_to_table,
-    ),
-    TableName.EDITED_RESPONSIBILITIES: (
-        NestedResponsibilities,
-        flatten_nested_responsibilities_to_table,
-    ),
-}
 
 
 # Alternative and more flexible function to add metadata
 def add_metadata(
     df: pd.DataFrame,
-    file_path: Optional[Path | str],
-    stage: PipelineStage,
     table: TableName,
-    version: Optional[Version] = Version.ORIGINAL,
-    llm_provider: Optional[LLMProvider] = None,
-    iteration: int = 0,
+    *,
+    source_file: Path | str | None = None,
+    iteration: int | None = None,
+    version: Version | str | None = None,
+    llm_provider: LLMProvider | str | None = None,
+    model_id: str | None = None,
 ) -> pd.DataFrame:
     """
-    Adds standard metadata columns to a DataFrame if expected by the schema.
+    Add table-aware metadata columns without overwriting existing values.
+
+    Purpose
+    -------
+    Ensures each DataFrame has only the metadata fields owned by its target
+    table, as defined in `DUCKDB_SCHEMA_REGISTRY[table].metadata_fields`.
+    Prevents over-stamping (e.g., no global `stage`/`timestamp`) and avoids
+    INSERT errors by aligning to schema intent.
+
+    Behavior
+    --------
+    • Adds `source_file` if provided.
+    • Adds `iteration` (defaults to 0 if table requires it).
+    • Adds `version`, `llm_provider`, and `model_id` only if both provided
+      *and* the table defines them.
+    • Never overwrites existing DataFrame columns.
+    • Ignores `stage`, `created_at`, `updated_at`, and metrics backends
+      (set elsewhere).
+
+    Usage
+    -----
+    Call this right before DB insertion, after flattening models:
+      >>> add_metadata(df, TableName.FLATTENED_REQUIREMENTS, source_file="fsm")
+      >>> add_metadata(df, TableName.EDITED_RESPONSIBILITIES,
+      ...              source_file="fsm", llm_provider="openai", model_id="gpt-4.1-mini")
+
+    Notes
+    -----
+    • `created_at` / `updated_at` come from DDL defaults or the write path.
+    • Use FSM helpers (not this function) to stamp `stage` in `pipeline_control`.
+    • Schema changes are safe: update the registry and this function adapts.
     """
-    version = version or Version.ORIGINAL
-    llm_provider = llm_provider if llm_provider else None
+    schema = DUCKDB_SCHEMA_REGISTRY[table]
+    fields = set(getattr(schema, "metadata_fields", []))
 
-    schema_cols = DUCKDB_SCHEMA_REGISTRY[table].column_order
+    def set_if_needed(col: str, value):
+        # only set if table wants it AND df doesn't already have it
+        if col in fields and col not in df.columns:
+            df[col] = value
 
-    if "source_file" in schema_cols:
-        df["source_file"] = str(file_path) if file_path else None
-    if "stage" in schema_cols:
-        df["stage"] = stage.value
-    if "timestamp" in schema_cols:
-        df["timestamp"] = pd.Timestamp.now()
-    if "version" in schema_cols:
-        df["version"] = version.value
-    if "llm_provider" in schema_cols:
-        df["llm_provider"] = llm_provider.value if llm_provider else None
-    if "iteration" in schema_cols:
-        df["iteration"] = iteration
+    def as_value(x):
+        return getattr(x, "value", x)
+
+    # Optional stamps (table-aware)
+    set_if_needed("source_file", str(source_file) if source_file is not None else None)
+
+    # iteration: default to 0 if the table wants it and caller didn't provide one
+    if "iteration" in fields and "iteration" not in df.columns:
+        set_if_needed("iteration", 0 if iteration is None else iteration)
+
+    # version + llm_provider only where present and provided
+    if version is not None:
+        set_if_needed("version", as_value(version))
+    if llm_provider is not None:
+        set_if_needed("llm_provider", as_value(llm_provider))
+
+    # model_id (LLM artifacts)
+    if model_id is not None:
+        set_if_needed("model_id", model_id)
+
+    # Explicitly DO NOT set:
+    # - 'stage' (belongs only to pipeline_control and should be set by the FSM upsert)
+    # - 'timestamp', 'created_at', 'updated_at' (handled by DDL/mixins/defaults)
 
     return df
-
-
-# * Function to add standard metadata to ALL TABLES
-def add_all_metadata(
-    df: pd.DataFrame,
-    file_path: Optional[Path | str],
-    stage: PipelineStage,
-    table: TableName,
-    version: Version | None = None,
-    llm_provider: LLMProvider | None = None,
-    iteration: int = 0,
-) -> pd.DataFrame:
-    """
-    * Adds ALL STANDARD metadata columns, even if not in the target schema.
-    Unused fields will be filled with None or defaults to ensure consistent
-    downstream format.
-    """
-    version = version or Version.ORIGINAL
-    llm_provider = llm_provider if llm_provider else None
-
-    df = df.copy()
-
-    df["source_file"] = str(file_path) if file_path else None
-    df["stage"] = stage.value
-    df["timestamp"] = pd.Timestamp.now()
-    df["version"] = version.value
-    df["llm_provider"] = llm_provider.value if llm_provider else None
-    df["iteration"] = iteration
-
-    # Add any missing columns (padding to align with table schema)
-    schema_cols = DUCKDB_SCHEMA_REGISTRY[table].column_order
-    for col in schema_cols:
-        if col not in df.columns:
-            df[col] = None
-
-    return df[schema_cols]
-
-
-def flatten_model_to_df(
-    model: ModelType,
-    table_name: TableName,
-    stage: PipelineStage,
-    source_file: Optional[Path | str] = None,
-    version: Optional[Version] = None,
-    llm_provider: Optional[LLMProvider] = None,
-    iteration: int = 0,
-) -> pd.DataFrame:
-    """
-    Flattens a validated Pydantic model into a tabular DataFrame for DuckDB insertion.
-    """
-    logger.info(
-        f"🪄 Flattening model '{type(model).__name__}' for table '{table_name}'"
-    )
-
-    if table_name not in FLATTEN_DISPATCH:
-        raise ValueError(f"Unsupported table: {table_name}")
-
-    expected_model_type, flatten_func = FLATTEN_DISPATCH[table_name]
-    if not isinstance(model, expected_model_type):
-        raise TypeError(
-            f"Expected model of type '{expected_model_type.__name__}' for table '{table_name}', "
-            f"but got '{type(model).__name__}'"
-        )
-
-    df = flatten_func(model)
-
-    path = (
-        Path(source_file)
-        if isinstance(source_file, str) and source_file
-        else source_file
-    )
-
-    return add_all_metadata(
-        df=df,
-        file_path=path,
-        stage=stage,
-        table=table_name,
-        version=version,
-        llm_provider=llm_provider,
-        iteration=iteration,
-    )

@@ -3,9 +3,11 @@
 # TODO: more advanced; do it later
 
 from typing import Literal
-from fsm.pipeline_fsm import PipelineFSM
-from models.duckdb_table_models import PipelineState
-from db_io.state_sync import load_pipeline_state, upsert_pipeline_state_to_duckdb
+from job_bot.fsm.pipeline_fsm import PipelineFSM
+from job_bot.models.db_table_models import PipelineState
+from job_bot.db_io.state_sync import (
+    load_pipeline_state,
+)
 
 
 # ✅ Aliases to use throughout your code
@@ -61,10 +63,10 @@ def advance_fsm_for_url(
 
     state = load_pipeline_state(url) or PipelineState(
         url=url,
-        llm_provider=llm_provider,
         iteration=iteration,
         version=version,
         status=status,
+        stage=stage,
     )
     fsm = PipelineFSM(state)
     fsm.step(table_name="pipeline_control")

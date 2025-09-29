@@ -8,20 +8,20 @@ validating the file paths and contents, leveraging Pydantic models for requireme
 """
 
 from pathlib import Path
-import shutil
-import os
 import logging
-import logging_config
 from typing import Union
-from evaluation_optimization.create_mapping_file import (
+
+from job_bot.evaluation_optimization.create_mapping_file import (
     load_existing_or_create_new_mapping,
 )
-from models.resume_job_description_io_models import Requirements
-from utils.pydantic_model_loaders_from_files import (
+from job_bot.models.resume_job_description_io_models import Requirements
+from job_bot.utils.pydantic_model_loaders_for_files import (
     load_job_file_mappings_model,
 )
-from evaluation_optimization.evaluation_optimization_utils import check_mapping_keys
-from utils.generic_utils import (
+from job_bot.evaluation_optimization.evaluation_optimization_utils import (
+    check_mapping_keys,
+)
+from job_bot.utils.generic_utils import (
     read_from_json_file,
     save_to_json_file,
     verify_dir,

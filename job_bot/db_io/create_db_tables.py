@@ -1,79 +1,91 @@
 """
-db_io/create_db.py
+db_io/create_db_tables.py
 
-Creates all DuckDB tables as defined in DUCKDB_SCHEMAS.
-This module should be run once at setup time or as part of a migration process.
+Create DuckDB tables from DUCKDB_SCHEMA_REGISTRY using Pydantic models.
 """
 
+from __future__ import annotations
+
 import logging
-from db_io.duckdb_adapter import get_duckdb_connection
-from db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
-from db_io.pipeline_enums import TableName
+from typing import Optional
+
+from job_bot.db_io.get_db_connection import get_db_connection
+from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
+from job_bot.db_io.pipeline_enums import TableName
+from job_bot.db_io.db_utils import generate_table_schema_from_model
 
 logger = logging.getLogger(__name__)
 
 
-def create_single_db_table(table_name: TableName | str) -> None:
-    """
-    Creates a single DuckDB table based on the schema defined in DUCKDB_SCHEMA_REGISTRY.
-
-    This function accepts either a `TableName` enum instance or a string representation
-    of a table name and attempts to create the corresponding DuckDB table. If the table
-    already exists, it will not attempt to recreate it.
-
-    Args:
-        table_name (TableName | str): The enum value or string representation of the table.
-
-    Example Usage:
-        # Using a TableName enum instance:
-        create_single_db_table(TableName.PIPELINE_CONTROL)
-
-        # Using a string representation:
-        create_single_db_table("pipeline_control")
-
-    Raises:
-        ValueError: If the provided table name is not a valid enum value.
-        Exception: If the table creation query fails.
-    """
-    con = get_duckdb_connection()
-
-    # If str, convert to enum
+def _to_tablename(name: TableName | str) -> Optional[TableName]:
+    if isinstance(name, TableName):
+        return name
     try:
-        table = TableName(table_name)
+        return TableName(name)
     except ValueError:
-        logger.error(f"{table_name} is not a valid table name.")
-        return
+        for t in TableName:
+            if t.value == name:
+                return t
+        return None
+
+
+def create_single_db_table(table_name: TableName | str) -> bool:
+    """
+    Create a single DuckDB table defined in DUCKDB_SCHEMA_REGISTRY.
+    Returns True if successful, False otherwise.
+    """
+    table = _to_tablename(table_name)
+    if table is None:
+        logger.error("❌ %r is not a valid TableName.", table_name)
+        return False
 
     schema = DUCKDB_SCHEMA_REGISTRY.get(table)
-
     if not schema:
-        logger.error(f"⚠️ Table '{table.value}' not found in registry.")
-        return
+        logger.error("⚠️ Table '%s' not found in registry.", table.value)
+        return False
 
+    ddl = generate_table_schema_from_model(
+        model=schema.model,
+        table_name=schema.table_name,
+        primary_keys=schema.primary_keys,
+    )
+
+    con = get_db_connection()
     try:
-        con.execute(schema.ddl)
-        logger.info(f"✅ Table '{table.value}' created successfully.")
-
-    except Exception as e:
-        logger.error(f"❌ Error creating table '{table.value}': {e}")
-
-
-def create_all_db_tables():
-    """
-    Executes all `CREATE TABLE IF NOT EXISTS` statements from DUCKDB_SCHEMAS.
-
-    This function connects to DuckDB and ensures that each table is created
-    only if it doesn't already exist.
-
-    Raises:
-        Any exceptions encountered during DDL execution are caught and logged.
-    """
-    con = get_duckdb_connection()
-    for table_name, table_schema in DUCKDB_SCHEMA_REGISTRY.items():
+        con.execute(ddl)
+        logger.info("✅ Table '%s' created or confirmed.", table.value)
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error("❌ Error creating table '%s': %s", table.value, e, exc_info=True)
+        return False
+    finally:
         try:
-            con.execute(table_schema.ddl)
-            logger.info(f"✅ Created or confirmed table '{table_name}' exists.")
-        except Exception as e:
-            logger.error(
-                f"❌ Failed to create table '{table_name}': {e}", exc_info=True
+            con.close()
+        except Exception:
+            pass
+
+
+def create_all_db_tables() -> None:
+    """
+    Create all DuckDB tables listed in DUCKDB_SCHEMA_REGISTRY.
+    """
+    con = get_db_connection()
+    try:
+        for table, schema in DUCKDB_SCHEMA_REGISTRY.items():
+            ddl = generate_table_schema_from_model(
+                model=schema.model,
+                table_name=schema.table_name,
+                primary_keys=schema.primary_keys,
             )
+            try:
+                con.execute(ddl)
+                logger.info("✅ Created or confirmed table '%s'.", table.value)
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    "❌ Failed to create table '%s': %s", table.value, e, exc_info=True
+                )
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass

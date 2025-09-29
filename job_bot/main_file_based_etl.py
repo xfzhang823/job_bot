@@ -55,22 +55,21 @@ import asyncio  # Add this line to import asyncio
 import matplotlib
 
 # User defined
-from pipelines.run_pipelines import (
+from job_bot.pipelines.run_pipelines import (
     run_pipeline,
     run_pipeline_async,
 )
-from pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
-from project_config import (
+from job_bot.pipeline_config import PIPELINE_CONFIG, DEFAULT_MODEL_IDS
+from job_bot.pipelines.filter_job_posting_urls_mini_pipeline import (
+    run_filtering_job_posting_urls_mini_pipe_line,
+)
+from job_bot.config.project_config import (
     OPENAI,
     ANTHROPIC,
     CLAUDE_SONNET_3_5,
     GPT_35_TURBO,
     GPT_4_1_NANO,
     CLAUDE_HAIKU,
-)
-
-from pipelines.filter_job_posting_urls_mini_pipeline import (
-    run_filtering_job_posting_urls_mini_pipe_line,
 )
 
 

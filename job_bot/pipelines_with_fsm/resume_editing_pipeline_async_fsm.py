@@ -1,409 +1,358 @@
-import os
-import json
-from pathlib import Path, WindowsPath
-import logging
-from typing import Union
+"""
+pipelines_with_fsm/resume_editing_pipeline_async_fsm.py
+
+DB-native Resume Editing Pipeline (FSM-driven; async; no filesystem I/O)
+
+Inputs (per URL):
+  - Worklist:  FLATTENED_RESPONSIBILITIES / NEW as default
+  - Tables:    flattened_requirements        (requirement_key, requirement, url, …)
+               flattened_responsibilities    (responsibility_key, responsibility, url, …)
+
+Output (per URL):
+    • edited_responsibilities / NEW
+        Columns: url, responsibility_key, requirement_key, responsibility,
+            iteration, version, llm_provider, stage, status, created_at, updated_at
+
+Per-URL flow:
+  1) FSM: mark IN_PROGRESS for source stage (FLATTENED_RESPONSIBILITIES).
+  2) Load flattened responsibilities + flattened requirements (DuckDB).
+  3) Run async LLM editor (→ ResponsibilityMatches).
+  4) Flatten to row-per-(responsibility_key, requirement_key).
+ 5) INSERT into edited_responsibilities with standard metadata.
+  6) FSM: mark COMPLETE on source; step() → EDITED_RESPONSIBILITIES; mark NEW.
+
+Notes:
+  • Strictly DB-native: no JSON/CSV file I/O.
+  • Uses your pydantic_model_loaders_from_db utilities for
+    rehydration & validation.
+  • Mirrors the structure of your similarity-metrics FSM pipeline
+    (semaphore, gather).
+"""
+
+from __future__ import annotations
+
 import asyncio
-from pydantic import HttpUrl
+import logging
+from typing import Any, Dict, List, Optional, Sequence
+import pandas as pd
 
-from models.resume_job_description_io_models import (
-    ResponsibilityMatch,
-    ResponsibilityMatches,
-    Responsibilities,
-    Requirements,
-    NestedResponsibilities,
+# Pipeline enums / metadata
+from job_bot.db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    TableName,
+    Version,
 )
-from evaluation_optimization.resume_editor import TextEditor
-from evaluation_optimization.text_similarity_finder import AsymmetricTextSimilarity
-from evaluation_optimization.metrics_calculator import categorize_scores
 
-# Import from non parallell version for now!
-# from evaluation_optimization.resumes_editing import modify_multi_resps_based_on_reqs
-from evaluation_optimization.resumes_editing_async import (
+# FSM
+from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
+
+# Worklist + IO
+from job_bot.db_io.db_utils import get_urls_by_stage_and_status
+from job_bot.db_io.db_transform import add_metadata
+from job_bot.db_io.db_inserters import insert_df_with_config
+from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
+
+# Readers for inputs
+from job_bot.db_io.db_readers import (
+    fetch_flattened_requirements,
+    fetch_flattened_responsibilities,
+)
+
+# The async editor that rewrites responsibilities against requirements
+from job_bot.evaluation_optimization.resumes_editing_async import (
     modify_multi_resps_based_on_reqs_async,
 )
 
-from utils.pydantic_model_loaders_from_files import (
-    load_job_file_mappings_model,
-)
-from utils.generic_utils import (
-    inspect_json_structure,
-    read_from_json_file,
-    verify_dir,
-    verify_file,
-)
-from utils.generic_utils_async import save_data_to_json_file_async
-from project_config import OPENAI, GPT_35_TURBO, GPT_4_1_NANO
+# Pyd models (for types)
+from job_bot.models.resume_job_description_io_models import ResponsibilityMatches
 
+# Configs
+from job_bot.config.project_config import OPENAI, GPT_4_1_NANO, ANTHROPIC, CLAUDE_HAIKU
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
-import time
 
-
-async def debug_log(msg: str):
-    logger.info(f"[DEBUG] {msg} | Time: {time.time()}")
-
-
-def check_mapping_keys(file_mapping_prev: dict, file_mapping_curr: dict) -> dict:
+# =============================================================================
+# Per-URL worker
+# =============================================================================
+async def edit_and_persist_responsibilities_for_url(
+    url: str,
+    *,
+    fsm_manager: PipelineFSMManager,
+    semaphore: asyncio.Semaphore,
+    iteration: int | None = None,
+    llm_provider: str,
+    model_id: str,
+    no_of_concurrent_workers_for_llm: int = 3,
+) -> bool:
     """
-    Check if the keys (URLs) in the previous and current mapping files are the same.
+    Rewrite (edit) responsibilities for a single URL and persist them
+    (DuckDB + FSM).
+
+    Overview
+    --------
+    This function performs the "editing" stage for one job posting:
+      - Guards on FSM stage: only runs if the URL is at
+        `FLATTENED_RESPONSIBILITIES`.
+      - Marks the control row as IN_PROGRESS.
+      - Loads the URL’s flattened responsibilities and flattened requirements
+        from DuckDB.
+      - Calls the async LLM editor (`modify_multi_resps_based_on_reqs`)
+        to produce edited responsibilities aligned to requirements.
+      - Stamps metadata (stage/table/version/iteration/llm_provider)
+        with `add_metadata`.
+      - Inserts rows into `edited_responsibilities` with de-duplication.
+      - Advances the FSM: `COMPLETED` → step() to `EDITED_RESPONSIBILITIES` → `NEW`.
+
+    Concurrency
+    -----------
+    LLM calls are bounded by the provided `semaphore` and an internal
+    `no_of_concurrent_workers_for_llm` inside the editor.
+
+    Error Handling
+    --------------
+    - Any failure (load/validate/insert/FSM/LLM) logs, marks the URL `ERROR`,
+      does **not** advance the FSM, and returns False.
+    - On success, the FSM advances, and the function returns True.
 
     Args:
-        file_mapping_prev (dict): Dictionary loaded from the previous mapping file.
-        file_mapping_curr (dict): Dictionary loaded from the current mapping file.
+        url: Canonical job posting URL.
+        fsm_manager: Shared FSM manager used to read and update pipeline state.
+        semaphore: Async semaphore used to bound URL-level concurrency.
+        iteration: Iteration stamp for auditing/reruns.
+        llm_provider: LLM provider label (e.g., "openai", "anthropic").
+        model_id: LLM model identifier for editing.
+        no_of_concurrent_workers_for_llm: Internal concurrency inside the editor.
 
     Returns:
-        dict: A dictionary containing the keys that are only in the previous or only
-        in the current file.
-
-    Raises:
-        ValueError: If there are differences in the keys between the two mapping files.
+        bool: True on success; False if skipped or failed.
     """
-    prev_keys = set(file_mapping_prev.keys())
-    curr_keys = set(file_mapping_curr.keys())
+    async with semaphore:
+        fsm = fsm_manager.get_fsm(url)
 
-    # Find keys that are only in one of the mappings
-    missing_in_prev = curr_keys - prev_keys
-    missing_in_curr = prev_keys - curr_keys
+        # Guard: only operate when current stage is FLATTENED_RESPONSIBILITIES
+        if fsm.get_current_stage() != PipelineStage.FLATTENED_RESPONSIBILITIES.value:
+            logger.info("⏩ Skipping %s; current stage is %s", url, fsm.state)
+            return False
 
-    if missing_in_prev or missing_in_curr:
-        error_message = (
-            f"Key mismatch detected:\n"
-            f"Missing in previous mapping: {missing_in_prev}\n"
-            f"Missing in current mapping: {missing_in_curr}"
+        # IN_PROGRESS at current stage
+        fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Editing responsibilities…")
+
+        # Load inputs
+        try:
+            resps_df = fetch_flattened_responsibilities(
+                url
+            )  # responsibility_key, responsibility
+            reqs_df = fetch_flattened_requirements(url)  # requirement_key, requirement
+            if resps_df.empty or reqs_df.empty:
+                raise ValueError("Missing flattened responsibilities or requirements")
+
+            # Clean NaNs
+            resps_df = resps_df.dropna(subset=["responsibility_key", "responsibility"])
+            reqs_df = reqs_df.dropna(subset=["requirement_key", "requirement"])
+
+        except Exception:
+            logger.exception("❌ Failed to load inputs for %s", url)
+            fsm.mark_status(PipelineStatus.ERROR, notes="Load inputs failed")
+            return False
+
+        # Build the dicts required by the editor function signature
+        responsibilities: Dict[str, str] = dict(
+            zip(resps_df["responsibility_key"], resps_df["responsibility"])
         )
-        raise ValueError(error_message)
-
-    return {
-        "missing_in_prev": missing_in_prev,
-        "missing_in_curr": missing_in_curr,
-    }
-
-
-def set_directory_paths(
-    mapping_file_prev: Union[str, Path], mapping_file_curr: Union[str, Path]
-) -> dict[HttpUrl, dict[str, WindowsPath]]:
-    """
-    Set the directory paths for processing responsibilities and requirements based on the
-    previous and current mapping files, using Pydantic models for validation.
-
-    This function loads the previous and current iteration mapping files as Pydantic models,
-    validates the mapping keys (URLs), and constructs a dictionary of paths for input/output
-    responsibilities and requirements. It checks the validity of the file paths and logs
-    warnings for any URLs that are missing in the current mapping file.
-
-    Args:
-        - mapping_file_prev (Union[str, Path]): Path to the mapping file for
-        the previous iteration.
-        - mapping_file_curr (Union[str, Path]): Path to the mapping file for
-        the current iteration.
-
-    Returns:
-        dict[HttpUrl, dict[str, Path]]: A dictionary where:
-            - Each key is a validated `HttpUrl` corresponding to a job posting.
-            - Each value is a dictionary containing:
-                - 'requirements_input': Path to the requirements file from
-                the previous iteration.
-                - 'responsibilities_input': Path to the pruned responsibilities file
-                from the previous iteration.
-                - 'responsibilities_output': Path to the responsibilities file for
-                the current iteration.
-
-        All paths are represented using `pathlib.Path` (typically `WindowsPath` on Windows).
-        Entries are only included if all required input files exist.
-
-        If any file is missing or an error occurs, the function logs the issue and skips
-        processing for that URL.
-    """
-    # Convert mapping files to Path objects (if they aren't already)
-    mapping_file_prev = Path(mapping_file_prev)
-    mapping_file_curr = Path(mapping_file_curr)
-
-    # Load the mapping files using the Pydantic model loader
-    file_mapping_prev = load_job_file_mappings_model(mapping_file_prev)
-    file_mapping_curr = load_job_file_mappings_model(mapping_file_curr)
-
-    if file_mapping_prev is None or file_mapping_curr is None:
-        logger.error(
-            f"Failed to load one or both mapping files: {mapping_file_prev}, {mapping_file_curr}"
+        requirements: Dict[str, str] = dict(
+            zip(reqs_df["requirement_key"], reqs_df["requirement"])
         )
-        return {}
 
-    # Extract mappings from the Pydantic models' root attribute
-    file_mapping_prev = file_mapping_prev.root
-    file_mapping_curr = file_mapping_curr.root
-
-    # Initialize dictionary to hold paths
-    paths_dict = {}
-
-    # Iterate through URLs from the previous mapping file
-    for url, prev_paths in file_mapping_prev.items():
-        if url not in file_mapping_curr:
-            logger.warning(
-                f"URL {url} not found in the current iteration's mapping file."
-            )
-            continue
-
-        curr_paths = file_mapping_curr[url]
-
-        # Create the dictionary of paths for the current URL
-        paths_dict[url] = {
-            "requirements_input": Path(
-                prev_paths.reqs
-            ),  # Directly access from the Pydantic model
-            "responsibilities_input": Path(
-                prev_paths.pruned_resps
-            ),  # Access pruned responsibilities
-            "responsibilities_output": Path(
-                curr_paths.resps
-            ),  # Current iteration responsibilities
-        }
-
-        # Verify the file paths and log errors for missing files
-        if not verify_file(paths_dict[url]["requirements_input"]):
-            logger.error(f"Missing requirements file for {url}. Skipping URL.")
-            continue
-        if not verify_file(paths_dict[url]["responsibilities_input"]):
-            logger.error(
-                f"Missing pruned responsibilities file for {url}. Skipping URL."
-            )
-            continue
-
-    logger.info(f"Directory path dictionary:\n{paths_dict}")
-    logger.info("Data structure:")
-    logger.info(json.dumps(inspect_json_structure(paths_dict), indent=2))
-    return paths_dict
-
-
-def verify_directory_paths(mapping_file_prev, mapping_file_curr) -> bool:
-    """Function to test input files exists and output folder exists."""
-    # Get the directory paths
-    paths_dict = set_directory_paths(mapping_file_prev, mapping_file_curr)
-
-    # Flag to track if all verifications pass
-    all_valid = True
-
-    # Check each URL entry and verify input/output paths
-    for url, paths in paths_dict.items():
-        requirements_input = paths["requirements_input"]
-        responsibilities_input = paths["responsibilities_input"]
-        responsibilities_output = paths["responsibilities_output"]
-
-        # Verify if input files exist
-        if not requirements_input.exists():
-            print(
-                f"Error: Requirements input file does not exist for URL {url}: {requirements_input}"
-            )
-            all_valid = False  # Set to False if any file is missing
-        if not responsibilities_input.exists():
-            print(
-                f"Error: Responsibilities input file does not exist for URL {url}: {responsibilities_input}"
-            )
-            all_valid = False
-
-        # Verify if the output directory exists (or create it)
-        if not responsibilities_output.parent.exists():
-            try:
-                print(
-                    f"Creating output directory for URL {url}: {responsibilities_output.parent}"
+        # Call async editor (LLM) to generate edited responsibilities
+        # --- Call the async editor with EXACT signature
+        try:
+            matches: ResponsibilityMatches = (
+                await modify_multi_resps_based_on_reqs_async(
+                    responsibilities=responsibilities,
+                    requirements=requirements,
+                    llm_provider=llm_provider,
+                    model_id=model_id,
+                    no_of_concurrent_workers=no_of_concurrent_workers_for_llm,
                 )
-                responsibilities_output.parent.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                print(f"Failed to create output directory for URL {url}: {e}")
-                all_valid = False
+            )
+        except Exception:
+            logger.exception("❌ Editor failed for %s", url)
+            fsm.mark_status(PipelineStatus.ERROR, notes="LLM editor failed")
+            return False
 
-        # Test writing a small dummy file to the output directory
+        # --- Flatten ResponsibilityMatches → rows
         try:
-            test_file = responsibilities_output.with_name("test_output.txt")
-            with test_file.open("w") as f:
-                f.write("Test output")
-            print(f"Successfully wrote test file to {test_file}")
-            test_file.unlink()  # Optionally remove the test file after verification
-        except Exception as e:
-            print(f"Failed to write to output directory for URL {url}: {e}")
-            all_valid = False
+            # ResponsibilityMatches is a Pydantic wrapper. Get its plain dict.
+            payload: Dict[str, Any] = matches.model_dump() if hasattr(matches, "model_dump") else dict(matches)  # type: ignore
 
-    return all_valid
+            # Expected shape: { resp_key: { req_key: "edited text", ... }, ... }
+            rows: List[Dict[str, Any]] = []
+            for resp_key, by_req in payload.items():
+                if not isinstance(by_req, dict):
+                    logger.warning(
+                        "No per-requirement edits for resp=%s; skipping row(s).",
+                        resp_key,
+                    )
+                    continue
+                for req_key, edited_text in by_req.items():
+                    rows.append(
+                        {
+                            "responsibility_key": resp_key,
+                            "requirement_key": req_key,
+                            "responsibility": str(edited_text),
+                        }
+                    )
 
+            edited_df = pd.DataFrame(rows)
+            if edited_df.empty:
+                raise ValueError("Editor produced no rows")
 
-async def run_resume_editing_pipeline_async(
-    mapping_file_prev: Union[str, Path],
-    mapping_file_curr: Union[str, Path],
-    llm_provider: str = OPENAI,
-    model_id: str = GPT_4_1_NANO,
-    no_of_concurrent_workers: int = 3,
-    filter_keys: list[str] | None = None,  # ✅ New: selected list of urls only!
-) -> None:
-    """
-    Run the pipeline to modify responsibilities based on the previous and current
-    mapping files. The piple uses joblib to process jobs in parallel.
+            # Single call -> stamping (iteration/LLM), alignment, and dedup are handled by inserter/YAML
+            insert_df_with_config(
+                edited_df,
+                TableName.EDITED_RESPONSIBILITIES,
+                url=url,
+                llm_provider=llm_provider,  # ensures the actual provider is recorded
+                model_id=model_id,  # ensures the actual provider is recorded
+            )
 
-    Args:
-        - mapping_file_prev (Union[str, Path]): Path to the mapping file for
-        the previous iteration.
-        - mapping_file_curr (Union[str, Path]): Path to the mapping file for
-        the current iteration.
-        - model (str, optional): Model name to be used for modifications.
-        Defaults to 'openai'.
-        - model_id (str, optional): Specific model version to be used.
-        Defaults to 'gpt-3.5-turbo'.
-        *- filter_keys (list[str] | None, optional): (New) Optional list of
-        * job posting URLs to include.
-        If provided, only jobs matching these keys will be edited.
-        Defaults to None (process all).
+        except Exception:
+            logger.exception("❌ Persist failed for %s", url)
+            fsm.mark_status(PipelineStatus.ERROR, notes="DB insert failed")
+            return False
 
-
-
-    Returns:
-        None
-    """
-    # Step 0: Ensure mapping file paths are Path objects
-    mapping_file_prev = Path(mapping_file_prev)
-    mapping_file_curr = Path(mapping_file_curr)
-
-    # Step 0: Test the file/dir paths
-    if not verify_directory_paths(mapping_file_prev, mapping_file_curr):
-        logger.info("Path verification failed, stopping execution.")
-        return  # early return
-
-    logger.info("I/O dir/file paths are correct. Proceed with processing.")
-
-    # Step 1: Setup directory and file paths
-    paths_dict = set_directory_paths(
-        mapping_file_prev, mapping_file_curr
-    )  #! url in returned dict is httpURL (not str)
-    if not paths_dict:
-        logger.error("Failed to set up directory paths.")
-        return
-
-    logger.info(f"paths_dict:\n{paths_dict}")
-
-    # * Step 1.5: ✅ New; added a filter to selected list of urls (process small batches)
-    if filter_keys:
-        logger.info(f"Filter_keys for editing:\n{filter_keys}")  # Debug
-        paths_dict = {
-            url: paths for url, paths in paths_dict.items() if str(url) in filter_keys
-        }
-        logger.info(f"Filtered file mapping for editing:\n{paths_dict}")  # Debug
-
-    # Step 2: Process each job posting URL and modify responsibilities
-    # Use async.gather
-    for url, paths in paths_dict.items():
-        logger.info(f"Processing job posting from {url}")
-
-        # *Early return if the output file already exists
-        output_file = paths["responsibilities_output"]
-        if output_file.exists():
-            logger.info(f"Output file already exists for {url}, skipping processing.")
-            continue  # Skip further processing for this URL
-
+        # --- Advance FSM to EDITED_RESPONSIBILITIES → NEW
         try:
-            # Extract file paths for requirements and pruned responsibilities
-            reqs_file = paths["requirements_input"]
-            resps_file = paths["responsibilities_input"]
+            fsm.mark_status(PipelineStatus.COMPLETED, notes="Edited → DB")
+            fsm.step()  # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
+            fsm.mark_status(PipelineStatus.NEW, notes="Ready for next stage")
+            logger.info("✅ Editing complete for %s", url)
+            return True
+        except Exception:
+            logger.exception("❌ FSM transition failed for %s", url)
+            fsm.mark_status(PipelineStatus.ERROR, notes="FSM transition failed")
+            return False
 
-            # Load responsibilities and requirements files
-            if not reqs_file.exists() or not resps_file.exists():
-                raise FileNotFoundError(f"Files ({reqs_file} not found for {url}")
 
-            # Load data from JSON files (as dicts) (both dicts)
-            responsibilities = read_from_json_file(resps_file)
-            requirements = read_from_json_file(reqs_file)
+# =============================================================================
+# Batch runner (bounded concurrency)
+# =============================================================================
+async def process_resume_editing_batch_async_fsm(
+    urls: List[str],
+    *,
+    iteration: int = 0,
+    llm_provider: str,
+    model_id: str,
+    max_concurrent_urls: int = 4,
+    no_of_concurrent_workers_for_llm: int = 3,
+) -> list[asyncio.Task]:
+    """
+    Kick off bounded-concurrency editing tasks for a list of URLs.
+    """
+    semaphore = asyncio.Semaphore(max_concurrent_urls)
+    fsm_manager = PipelineFSMManager()
 
-            if not responsibilities or not requirements:
-                raise ValueError(f"Files are empty for {url}")
-
-            # Convert to validated pyd. model
-            validated_responsibilities = Responsibilities(**responsibilities)
-            validated_requirements = Requirements(**requirements)
-
-        except (FileNotFoundError, ValueError) as error:
-            logger.error(error)
-            continue
-
-        # Step 3: Modify responsibilities based on requirements
-        logger.info(f"Modifying responsibilities for {url}...")
-
-        logger.info(
-            f"Before modify_multi_resps_based_on_reqs_async()"
-        )  # todo: debug; delete later
-
-        modified_resps = await modify_multi_resps_based_on_reqs_async(
-            responsibilities=validated_responsibilities.responsibilities,
-            requirements=validated_requirements.requirements,
+    async def _run_one(u: str) -> None:
+        await edit_and_persist_responsibilities_for_url(
+            u,
+            fsm_manager=fsm_manager,
+            semaphore=semaphore,
+            iteration=iteration,
             llm_provider=llm_provider,
             model_id=model_id,
-            no_of_concurrent_workers=no_of_concurrent_workers,  # If running multiple urls, then dial this down to be safe
-        )  # returns model ResponsibilityMatches
-
-        logger.info(
-            f"After modify_multi_resps_based_on_reqs_async()"
-        )  # todo: debug; delete later
-
-        # todo: debug; delete later; Log before moving to NestedResponsibilities
-        logger.info(f"Before constructing NestedResponsibilities")
-        logger.info(f"Type of modified_resps: {type(modified_resps)}")
-        logger.info(
-            f"Is instance of ResponsibilityMatches? {isinstance(modified_resps, ResponsibilityMatches)}"
-        )  # todo: debugging; delete later
-
-        # Step 4: ResponsibilityMatches -> NestedResponsibilities model
-        logger.info(
-            f"Constructing NestedResponsibilities with url: {url}"
-        )  # todo: debug; delete later
-        logger.info(
-            f"URL is {url} and its type is{type(url)}"
-        )  # todo: debug; delete later
-
-        logger.info(
-            f"Attempting to serialize to {output_file}"
-        )  # todo debug; delete later
-        try:
-            # Dump the full modified_resps model into a dictionary
-            modified_resps_dict = modified_resps.model_dump()
-
-            # Extract only the "responsibilities" key, which is now fully converted
-            modified_resps_dict = modified_resps_dict["responsibilities"]
-
-            # Pass the fully converted dictionary to NestedResponsibilities
-            modified_resps_with_url = NestedResponsibilities(
-                url=url,
-                responsibilities=modified_resps_dict,  # now a valid dict format
-            )
-            logger.info(
-                f"Successfully constructed NestedResponsibilities: {modified_resps_with_url}"
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to construct NestedResponsibilities: {e}", exc_info=True
-            )
-            raise
-
-        # todo: debug; delete later
-        logger.info(
-            f"Is instance of NestedResponsibilities? {isinstance(modified_resps_with_url, NestedResponsibilities)}"
+            no_of_concurrent_workers_for_llm=no_of_concurrent_workers_for_llm,
         )
-        logger.info(f"After adding url: {modified_resps_with_url}")
-        logger.info(
-            f"Before saving modified responsibilities to JSON"
-        )  # todo: debug; Log before file save; delete later
 
-        # Step 5: Save the modified responsibilities
-        output_file = paths["responsibilities_output"]
-        logger.info(f"Attempting to serialize to {output_file}")
+    return [asyncio.create_task(_run_one(u)) for u in urls]
 
-        try:
-            modified_resps_dict = modified_resps_with_url.model_dump()
-            logger.info(f"Serialized dict (preview): {str(modified_resps_dict)[:1000]}")
-        except Exception as e:
-            logger.error(f"Serialization failed: {e}", exc_info=True)
-            raise
-        await debug_log("Before file write")
-        await save_data_to_json_file_async(modified_resps_dict, output_file)
-        await debug_log("After file write")
 
-        logger.info(f"Modified responsibilities for {url} saved to {output_file}")
+# =============================================================================
+# Entrypoint (stage worklist → tasks → await)
+# =============================================================================
+async def run_resume_editing_pipeline_async_fsm(
+    *,
+    iteration: int = 0,
+    llm_provider: str = OPENAI,
+    model_id: str = GPT_4_1_NANO,
+    max_concurrent_urls: int = 4,
+    no_of_concurrent_workers_for_llm: int = 3,
+    filter_urls: Optional[Sequence[str]] = None,
+    limit_urls: Optional[int] = None,
+) -> None:
+    """
+    FSM-aware entrypoint for **editing** flattened responsibilities and persisting
+    them into DuckDB.
 
-    logger.info("Pipeline execution completed.")
+    What It Does
+    ------------
+    - Queries the `pipeline_control` table for all job URLs currently at
+      stage = `FLATTENED_RESPONSIBILITIES` with status = `NEW`.
+    - Optionally filters this list to a caller-provided subset (`filter_urls`) and
+      trims with `limit_urls`.
+    *- For each eligible URL:
+        * Loads flattened responsibilities + flattened requirements (DuckDB).
+        * Runs the async editor to produce LLM-edited responsibilities.
+        * Stamps standard metadata (stage, iteration, version='edited', llm_provider).
+        * Inserts deduplicated rows into `edited_responsibilities`.
+        * Advances the FSM: mark current stage `COMPLETED` →
+          step() to `EDITED_RESPONSIBILITIES` →
+          mark new stage `NEW`.
+    - Runs all URLs concurrently, bounded by `max_concurrent_urls`.
+
+    Concurrency
+    -----------
+    - Uses a stage-level semaphore. The editor can also run multiple
+        internal workers per-URL (`no_of_concurrent_workers_for_llm`).
+
+    Error Handling
+    --------------
+    - If no URLs match, the function logs and returns early.
+    - For individual URLs:
+        * Any load/LLM/insert/FSM error logs, marks status = `ERROR`,
+          does not advance, and continues with other URLs.
+    - The pipeline completes even if some URLs fail.
+
+    Args:
+        iteration: Iteration stamp to apply on output rows.
+        llm_provider: Provider label used for stamping (e.g., "openai").
+        model_id: Model ID used by the editing function.
+        max_concurrent_urls: Maximum number of concurrent URL tasks.
+        no_of_concurrent_workers_for_llm: Internal concurrency per URL
+            in the editor.
+        filter_urls: Optional subset of URLs to process.
+        limit_urls: Optional cap on how many URLs to pull.
+
+    Returns:
+        None. Side effects include writing rows to DuckDB and updating the
+        `pipeline_control` FSM state.
+    """
+    # Select urls to process (stage / version)
+    urls = get_urls_by_stage_and_status(
+        stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
+        status=PipelineStatus.NEW,
+    )
+
+    if filter_urls:
+        urls = [u for u in urls if u in filter_urls]
+    if not urls:
+        logger.info("📭 No URLs to edit at 'flattened_responsibilities' stage.")
+        return
+    if limit_urls:
+        urls = urls[:limit_urls]
+
+    logger.info("✏️ Editing responsibilities for %d URL(s)…", len(urls))
+
+    tasks = await process_resume_editing_batch_async_fsm(
+        urls=urls,
+        iteration=iteration,
+        llm_provider=llm_provider,
+        model_id=model_id,
+        max_concurrent_urls=max_concurrent_urls,
+        no_of_concurrent_workers_for_llm=no_of_concurrent_workers_for_llm,
+    )
+
+    await asyncio.gather(*tasks)
+
+    logger.info("✅ Finished resume editing FSM pipeline.")
