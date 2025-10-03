@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import logging
+from collections import OrderedDict
 
 # root_dir = Path(__file__).resolve().parent.parent / "src"
 # sys.path.append(str(root_dir))
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 # Function to flatten a dict
-def flatten_dict(d, parent_key="", sep="."):
+def flatten_dict(d, parent_key="", sep=".") -> Dict[str, Any]:
     """
     Flattens a nested dictionary.
 
@@ -23,8 +24,10 @@ def flatten_dict(d, parent_key="", sep="."):
     Returns:
         dict: A flattened dictionary.
     """
-    items = []
-    for k, v in d.items():
+    items: List[tuple[str, Any]] = []
+    od = _ensure_ordered(d)
+
+    for k, v in od.items():  # ← no enumerate here
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
         if isinstance(v, dict):
             items.extend(flatten_dict(v, new_key, sep=sep).items())
@@ -36,7 +39,7 @@ def flatten_dict(d, parent_key="", sep="."):
 
 
 # Funct to flatten a list
-def flatten_list(lst, parent_key: Optional[str] = "", sep: str = "."):
+def flatten_list(lst, parent_key: Optional[str] = "", sep: str = ".") -> Dict[str, Any]:
     """
     Flattens a nested list.
 
@@ -62,7 +65,7 @@ def flatten_list(lst, parent_key: Optional[str] = "", sep: str = "."):
 
 def flatten_dict_and_list(
     obj: Union[Dict, List, Any], parent_key: str = "", sep: str = "."
-):
+) -> Dict[str, Any]:
     """
     Flattens a nested structure that could be a dictionary or a list.
 
@@ -298,6 +301,11 @@ def fetch_branches(d, search_key=None, search_value=None):
                         branches.append(item)
 
     return branches
+
+
+def _ensure_ordered(d: Dict[str, Any]) -> "OrderedDict[str, Any]":
+    # Python 3.7+ preserves insertion order, but make it explicit for clarity/tests.
+    return OrderedDict(d.items())
 
 
 # testing

@@ -85,8 +85,8 @@ class PipelineStage(str, Enum):
     FINAL_RESPONSIBILITIES = "final_responsibilities"  # manually trimmed/pruned output
 
     @classmethod
-    def list(cls) -> list[str]:
-        return [stage.value for stage in cls]
+    def list(cls) -> list["PipelineStage"]:
+        return list(cls)
 
 
 class PipelineStatus(str, Enum):
@@ -112,6 +112,34 @@ class PipelineStatus(str, Enum):
     @classmethod
     def list(cls) -> list[str]:
         return [stage.value for stage in cls]
+
+
+class PipelineProcessStatus(str, Enum):
+    """
+    High-level lifecycle status for a pipeline run (per URL/iteration).
+
+    This enum is distinct from per-stage `PipelineStatus`:
+    - `PipelineStatus` tracks work progress *within* a stage
+      (e.g., NEW → IN_PROGRESS → DONE/ERROR).
+    - `PipelineProcessStatus` tracks the *entire pipeline iteration*
+      from start to finish.
+
+    States:
+        NEW:
+            Pipeline has never been started for this URL/iteration.
+        RUNNING:
+            Pipeline is actively processing one or more stages.
+        COMPLETED:
+            Pipeline reached its final stage successfully.
+        SKIPPED:
+            Pipeline was intentionally bypassed (manual decision,
+            filtering, or early exit).
+    """
+
+    NEW = "new"  # never touched
+    RUNNING = "running"  # actively in pipeline
+    COMPLETED = "completed"  # reached final stage OK
+    SKIPPED = "skipped"  # intentionally not run (manual decision, filter, etc.)
 
 
 class TableName(str, Enum):

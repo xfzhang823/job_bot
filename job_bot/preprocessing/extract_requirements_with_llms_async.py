@@ -3,14 +3,17 @@ extract_requirements_with_llms.py
 Helper functions to extract requirements with LLMs.
 """
 
+# Standard / 3rd party
 import logging
-from typing import Any, Dict
-from llm_providers.llm_api_utils_async import (
+from typing import Dict
+
+# User defined
+from job_bot.llm_providers.llm_api_utils_async import (
     call_anthropic_api_async,
     call_openai_api_async,
 )
-from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
-from models.llm_response_models import RequirementsResponse
+from job_bot.prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT
+from job_bot.models.llm_response_models import RequirementsResponse
 from job_bot.config.project_config import (
     GPT_35_TURBO,
     GPT_4_1_NANO,
@@ -147,10 +150,10 @@ async def extract_job_requirements_with_anthropic_async(
     # Validate that the response is in the expected JobSiteResponseModel format
     if not isinstance(response_model, RequirementsResponse):
         logger.error(
-            "Received response is not in expected JobSiteResponseModel format."
+            "Received response is not in expected RequirementsResponse model format."
         )
         raise ValueError(
-            "Received response is not in expected JobSiteResponseModel format."
+            "Received response is not in expected RequirementsResponse model format."
         )
 
     # Return pydantic model (do not model_dump() to dict)

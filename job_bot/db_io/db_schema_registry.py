@@ -76,6 +76,10 @@ STANDARD_METADATA_FIELDS = {
     "version",
     "resp_llm_provider",
     "resp_model_id",
+    # FSM control
+    "stage",
+    "status",
+    "process_status",
 }
 
 # --- 🔒 Explicit column order per table (authoritative) ---
@@ -86,6 +90,9 @@ DUCKDB_COLUMN_ORDER = {
         "iteration",
         "stage",
         "status",
+        "process_status",
+        "decision_flag",  # NEW: 1 / 0 (go / no go)
+        "transition_flag",  # NEW 1 / 0 (have applied / not applied)
         "version",
         "source_file",
         "notes",
@@ -203,10 +210,10 @@ class TableSchema:
 
     def __init__(
         self,
+        *,
         model: Type[BaseModel],
         table_name: str,
         primary_keys: list[str],
-        *,
         column_order: Optional[list[str]] = None,
     ):
         self.model = model
@@ -344,6 +351,7 @@ DUCKDB_SCHEMA_REGISTRY = {
             "url",
             "iteration",
             "requirement_key",
+            "requirement_category_key",
             "llm_provider",
             "model_id",
         ],

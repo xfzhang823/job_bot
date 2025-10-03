@@ -29,6 +29,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import logging
+from datetime import datetime, date
 from typing import Any, cast, Dict, Callable, Mapping, Type, TypeVar, Tuple, List, Union
 import pandas as pd
 from pydantic import BaseModel, HttpUrl, ValidationError
@@ -316,53 +317,120 @@ def rehydrate_job_urls_from_table(df: pd.DataFrame) -> JobPostingUrlsBatch:
     return JobPostingUrlsBatch(validated)
 
 
+# def rehydrate_job_postings_from_table(df: pd.DataFrame) -> JobPostingsBatch:
+#     """
+#     Reconstructs a validated JobPostingsFile model from a wide-format DataFrame.
+
+#     Args:
+#         df (pd.DataFrame): Flattened job postings with one row per job.
+
+#     Returns:
+#         JobPostingsFile: A validated Pydantic model containing all job postings.
+#     """
+#     result: Dict[str, JobSiteResponse] = {}
+
+#     for idx, row in df.iterrows():
+#         try:
+#             url = row.url
+#             content = row.content
+#             parsed_content = json.loads(content) if isinstance(content, str) else {}
+
+#             if not all([row.status, row.job_title, row.company]):
+#                 logger.warning(f"⚠️ Missing required fields at {url} — skipping")
+#                 continue
+
+#             job_data = JobSiteData(
+#                 url=url,
+#                 job_title=row.job_title,
+#                 company=row.company,
+#                 location=row.location,
+#                 salary_info=row.salary_info,
+#                 posted_date=row.posted_date,
+#                 content=parsed_content,
+#             )
+
+#             result[url] = JobSiteResponse(
+#                 status=row.status,
+#                 message=row.message,
+#                 data=job_data,
+#             )
+
+#         except ValidationError as e:
+#             logger.warning(
+#                 f"❌ Validation error rehydrating job posting at {row.url}: {e}"
+#             )
+#         except Exception as e:
+#             logger.error(f"❌ Unexpected error at {row.url}: {e}", exc_info=True)
+
+#     logger.info(f"✅ Rehydrated {len(result)} job postings from DataFrame.")
+#     return JobPostingsBatch(cast(dict[Union[HttpUrl, str], JobSiteResponse], result))
+
+
 def rehydrate_job_postings_from_table(df: pd.DataFrame) -> JobPostingsBatch:
     """
-    Reconstructs a validated JobPostingsFile model from a wide-format DataFrame.
+    Reconstruct JobPostingsBatch from a job_postings DataFrame.
 
     Args:
         df (pd.DataFrame): Flattened job postings with one row per job.
 
     Returns:
         JobPostingsFile: A validated Pydantic model containing all job postings.
+
+    Since DB does not store `status` or `message`, we fill in dummy defaults:
+      - status="success"
+      - message="Rehydrated from DB"
     """
-    result: Dict[str, JobSiteResponse] = {}
+    result: Dict[Union[HttpUrl, str], JobSiteResponse] = {}
+    # result: dict[str, JobSiteResponse] = {}
 
-    for idx, row in df.iterrows():
+    for rec in df.to_dict(orient="records"):
         try:
-            url = row.url
-            content = row.content
-            parsed_content = json.loads(content) if isinstance(content, str) else {}
+            url = rec.get("url")
+            if not url:
+                continue
 
-            if not all([row.status, row.job_title, row.company]):
+            job_title = rec.get("job_title")
+            company = rec.get("company")
+
+            # 🚦 Guard: skip rows missing required fields
+            if not url or not job_title or not company:
                 logger.warning(f"⚠️ Missing required fields at {url} — skipping")
                 continue
 
+            # Required minimum
+            if not all([job_title, company]):
+                continue
+
+            content = rec.get("content")
+            parsed_content = (
+                json.loads(content) if isinstance(content, str) else content or {}
+            )
+
             job_data = JobSiteData(
                 url=url,
-                job_title=row.job_title,
-                company=row.company,
-                location=row.location,
-                salary_info=row.salary_info,
-                posted_date=row.posted_date,
+                job_title=job_title,
+                company=company,
+                location=rec.get("location"),
+                salary_info=rec.get("salary_info"),
+                posted_date=_coerce_posted_date(rec.get("posted_date")),
                 content=parsed_content,
             )
 
+            # 👇 Dummy values here
             result[url] = JobSiteResponse(
-                status=row.status,
-                message=row.message,
+                status="success",
+                message="Rehydrated from DB",
                 data=job_data,
             )
 
         except ValidationError as e:
-            logger.warning(
-                f"❌ Validation error rehydrating job posting at {row.url}: {e}"
+            print(
+                f"❌ Validation error rehydrating job posting at {rec.get('url')}: {e}"
             )
         except Exception as e:
-            logger.error(f"❌ Unexpected error at {row.url}: {e}", exc_info=True)
+            print(f"❌ Unexpected error at {rec.get('url')}: {e}")
 
-    logger.info(f"✅ Rehydrated {len(result)} job postings from DataFrame.")
-    return JobPostingsBatch(cast(dict[Union[HttpUrl, str], JobSiteResponse], result))
+    return JobPostingsBatch(result)
 
 
 # * ☑️ Job Requirements
@@ -507,15 +575,16 @@ def flatten_extracted_requirements_to_table(
                         )
                         continue
 
+                    # Need to generate unique keys for db tbl (PK rule)
+                    category_ = str(category).strip().lower().replace(" ", "_")
+                    composite_key = f"{cat_idx}.{category_}.{item_idx}"  # unique key
                     rows.append(
                         {
                             "url": url_key,
-                            "status": getattr(validated, "status", None),
-                            "message": getattr(validated, "message", None),
                             "requirement_category": category,
                             "requirement_category_key": cat_idx,
                             "requirement": requirement,
-                            "requirement_key": item_idx,
+                            "requirement_key": composite_key,
                         }
                     )
 
@@ -534,13 +603,23 @@ def rehydrate_extracted_requirements_from_table(
     """
     Rehydrate a long extracted-requirements table into `ExtractedRequirementsBatch`.
 
-    Grouping
-    --------
-    Rows are grouped by (url, requirement_category) and ordered by requirement_key.
+    Grouping & Ordering
+    -------------------
+    • Rows are grouped by (url, requirement_category).
+    • Within each category, rows are sorted numerically by the trailing index
+      of the composite `requirement_key` (e.g., "0.down_to_earth.3" → 3).
+    • Composite keys are used only for stable ordering; they are not exposed
+      in the rehydrated NestedRequirements, which remain {category: [list of strings]}.
+
+    Stripping
+    ---------
+    The trailing index is extracted after applying `str(x).strip()` to guard
+    against whitespace around the composite key.
 
     Returns
     -------
     ExtractedRequirementsBatch
+        A validated batch model containing URL → RequirementsResponse.
     """
     result = {}
 
@@ -549,17 +628,35 @@ def rehydrate_extracted_requirements_from_table(
             categories: Dict[str, List[str]] = {}
 
             for category, cat_group in group.groupby("requirement_category"):
-                sorted_items = cat_group.sort_values("requirement_key")[
-                    "requirement"
-                ].tolist()
+                cg = cat_group.copy()
+                # Sort by numeric tail of composite key, e.g. "0.cat.3" → 3
+                cg["_ord"] = cg["requirement_key"].map(
+                    lambda x: int(str(x).strip().rsplit(".", 1)[-1])
+                )
+                sorted_items = cg.sort_values("_ord")["requirement"].tolist()
                 categories[str(category)] = sorted_items
 
             nested = NestedRequirements(**categories)
 
             first = group.iloc[0]
+
+            # status: always a str; default to "success" if missing/NaN
+            raw_status = first["status"] if "status" in first.index else None
+            status_str = (
+                "success"
+                if (raw_status is None or pd.isna(raw_status))
+                else str(raw_status)
+            )
+
+            # message: Optional[str]; coerce NaN -> None
+            raw_msg = first["message"] if "message" in first.index else None
+            message_str = (
+                None if (raw_msg is None or pd.isna(raw_msg)) else str(raw_msg)
+            )
+
             response = RequirementsResponse(
-                status=first["status"],
-                message=first["message"],
+                status=status_str,
+                message=message_str,
                 data=nested,
             )
 
@@ -908,6 +1005,21 @@ def flatten_model_to_df(
         model_id=model_id,  # ignored if table doesn't have it
     )
     return df
+
+
+def _coerce_posted_date(val):
+    # Treat NaT/NaN/None as None
+    if val is None or (isinstance(val, float) and pd.isna(val)) or pd.isna(val):
+        return None
+    # pandas Timestamp / python datetime / date → ISO string "YYYY-MM-DD"
+    if isinstance(val, (pd.Timestamp, datetime, date)):
+        return val.date().isoformat() if hasattr(val, "date") else val.isoformat()
+    # Already a string? strip and normalize empty→None
+    if isinstance(val, str):
+        s = val.strip()
+        return s or None
+    # Fallback: stringify
+    return str(val)
 
 
 # todo: commented out; old code; delete later

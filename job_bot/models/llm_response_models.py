@@ -14,6 +14,7 @@ from pydantic import (
     Field,
     HttpUrl,
     field_serializer,
+    ConfigDict,
 )
 import pandas as pd
 
@@ -356,8 +357,10 @@ class RequirementsResponse(BaseResponseModel):
 
     data: NestedRequirements
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        extra="ignore",
+        use_enum_values=True,
+        json_schema_extra={
             "example": {
                 "status": "success",
                 "message": "Job requirements data processed successfully.",
@@ -367,34 +370,39 @@ class RequirementsResponse(BaseResponseModel):
                         "Motivated by high impact, high visibility work",
                     ],
                     "down_to_earth": [
-                        "Bachelor's degree and MBA degree required, as well as demonstrated record of success",
+                        "Bachelor's degree and MBA degree required",
                         "3-5 years of work experience preferred",
-                        "Strong critical thinking skills with ability to elevate thinking and apply judgment to how components fit into the broader picture",
-                        "Ability to leverage experience and analysis to gain support and influence others",
-                        "Strong quantitative, analytical, and written and oral communication skills",
-                        "Strong leadership skills and ability to work independently and as a member of a team, and coach junior team members",
-                        "Ability to manage multiple priorities, including project work and department responsibilities",
-                        "Advanced proficiency with Microsoft PowerPoint and Excel",
-                        "Insurance or financial services industry experience a plus (not required)",
-                        "Ability to independently navigate and decipher an ambiguous environment",
-                        "Excited about contributing to a dynamic and high-performing team culture",
                     ],
                     "bare_minimum": [
-                        "Bachelor's degree and MBA degree required, as well as demonstrated record of success",
-                        "3-5 years of work experience preferred",
-                        "Strong critical thinking skills with ability to elevate thinking and apply judgment to how components fit into the broader picture",
-                        "Ability to leverage experience and analysis to gain support and influence others",
-                        "Strong quantitative, analytical, and written and oral communication skills",
-                        "Strong leadership skills and ability to work independently and as a member of a team, and coach junior team members",
-                        "Ability to manage multiple priorities, including project work and department responsibilities",
-                        "Advanced proficiency with Microsoft PowerPoint and Excel",
+                        "Bachelor's degree",
+                        "Ability to manage multiple priorities",
                     ],
-                    "cultural_fit": [
-                        "Excited about contributing to a dynamic and high-performing team culture"
-                    ],
-                    "other": [
-                        "Insurance or financial services industry experience a plus (not required)"
-                    ],
+                    "cultural_fit": ["Excited about contributing to a dynamic team"],
+                    "other": ["Insurance industry experience is a plus"],
                 },
-            }
-        }
+            },
+        },
+    )
+
+    @property
+    def requirements_dict(self) -> Dict[str, List[str]]:
+        """
+        Canonical, cleaned dict view of requirements:
+        - keys: category names
+        - values: non-empty, stripped strings
+        """
+        raw = self.data.model_dump(exclude_none=True)  # dict from NestedRequirements
+        out: Dict[str, List[str]] = {}
+        for cat, items in raw.items():
+            if isinstance(items, list):
+                cleaned = [s.strip() for s in items if isinstance(s, str) and s.strip()]
+                if cleaned:
+                    out[str(cat)] = cleaned
+        return out
+
+    def ensure_requirements_dict(self) -> Dict[str, List[str]]:
+        """Return the normalized dict, raising if it’s empty."""
+        rd = self.requirements_dict
+        if not rd or sum(len(v) for v in rd.values()) == 0:
+            raise ValueError("RequirementsResponse has no non-empty requirements.")
+        return rd

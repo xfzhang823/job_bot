@@ -24,31 +24,55 @@ Usage:
     python main_fsm_driven_duckdb.py
 """
 
+# Dependencies
 from __future__ import annotations
+
+# * ✅ Force Transformers & BERTScore to use local cache
+from job_bot.pipelines.hf_cache_refresh_and_lock_pipeline import (
+    run_hf_cache_refresh_and_lock_pipeline,
+)
+
+# Setting environment variables for Transformers to force the library to work entirely
+# from the local cache only!
+run_hf_cache_refresh_and_lock_pipeline(refresh_cache=False)
+
+# from standard/third-party
+import os
 import asyncio
 import logging
+import matplotlib
 
+# User defined
 from job_bot.db_io.create_db_tables import create_all_db_tables
 import job_bot.config.logging_config
 
 # 0) URL intake + control-plane seed
 from job_bot.pipelines_with_fsm.update_job_urls_pipeline_fsm import (
-    run_ingest_job_urls_pipeline_fsm,
+    run_update_job_urls_pipeline_fsm,
 )
 from job_bot.fsm.pipeline_control_sync import (
     sync_job_urls_to_pipeline_control,
+    sync_decision_flags_all,
 )
 
+
 # 1) Stage pipelines
+from job_bot.pipelines_with_fsm.pipe_control_auto_transition_pipeline_fsm import (
+    run_pipe_control_auto_transition_pipeline_fsm,
+)
 from job_bot.pipelines_with_fsm.job_postings_pipeline_async_fsm import (
     run_job_postings_pipeline_async_fsm,
 )
 from job_bot.pipelines_with_fsm.extract_requirements_pipeline_async_fsm import (
     run_extract_job_requirements_pipeline_async_fsm,
 )
-from job_bot.pipelines_with_fsm.flattened_requirements_pipeline_async_fsm import (
+
+# from job_bot.pipelines_with_fsm.flattened_requirements_pipeline_async_fsm import (
+#     run_flattened_requirements_pipeline_async_fsm,
+# )
+from job_bot.pipelines_with_fsm.flattened_requirements_pipeline_async_fsm_temp_fix import (
     run_flattened_requirements_pipeline_async_fsm,
-)
+)  # temp fix to copy from the extracted req table
 from job_bot.pipelines_with_fsm.flattened_responsibilities_pipeline_fsm import (
     run_flattened_responsibilities_pipeline_fsm,
 )
@@ -60,7 +84,10 @@ from job_bot.pipelines_with_fsm.similarity_metrics_pipeline_async_fsm import (
     run_similarity_metrics_reval_async_fsm,
 )
 
+
 logger = logging.getLogger(__name__)
+
+matplotlib.use("Agg")  # Prevent interactive mode
 
 
 async def run_all_fsm(*, append_only_urls: bool = True) -> None:
@@ -92,10 +119,19 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
     create_all_db_tables()
 
     # --- PRE-FLIGHT: update job_urls, then seed control-plane from it ---
-    run_ingest_job_urls_pipeline_fsm(mode="append" if append_only_urls else "replace")
+    run_update_job_urls_pipeline_fsm(mode="append" if append_only_urls else "replace")
 
     sync_job_urls_to_pipeline_control()  # seeds JOB_URLS/NEW in pipeline_control
     logger.info(f"✅ Sync job urls to pipeline control table completed.")
+
+    # sync pipeline control table: auto transition, etc. (idempotent)
+    retried, advanced = run_pipe_control_auto_transition_pipeline_fsm(dry_run=False)
+
+    logger.info(
+        "🔄 Pipeline control auto-transition completed (retried=%s, advanced=%s)",
+        retried,
+        advanced,
+    )
 
     # --- Pipelines in order (each pulls its own worklist from pipeline_control) ---
 
@@ -113,6 +149,8 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
 
     # run on FLATTENED_RESPONSIBILITIES
     await run_similarity_metrics_eval_async_fsm()
+
+    return
 
     # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
     await run_resume_editing_pipeline_async_fsm()

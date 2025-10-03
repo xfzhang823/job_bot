@@ -10,7 +10,8 @@ only manages orchestration state so stage pipelines know what to process next.
 
 Core responsibilities:
 - Initialize FSM state for new URLs (one row per url/iteration).
-- Incrementally sync metadata (e.g., source_file, version) into pipeline_control.
+- Incrementally sync metadata (e.g., source_file, version) into
+    pipeline_control.
 - Preserve existing stage/status unless explicitly overridden.
 - Run optional FSM integrity checks.
 
@@ -30,7 +31,7 @@ state, forming the backbone of FSM-driven orchestration.
 
 from __future__ import annotations
 import logging
-from typing import Dict, List, Optional, Literal, Iterable
+from typing import Optional, Literal, Iterable
 
 from job_bot.db_io.get_db_connection import get_db_connection
 from job_bot.db_io.create_db_tables import create_single_db_table
@@ -38,9 +39,16 @@ from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,
+    PipelineProcessStatus,
     TableName,
 )
 from job_bot.fsm.check_pipeline_fsm import check_fsm_integrity
+from job_bot.db_io.state_sync import (
+    retry_error_one,
+    advance_completed_one,
+)
+from db_io.db_utils import get_urls_from_pipeline_control
+
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +73,125 @@ def list_intersection(a: Iterable[str], b: Iterable[str]) -> list[str]:
 
 
 # -------------------------------
+# Sync to set decision flat to 1 (if stuck on 0)
+# -------------------------------
+
+
+def sync_decision_flags_all(
+    *,
+    table_name: TableName = TableName.PIPELINE_CONTROL,
+    con=None,
+) -> int:
+    """
+    Recompute decision_flag for ALL rows in pipeline_control and reset transition_flag to 0.
+
+    Rule:
+      decision_flag = 0 if status IN {COMPLETED, SKIPPED}
+                      or process_status IN {COMPLETED, SKIPPED}
+                      else 1
+    """
+    owns_con = con is None
+    if owns_con:
+        con = get_db_connection()
+    try:
+        st_completed = PipelineStatus.COMPLETED.value
+        st_skipped = getattr(PipelineStatus, "SKIPPED", PipelineStatus.COMPLETED).value
+        ps_completed = PipelineProcessStatus.COMPLETED.value
+        ps_skipped = getattr(
+            PipelineProcessStatus, "SKIPPED", PipelineProcessStatus.COMPLETED
+        ).value
+
+        res = con.execute(
+            f"""
+            UPDATE {table_name.value}
+            SET decision_flag = CASE
+                                   WHEN status IN (?, ?) OR process_status IN (?, ?)
+                                   THEN 0 ELSE 1
+                                END,
+                transition_flag = 0,
+                updated_at = now()
+            """,
+            (st_completed, st_skipped, ps_completed, ps_skipped),
+        )
+        updated = getattr(res, "rowcount", 0)
+        logger.info("🔄 decision_flag full-table sync updated %s rows.", updated)
+        return updated
+    finally:
+        if owns_con:
+            con.close()
+
+
+# -------------------------------
+# Sync to advance stage (ensure that existing pipeline control is not "stuck")
+# -------------------------------
+
+
+def fsm_retry_errors_all(
+    *,
+    dry_run: bool = False,
+    table: TableName = TableName.PIPELINE_CONTROL,
+) -> int:
+    """
+    Find URLs whose *status* == ERROR and call retry_error_one(url).
+    Only touches `status`, never `process_status`.
+    """
+    urls = get_urls_from_pipeline_control(
+        status=PipelineStatus.ERROR, active_urls_only=True
+    )
+    if dry_run:
+        for u in urls:
+            logger.info("DRY-RUN retry_error_one → %s", u)
+        return len(urls)
+
+    changed = 0
+    for u in urls:
+        try:
+            if retry_error_one(u, table=table):
+                changed += 1
+        except Exception:
+            logger.exception("retry_error_one failed for %s", u)
+    logger.info("♻️ Auto-retry: %s / %s URLs reset to NEW", changed, len(urls))
+    return changed
+
+
+def fsm_auto_advance_completed_all(
+    *,
+    dry_run: bool = False,
+    table: TableName = TableName.PIPELINE_CONTROL,
+) -> int:
+    """
+    Find URLs whose *status* ==
+    COMPLETED and advance one stage (status -> NEW)
+    via advance_completed_one(url).
+
+    Only touches `status`, never `process_status`.
+    """
+    urls = get_urls_from_pipeline_control(
+        status=PipelineStatus.COMPLETED, active_urls_only=True
+    )
+
+    logger.debug(f"urls selected to update: {urls}")  # todo: debug; delete later
+    if dry_run:
+        for u in urls:
+            logger.info("DRY-RUN advance_completed_one → %s", u)
+        return len(urls)
+
+    moved = 0
+    for u in urls:
+        try:
+            if advance_completed_one(u, table=table):
+                moved += 1
+        except Exception:
+            logger.exception("advance_completed_one failed for %s", u)
+    logger.info(
+        "➡️ Auto-advance: %s / %s URLs moved to next stage (status=NEW)",
+        moved,
+        len(urls),
+    )
+    return moved
+
+
+# -------------------------------
 # Generic control-plane sync
 # -------------------------------
 
@@ -78,6 +205,7 @@ def sync_table_to_pipeline_control(
     preserve_stage_on_update: bool = True,
     preserve_status_on_update: bool = True,
     set_status_on_insert: PipelineStatus = PipelineStatus.NEW,
+    set_process_status_on_insert: PipelineProcessStatus = PipelineProcessStatus.NEW,
     mode: Literal["append", "replace"] = "append",
     notes: Optional[str] = None,
 ) -> None:
@@ -85,9 +213,15 @@ def sync_table_to_pipeline_control(
     Incremental sync of stage table rows into `pipeline_control`.
 
     This function keeps the control-plane table aligned with data in a
-    given source stage table. By default it operates in **incremental mode**:
-    only inserting missing rows and refreshing selected metadata fields,
-    without disturbing existing FSM stage or status values.
+    given source stage table.
+
+    By default it operates in incremental mode:
+        only inserting missing rows and refreshing selected metadata fields,
+        without disturbing existing FSM stage or status values.
+
+    This sync sets process_status=NEW for newly inserted control rows.
+    Existing rows’ lifecycle is not modified;
+    lifecycle is owned by the FSM/orchestrators.
 
     Behavior
     --------
@@ -105,18 +239,37 @@ def sync_table_to_pipeline_control(
     ----------
     source_table : TableName
         Stage/source table to sync from (e.g., JOB_URLS, JOB_POSTINGS).
+
     stage : PipelineStage
         Pipeline stage to assign on INSERT for these rows.
+
     insert_only : bool, default=True
         If True, insert only missing rows.
+
+    mode : Literal["append", "replace"], default="append"
+        If "append", INSERT only the rows that don't exist in `pipeline_control`.
+        If "replace", DELETE matching control rows first and then re-INSERT all rows
+        from the source table (used for bootstrap/recovery scenarios).
+
     refresh_meta_fields : tuple[str, ...], default=("source_file",)
-        Metadata fields to refresh on existing rows (does not affect stage/status).
+        Metadata columns to refresh on existing rows. This never touches orchestration
+        columns: `stage`, `status`, `decision_flag`, `transition_flag`, `created_at`,
+        or `updated_at`.
+
     preserve_stage_on_update : bool, default=True
         If True, never overwrite an existing `stage` value.
+
     preserve_status_on_update : bool, default=True
         If True, never overwrite an existing `status` value.
+
     set_status_on_insert : PipelineStatus, default=PipelineStatus.NEW
         Status to assign on newly inserted rows.
+
+    set_process_status_on_insert :
+        PipelineProcessStatus, default=PipelineProcessStatus.NEW
+        Process status to indicate whether a URL/job should be processed
+            (vs skipped, completed, etc.).
+
     notes : str, optional
         Free-text notes to attach to inserted control rows.
 
@@ -170,6 +323,14 @@ def sync_table_to_pipeline_control(
             )
         elif col == "status":
             select_exprs.append(f"{sql_str_lit(set_status_on_insert.value)} AS status")
+        elif col == "process_status":
+            select_exprs.append(
+                f"{sql_str_lit(set_process_status_on_insert.value)} AS process_status"
+            )
+        elif col == "decision_flag":  # <-- NEW
+            select_exprs.append("0 AS decision_flag")
+        elif col == "transition_flag":  # <-- NEW
+            select_exprs.append("0 AS transition_flag")
         elif col == "notes":
             select_exprs.append(
                 ("NULL" if notes is None else sql_str_lit(notes)) + " AS notes"
@@ -185,8 +346,8 @@ def sync_table_to_pipeline_control(
                 (f"j.{col} AS {col}") if col in src_cols else f"NULL AS {col}"
             )
 
-    insert_cols_sql = ", ".join(control_cols)
-    select_cols_sql = ",\n        ".join(select_exprs)
+        insert_cols_sql = ", ".join(control_cols)
+        select_cols_sql = ",\n        ".join(select_exprs)
 
     # 1) INSERT new rows (append mode)
     if insert_only or mode == "append":
@@ -225,8 +386,14 @@ def sync_table_to_pipeline_control(
     # 3) Refresh selected metadata fields when they exist in source
     if refresh_meta_fields:
         # columns we are allowed to refresh (excluding orchestration fields)
-        blocked = {"stage", "status", "created_at", "updated_at"}
-        # start with user-provided list ∩ (present-in-source) ∩ (present-in-control)
+        blocked = {
+            "stage",
+            "status",
+            "created_at",
+            "updated_at",
+            "decision_flag",
+            "transition_flag",
+        }  # start with user-provided list ∩ (present-in-source) ∩ (present-in-control)
         refresh_set = {
             col
             for col in refresh_meta_fields
@@ -330,6 +497,23 @@ def sync_all_tables_to_pipeline_control(
                 f"⚠️ Could not ensure pipeline_control table exists: {e}", exc_info=True
             )
 
+        # NEW: normalize any historical NULLs → 0
+        try:
+            con = get_db_connection()
+            try:
+                con.execute(
+                    """
+                    UPDATE pipeline_control
+                    SET decision_flag = COALESCE(decision_flag, 0),
+                        transition_flag = COALESCE(transition_flag, 0)
+                    WHERE decision_flag IS NULL OR transition_flag IS NULL
+                """
+                )
+            finally:
+                con.close()
+        except Exception as e:
+            logger.warning("⚠️ Could not backfill NULL flags to 0: %s", e, exc_info=True)
+
     if full:
         for item in SYNC_PLAN:
             try:
@@ -344,6 +528,7 @@ def sync_all_tables_to_pipeline_control(
                     ),
                     preserve_stage_on_update=True,
                     preserve_status_on_update=True,
+                    set_process_status_on_insert=PipelineProcessStatus.NEW,
                     mode="append",
                 )
             except Exception as e:
@@ -424,6 +609,7 @@ def sync_job_urls_to_pipeline_control():
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.NEW,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
 
 
@@ -437,6 +623,7 @@ def sync_job_postings_to_pipeline_control():
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
 
 
@@ -450,6 +637,7 @@ def sync_extracted_requirements_to_pipeline_control():
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
 
 
@@ -463,6 +651,7 @@ def sync_flattened_requirements_to_pipeline_control():
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
 
 
@@ -476,6 +665,7 @@ def sync_flattened_responsibilities_to_pipeline_control():
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
 
 
@@ -492,6 +682,7 @@ def sync_edited_responsibilities_to_pipeline_control():
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
 
 
@@ -503,8 +694,9 @@ def sync_similarity_metrics_to_pipeline_control():
         source_table=TableName.SIMILARITY_METRICS,
         stage=PipelineStage.SIM_METRICS_EVAL,
         insert_only=True,
-        refresh_meta_fields=("source_file",),  # ← no 'version' here
+        refresh_meta_fields=("source_file",),
         preserve_stage_on_update=True,
         preserve_status_on_update=True,
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
+        set_process_status_on_insert=PipelineProcessStatus.NEW,
     )

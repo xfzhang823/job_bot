@@ -15,6 +15,8 @@ from pydantic import (
     field_validator,
     DirectoryPath,
     RootModel,
+    ConfigDict,
+    model_validator,
 )
 from pydantic_core import Url
 
@@ -705,7 +707,55 @@ class ExtractedRequirementsBatch(
         - Used in both JSON-based pipelines and DB-driven ingestion stages.
     """
 
-    pass
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_keys_and_values(cls, v):
+        """
+        Accept either:
+          {str|AnyUrl: RequirementsResponse|dict}
+        Coerce keys -> str; values -> RequirementsResponse (normalized).
+        """
+        if not isinstance(v, dict):
+            raise TypeError("ExtractedRequirementsBatch expects a dict-like mapping")
+
+        out: Dict[str, RequirementsResponse] = {}
+        for k, val in v.items():
+            # 1) normalize key to string
+            ks = str(k)
+
+            # 2) normalize value to RequirementsResponse
+            if isinstance(val, RequirementsResponse):
+                rr = val
+            elif isinstance(val, dict):
+                rr = RequirementsResponse.model_validate(val)
+            else:
+                raise TypeError(
+                    f"Value for {ks} must be RequirementsResponse or dict, got {type(val)}"
+                )
+
+            # 3) force normalization (builds internal _norm)
+            _ = rr.requirements_dict  # access property to ensure normalization path ran
+
+            out[ks] = rr
+        return out
+
+    @field_serializer("root")
+    def _serialize_root(self, root: Dict[str, RequirementsResponse], _info):
+        """Ensure JSON dumps with string keys (URLs) and validated values."""
+        return {str(k): v for k, v in root.items()}
+
+    # Convenience helpers
+    def get_requirements_dict(self, url: str) -> Dict[str, list[str]]:
+        rr = self.root.get(url)
+        if rr is None:
+            return {}
+        return rr.requirements_dict
+
+    def ensure_nonempty(self, url: str) -> Dict[str, list[str]]:
+        rr = self.root.get(url)
+        if rr is None:
+            raise KeyError(f"No requirements found for URL: {url}")
+        return rr.ensure_requirements_dict()
 
 
 class PipelineInput(BaseModel):

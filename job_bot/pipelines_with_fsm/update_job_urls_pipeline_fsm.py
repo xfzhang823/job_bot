@@ -18,7 +18,7 @@ from job_bot.utils.pydantic_model_loaders_for_files import (
 logger = logging.getLogger(__name__)
 
 
-def run_ingest_job_urls_pipeline_fsm(
+def run_update_job_urls_pipeline_fsm(
     file_path: Path | str = JOB_POSTING_URLS_FILE,
     mode: Literal["append", "replace"] = "append",
 ) -> None:

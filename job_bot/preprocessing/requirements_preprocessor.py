@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 # User defined
-from utils.generic_utils import read_from_json_file
-from utils.flatten_and_search import fetch_subtrees, flatten_dict_and_list
+from job_bot.utils.generic_utils import read_from_json_file
+from job_bot.utils.flatten_and_search import fetch_subtrees, flatten_dict_and_list
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -20,7 +20,8 @@ class JobRequirementsParser:
     Attributes:
         - json_path (Path | str): Path to the job requirements JSON file.
         - url (str): Job posting URL to extract requirements from.
-        - job_reqs_dict (Optional[Dict[str, List[str]]]): The parsed job requirements.
+        - job_reqs_dict (Optional[Dict[str, List[str]]]):
+            The parsed job requirements.
     """
 
     def __init__(self, json_path: Union[Path, str], url: str):
@@ -179,7 +180,7 @@ class JobRequirementsParser:
             logging.error("Invalid job requirements data.")
             return None
 
-    def extract_flatten_reqs(self) -> Dict[str, str]:
+    def extract_flattened_reqs(self) -> Dict[str, str]:
         """
         Extract and flatten more relevant job requirements into a dictionary.
         Each requirement is keyed by a unique identifier.
@@ -224,7 +225,7 @@ class JobRequirementsParser:
             "5+ years of experience in software development\nStrong knowledge of \
 Python\nEnglish proficiency required"
         """
-        merged_flat_dict = self.extract_flatten_reqs()
+        merged_flat_dict = self.extract_flattened_reqs()
 
         if not merged_flat_dict:
             logging.warning("No job requirements found to concatenate.")

@@ -19,7 +19,7 @@ from job_bot.utils.get_file_names import get_file_names
 from job_bot.evaluation_optimization.multivariate_indexer import MultivariateIndexer
 from job_bot.preprocessing.resume_preprocessor import ResumeParser
 from job_bot.preprocessing.requirements_preprocessor import JobRequirementsParser
-
+from job_bot.utils.generic_utils import save_to_json_file
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -478,7 +478,7 @@ def process_and_save_requirements_by_url(
 
     # Parse and flatten job requirements based on a URL
     job_reqs_parser = JobRequirementsParser(requirements_json_file, url)
-    reqs_flat = job_reqs_parser.extract_flatten_reqs()
+    reqs_flat = job_reqs_parser.extract_flattened_reqs()
 
     # Wrap under `requirements` and include the URL
     wrapped_reqs_flat = {

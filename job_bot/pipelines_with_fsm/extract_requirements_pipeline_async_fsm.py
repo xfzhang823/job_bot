@@ -29,7 +29,7 @@ from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.flatten_and_rehydrate import flatten_model_to_df
 from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 from job_bot.db_io.state_sync import load_pipeline_state
-from job_bot.db_io.db_utils import get_urls_by_stage_and_status
+from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_loaders import load_table
 
 from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
@@ -44,7 +44,7 @@ from job_bot.preprocessing.extract_requirements_with_llms_async import (
     extract_job_requirements_with_anthropic_async,
 )
 
-# Optional (best-effort) control-plane sync after each URL
+# Control-plane sync after each URL
 from job_bot.fsm.pipeline_control_sync import (
     sync_job_postings_to_pipeline_control,
 )
@@ -68,17 +68,16 @@ async def extract_and_persist_requirements_for_url(
     no filesystem).
 
     This function:
-      1) Guards on FSM: only runs when the URL's current stage is `JOB_POSTINGS`.
-      2) Marks the control row `IN_PROGRESS`.
-      3) Loads the structured job description for `url` from DuckDB (`job_postings`).
-      4) Validates/serializes the description into a JSON string for LLM input.
-      5) Uses a bounded semaphore to call the LLM (via `_extract_job_requirements`) and
+      Marks the control row `IN_PROGRESS`.
+      Loads the structured job description for `url` from DuckDB (`job_postings`).
+      Validates/serializes the description into a JSON string for LLM input.
+      Uses a bounded semaphore to call the LLM (via `_extract_job_requirements`) and
          returns a typed `RequirementsResponse`.
-      6) Flattens and inserts the result into DuckDB (`extracted_requirements`) with
+      Flattens and inserts the result into DuckDB (`extracted_requirements`) with
          de-duplication.
-      7) Advances the FSM: mark current stage `COMPLETED` → `step()` to
+      Advances the FSM: mark current stage `COMPLETED` → `step()` to
          `EXTRACTED_REQUIREMENTS` → mark new stage `NEW`.
-      8) Optionally syncs control-plane views (`sync_job_postings_to_pipeline_control`)
+      Optionally syncs control-plane views (`sync_job_postings_to_pipeline_control`)
          if available.
 
     Side effects:
@@ -111,11 +110,6 @@ async def extract_and_persist_requirements_for_url(
     """
     logger.info(f"🧠 Starting requirements extraction for: {url}")
     fsm = fsm_manager.get_fsm(url)
-
-    # Guard: only operate when current stage is JOB_POSTINGS
-    if fsm.get_current_stage() != PipelineStage.JOB_POSTINGS.value:
-        logger.info(f"⏩ Skipping {url}; current stage is {fsm.state}")
-        return None
 
     # Mark the current stage as in-progress in the control table
     fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Extracting requirements…")
@@ -180,9 +174,10 @@ async def extract_and_persist_requirements_for_url(
     # Transition control-plane
     try:
         # Complete current stage, then step to the next stage
-        fsm.mark_status(PipelineStatus.COMPLETED, notes="Requirements saved to DB")
+        fsm.mark_status(
+            PipelineStatus.COMPLETED, notes="Requirements saved to DB"
+        )  # Not needed; keeping only for the notes.
         fsm.step()  # JOB_POSTINGS -> EXTRACTED_REQUIREMENTS
-        fsm.mark_status(PipelineStatus.NEW, notes="Ready for next stage")
 
         # Optional sync pass to keep pipeline_control denormalized views fresh
         if sync_job_postings_to_pipeline_control:
@@ -231,23 +226,24 @@ async def run_extract_job_requirements_pipeline_async_fsm(
     model_id: str = GPT_4_1_NANO,
     max_concurrent_tasks: int = 5,
     filter_keys: Optional[list[str]] = None,
-    iteration: int = 0,
+    # iteration: int = 0,
 ) -> None:
     """Entry point: process all URLs at JOB_POSTINGS stage with status NEW.
 
     filter_keys: if provided, limit to this subset of URLs.
     """
-    urls = get_urls_by_stage_and_status(
-        stage=PipelineStage.JOB_POSTINGS,
-        status=PipelineStatus.NEW,
-        iteration=iteration,
+    urls = get_urls_ready_for_transition(
+        stage=PipelineStage.EXTRACTED_REQUIREMENTS,
     )
+
+    logger.info(f"urls from get_urls_ready: {urls}")
 
     if filter_keys:
         urls = [u for u in urls if u in filter_keys]
+        logger.info(f"urls to process: {urls}")
 
     if not urls:
-        logger.info("📭 No job URLs to process at 'job_postings' stage.")
+        logger.info("📭 No job URLs to process at 'extracted_requirement' stage.")
         return
 
     logger.info(f"🧪 Extracting requirements for {len(urls)} URL(s)…")

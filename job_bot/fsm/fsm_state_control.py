@@ -7,9 +7,9 @@ Manages creation, updating, bulk operations, and FSM steps for pipeline states.
 import logging
 from datetime import datetime
 from job_bot.db_io.state_sync import (
-    update_and_persist_pipeline_state,
     load_pipeline_state,
 )
+from job_bot.db_io.persist_pipeline_state import update_and_persist_pipeline_state
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,

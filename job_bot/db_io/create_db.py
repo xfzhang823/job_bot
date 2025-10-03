@@ -1,6 +1,5 @@
-from pathlib import Path
-import duckdb
 import logging
+import duckdb
 from utils.find_project_root import find_project_root
 
 logger = logging.getLogger(__name__)

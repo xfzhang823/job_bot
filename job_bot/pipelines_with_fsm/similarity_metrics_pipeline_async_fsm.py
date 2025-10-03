@@ -46,7 +46,7 @@ from pydantic import TypeAdapter
 
 # --- Project imports (adjust the package prefix to match your repo layout) ---
 from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
-from job_bot.db_io.db_utils import get_urls_by_stage_and_status
+from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.pipeline_enums import (
     TableName,
@@ -303,9 +303,12 @@ async def evaluate_similarity_for_url(
 
         # Advance FSM
         try:
-            fsm.mark_status(PipelineStatus.COMPLETED, notes="Similarity saved to DB")
-            fsm.step(metrics_stage)
-            fsm.mark_status(PipelineStatus.NEW, notes="Metrics ready")
+            fsm.mark_status(
+                PipelineStatus.COMPLETED, notes="Similarity saved to DB"
+            )  # Not needed but kept for notes
+            fsm.step()
+
+            # fsm.mark_status(PipelineStatus.NEW, notes="Metrics ready")
             logger.info("✅ Similarity complete: %s", url)
             return True
         except Exception:
@@ -491,7 +494,7 @@ async def _run_similarity_metrics(
     else:
         src_stage = PipelineStage.EDITED_RESPONSIBILITIES
 
-    urls = get_urls_by_stage_and_status(stage=src_stage, status=PipelineStatus.NEW)
+    urls = get_urls_ready_for_transition(stage=src_stage)
 
     if filter_urls:
         urls = [u for u in urls if u in filter_urls]

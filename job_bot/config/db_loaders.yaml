@@ -1,6 +1,6 @@
 defaults:
   order_by:
-    - updated_at DESC
+    - updated_at DESC # DESC is DDL for descending order
     - created_at DESC
   per_url_group_key: url
   group_by_url_key: url
@@ -40,3 +40,11 @@ tables:
     filters: [url, iteration, version, resp_llm_provider, resp_model_id]
     order_by:
       - updated_at DESC
+
+  pipeline_control:
+    rehydrate: null            # just rows/DF for control-plane
+    filters: [url, iteration, stage, status, process_status]
+    order_by:
+      - updated_at DESC
+    group_by_url: false        # control-plane rows are 1-per-(url,iteration); no dict-of-url needed
+

@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,
+    PipelineProcessStatus,
     Version,
     LLMProvider,
 )
@@ -65,30 +66,46 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     """
     Represents a single **row** in the `pipeline_control` table.
 
-    - The DuckDB table is named `pipeline_control` (collection of all states).
-    - This model is named `PipelineState` (one state for one URL/iteration).
-    - FSM logic ensures only one active row per (url, iteration).
+    - DuckDB table: `pipeline_control` (collection of all states).
+    - Model name: `PipelineState` (one state per URL/iteration).
+    - FSM logic ensures at most one active row per (url, iteration).
 
     Fields:
-        url: Job posting URL (primary key part).
-        iteration: Integer iteration (default 0).
-        stage: Current pipeline stage (enum).
-        status: Current FSM status (enum).
-        notes: Optional free-text notes for FSM/debugging.
-        source_file: Provenance for seeding/debug.
-        version: Optional editorial version marker.
+        url (HttpUrl | str):
+            Job posting URL (primary key component).
+        iteration (int):
+            Iteration index for reruns (default = 0).
+        stage (PipelineStage):
+            Current pipeline stage in the FSM.
+        status (PipelineStatus):
+            Stage-local FSM status (e.g., NEW, IN_PROGRESS, DONE, ERROR).
+        process_status (PipelineProcessStatus):
+            High-level lifecycle status for the entire pipeline run
+            (NEW, RUNNING, COMPLETED, SKIPPED).
+        decision_flag: int | None = None
+            1 = go, 0 = no-go
+        transition_flag: int = 0
+            0=pending (have not applied), 1 = applied
+        notes (str | None):
+            Optional free-text notes for FSM/debugging.
+        source_file (str | None):
+            Provenance marker for seeding/debug.
+        version (Version | None):
+            Optional editorial version marker.
 
-    * ✅ Naming convention:
-        *- Table = `pipeline_control` (plural/collection)
-        *- Model = `PipelineState` (singular, one record)
-        * Purposedly setted up DIFFERENTLY!
+    ✅ Naming convention:
+        • Table = `pipeline_control` (plural/collection)
+        • Model = `PipelineState` (singular, one record)
+        • Intentional difference to emphasize row vs. table
     """
 
     url: Union[HttpUrl, str]
     iteration: int = 0
     stage: PipelineStage
     status: PipelineStatus = Field(default=PipelineStatus.NEW)
-    # Optional control metadata (include only if FSM logic uses them)
+    process_status: PipelineProcessStatus = Field(default=PipelineProcessStatus.NEW)
+    decision_flag: int | None = None  # 1=go, 0=no-go, NULL=undecided
+    transition_flag: int = 0  # 0=pending, 1=final/applied
     notes: Optional[str] = None
     source_file: Optional[str] = None
     version: Optional[Version] = None

@@ -19,10 +19,15 @@ import logging
 # Project imports
 from job_bot.db_io.get_db_connection import get_db_connection
 from job_bot.db_io.db_utils import (
-    get_urls_by_stage_and_status,
+    get_urls_ready_for_transition,
     get_pipeline_state,
 )
-from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
+from job_bot.db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    PipelineProcessStatus,
+    TableName,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +165,7 @@ def check_fsm_integrity(
     def _urls_for_stage(s: PipelineStage) -> set[str]:
         urls: set[str] = set()
         for st in statuses:
-            urls.update(get_urls_by_stage_and_status(stage=s, status=st))
+            urls.update(get_urls_ready_for_transition(stage=s))
         return urls
 
     def _has_rows(table: TableName, url: str) -> bool:

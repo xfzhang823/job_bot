@@ -19,8 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
-from typing import Optional, List
+from typing import cast, Optional, List
 
 # Enums / pipeline metadata
 from job_bot.db_io.pipeline_enums import (
@@ -34,23 +33,16 @@ from job_bot.db_io.pipeline_enums import (
 from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
 
 # Worklist + IO
-from job_bot.db_io.db_utils import get_urls_by_stage_and_status
-from job_bot.db_io.db_transform import add_metadata
+from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.flatten_and_rehydrate import flatten_extracted_requirements_to_table
+from job_bot.db_io.db_loaders import load_table
 
 # Optional control-plane sync (best-effort, zero-arg whole-table sync)
 from job_bot.fsm.pipeline_control_sync import (
     sync_job_urls_to_pipeline_control,  # type: ignore
 )
-
-
-# from job_bot.db_io.db_loaders import (
-#     load_extracted_requirements_for_url_from_db as _load_requirements_single,
-# )
-# from job_bot.db_io.db_loaders import (
-#     load_all_extracted_requirements_from_db as _load_requirements_all,
-# )
+from job_bot.fsm.pipeline_fsm_manager import PipelineFSM
 
 # Models
 from job_bot.models.resume_job_description_io_models import (
@@ -67,7 +59,7 @@ async def flatten_and_persist_requirements_for_url(
     *,
     fsm_manager: PipelineFSMManager,
     semaphore: asyncio.Semaphore,
-    iteration: int | None = None,
+    # iteration: int | None = None,
 ) -> bool:
     """
     Flatten extracted requirements for a single URL and persist them (DuckDB + FSM).
@@ -108,29 +100,17 @@ async def flatten_and_persist_requirements_for_url(
     async with semaphore:
         fsm = fsm_manager.get_fsm(url)
 
-        if fsm.get_current_stage() != PipelineStage.EXTRACTED_REQUIREMENTS.value:
-            logger.info("⏩ Skipping %s; current stage is %s", url, fsm.state)
-            return False
-
         # IN_PROGRESS at current stage
         fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Flattening requirements…")
 
         # Load extracted requirements
-        try:
-            reqs_model = _load_extracted_requirements_for_url(url)
-            if reqs_model is None:
-                raise ValueError("No extracted requirements found for URL")
-        except Exception:
-            logger.exception("❌ Failed to load extracted requirements for %s", url)
+        reqs_model = _load_extracted_requirements_for_url(url, fsm)
+        if not reqs_model:
+            logger.error("❌ No valid extracted requirements for %s", url)
             fsm.mark_status(
-                PipelineStatus.ERROR, notes="Load extracted_requirements failed"
+                PipelineStatus.ERROR,
+                notes="Load/validate extracted_requirements failed",
             )
-            return False
-
-        # Validate content
-        if not _validate_requirements_model(reqs_model):
-            logger.warning("🚫 Skipping %s — empty/invalid requirements.", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="Empty/invalid requirements")
             return False
 
         # Flatten + persist
@@ -146,9 +126,10 @@ async def flatten_and_persist_requirements_for_url(
 
         # Advance FSM
         try:
-            fsm.mark_status(PipelineStatus.COMPLETED, notes="Flattened → DB")
-            fsm.step()  # EXTRACTED_REQUIREMENTS → FLATTENED_REQUIREMENTS
-            fsm.mark_status(PipelineStatus.NEW, notes="Ready for next stage")
+            fsm.mark_status(
+                PipelineStatus.COMPLETED, notes="Flattened → DB"
+            )  # Not needed but keep for the notes
+            fsm.step()  # flattened_requirements → flattened responsibilities
 
             # Optional whole-table sync; zero-arg call is correct
             if sync_job_urls_to_pipeline_control:
@@ -239,9 +220,8 @@ async def run_flattened_requirements_pipeline_async_fsm(
         # Flattens and persists requirements for the provided URL(s).
     """
 
-    urls = get_urls_by_stage_and_status(
-        stage=PipelineStage.EXTRACTED_REQUIREMENTS,
-        status=PipelineStatus.NEW,
+    urls = get_urls_ready_for_transition(
+        stage=PipelineStage.FLATTENED_REQUIREMENTS,
     )
 
     if filter_urls:
@@ -279,16 +259,28 @@ def _validate_requirements_model(model: RequirementsResponse) -> bool:
         return False
 
 
-def _load_extracted_requirements_for_url(url: str) -> Optional[RequirementsResponse]:
+def _load_extracted_requirements_for_url(
+    url: str, fsm: PipelineFSM
+) -> Optional[RequirementsResponse]:
     """
-    Load the extracted requirements for a single URL.
-    Contract: return ONE `RequirementsResponse` (or None on error/miss).
+    Load and validate extracted requirements for a given URL.
+
+    Returns:
+        RequirementsResponse if valid, else None (FSM marked ERROR on failure).
     """
-    if _load_requirements_single is None:
-        raise RuntimeError("Per-URL loader is not available")
     try:
-        return _load_requirements_single(url=url)
-        # If needed later:
-        # return _load_requirements_single(url=url, status=PipelineStatus.NEW, iteration=0)
-    except Exception:
+        raw_model = load_table(TableName.EXTRACTED_REQUIREMENTS, url=url)
+        if raw_model is None:
+            raise ValueError("No extracted requirements found")
+
+        if isinstance(raw_model, ExtractedRequirementsBatch):
+            return raw_model.root.get(url)
+
+        raise TypeError(
+            f"Unexpected type for extracted requirements: {type(raw_model)}"
+        )
+
+    except Exception as e:
+        logger.exception("❌ Failed to load/validate requirements for %s: %s", url, e)
+        fsm.mark_status(PipelineStatus.ERROR, notes=f"Load/validate failure: {e}")
         return None

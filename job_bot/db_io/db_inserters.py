@@ -152,7 +152,7 @@ def insert_df_with_config(
     df = _stamp_df_per_config(df, tbl, provided_params)
 
     # Align to schema (strict: reorders/keeps only known columns)
-    df = align_df_with_schema(df, schema.column_order, strict=True)
+    df = align_df_with_schema(df, schema.column_order, strict=False)
 
     # Schema sanity (belt-and-suspenders)
     missing = [c for c in schema.column_order if c not in df.columns]
@@ -242,6 +242,14 @@ def _get_tbl_cfg(tname: str) -> tuple[dict, dict]:
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+def _ensure_schema_columns(df: pd.DataFrame, table: TableName) -> pd.DataFrame:
+    schema_cols = DUCKDB_SCHEMA_REGISTRY[table].column_order
+    out = df.copy()
+    for col in schema_cols:
+        if col not in out.columns:
+            out[col] = pd.NA
+    # 👇 drop any accidental extra cols here if you want
+    return out[schema_cols] if set(out.columns) - set(schema_cols) else out
 
 
 def _normalize_table_name(table_name: str | TableName) -> TableName:
@@ -314,96 +322,66 @@ def _stamp_df_per_config(
       • LLM defaults come from defaults.llm_defaults
     """
     defaults, tcfg = _get_tbl_cfg(table.value)
-
     stamp_cfg = _merge(defaults.get("stamp"), tcfg.get("stamp"))
     inherit_cfg = _merge(defaults.get("inherit"), tcfg.get("inherit"))
     constants = _merge(defaults.get("constants"), tcfg.get("constants"))
     llm_defaults = defaults.get("llm_defaults", {}) or {}
-
     url = provided_params.get("url")
 
-    out = df.copy()
+    # Ensure schema cols exist (should use pd.NA inside)
+    out_df = _ensure_schema_columns(df, table)
 
-    # 1) Iteration (special: controlled by inherit.*)
-    # Table may override inherit.iteration; otherwise use defaults
+    # (optional strictness) Only stamp schema columns
+    schema_cols = set(DUCKDB_SCHEMA_REGISTRY[table].column_order)
+
+    # URL convenience (if part of PK)
+    pk = DUCKDB_SCHEMA_REGISTRY[table].primary_keys
+    if "url" in pk and ("url" in out_df.columns) and (url is not None):
+        # only fill nulls to avoid overwriting existing values
+        out_df["url"] = out_df["url"].fillna(url)
+
+    # Iteration inheritance
     inherit_iter_mode = inherit_cfg.get("iteration")
-    # Some tables explicitly disable stamping of iteration in stamp block
     stamp_iter_mode = (stamp_cfg or {}).get("iteration")
     effective_iter_mode = (
         inherit_iter_mode if stamp_iter_mode is None else stamp_iter_mode
     )
-
-    if (
-        "iteration" in out.columns
-        and (effective_iter_mode is not None)
-        and (effective_iter_mode != "none")
-    ):
-        out["iteration"] = _resolve_iteration_from_cfg(
+    if ("iteration" in out_df.columns) and (effective_iter_mode not in (None, "none")):
+        out_df["iteration"] = _resolve_iteration_from_cfg(
             url=url,
             inherit_mode=effective_iter_mode,
             explicit_param=provided_params.get("iteration"),
             constant_map=constants,
         )
 
-    # 2) Timestamps (now)
-    for col, mode in (stamp_cfg or {}).items():
-        if col == "created_at":
-            # only fill if missing/null
-            out[col] = out.get(col).where(out.get(col).notna(), _now_naive_utc())
-        else:
-            # always overwrite (e.g. updated_at)
-            out[col] = _now_naive_utc()
-        # if mode == "now":
-        #     out[col] = _now_naive_utc()
+    # One timestamp per batch
+    now_ts = _now_naive_utc()
 
-    # 3) Generic stamping for the rest (param/default/none)
-    #    - default for llm fields comes from llm_defaults
-    #    - param looks up provided_params[col]
     for col, mode in (stamp_cfg or {}).items():
-        if mode in ("now",):  # already handled
-            continue
-        if col == "iteration":  # handled above
-            continue
+        if col not in schema_cols:
+            continue  # optional: ignore non-schema stamp targets
 
-        if mode == "param":
-            if col in out.columns:
-                if col in provided_params and provided_params[col] is not None:
-                    out[col] = provided_params[col]
-                else:
-                    # Do not assign None; leave column as-is
-                    logger.warning(
-                        f"⚠️ stamp:param for '{col}' but no value provided; leaving as-is"
-                    )
+        if mode == "now":
+            # create if missing (shouldn't happen post _ensure_schema_columns)
+            if col not in out_df.columns:
+                out_df[col] = now_ts
+            else:
+                out_df[col] = out_df[col].fillna(now_ts)
 
         elif mode == "default":
-            if col in out.columns:
-                # Only llm defaults are defined today; extend if you add more default groups
-                if col in ("llm_provider", "model_id"):
-                    dv = llm_defaults.get(col)
-                    if dv is not None:
-                        out[col] = dv
-                    else:
-                        logger.warning(
-                            f"⚠️ stamp:default for '{col}' but no llm_defaults.{col} configured"
-                        )
-                else:
-                    # You can extend with more default groups later
-                    logger.warning(
-                        f"⚠️ stamp:default for '{col}' has no configured defaults; skipping"
-                    )
+            if col in ("llm_provider", "model_id"):
+                val = provided_params.get(col) or llm_defaults.get(col)
+                if val is not None:
+                    out_df[col] = out_df[col].fillna(val)
+
+        elif mode == "param":
+            val = provided_params.get(col)
+            if val is not None:
+                out_df[col] = out_df[col].fillna(val)
+
         elif mode == "none":
-            # do nothing
             pass
         else:
-            # unknown modes are ignored but warned
-            if col in out.columns:
-                logger.warning(
-                    f"⚠️ Unknown stamp mode '{mode}' for column '{col}'; leaving as-is"
-                )
+            pass
 
-    # 4) Ensure URL exists when part of PK (convenience)
-    pk = DUCKDB_SCHEMA_REGISTRY[table].primary_keys
-    if "url" in pk and "url" not in out.columns and url is not None:
-        out["url"] = url
-
-    return out
+    return out_df

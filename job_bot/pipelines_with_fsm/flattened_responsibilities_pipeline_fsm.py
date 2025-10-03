@@ -73,7 +73,7 @@ Dependencies
 - process_responsibilities_from_resume(...)  → returns validated `Responsibilities`
 - flatten_model_to_df(...)                   → aligns to `flattened_responsibilities` schema
 - insert_df_with_config(...)                       → handles connection, delete-then-insert, dedup
-- get_urls_by_stage_and_status(...)          → pulls NEW URLs for this stage
+- get_urls_ready_for_transition(...)          → pulls NEW URLs for this stage
 - sync_flattened_responsibilities_to_pipeline_control() → control-plane sync (optional)
 """
 
@@ -93,15 +93,18 @@ from job_bot.evaluation_optimization.evaluation_optimization_utils import (
 from job_bot.db_io.flatten_and_rehydrate import flatten_model_to_df
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.pipeline_enums import TableName, PipelineStage, PipelineStatus
-from job_bot.db_io.db_utils import get_urls_by_stage_and_status
+from job_bot.db_io.db_utils import get_urls_ready_for_transition
 
 # ✅ Pydantic models (typing only)
 from job_bot.models.resume_job_description_io_models import Responsibilities
 
 # ✅ Control-plane sync helper
+from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager, PipelineFSM
+
 from job_bot.fsm.pipeline_control_sync import (
     sync_flattened_responsibilities_to_pipeline_control,
 )
+
 
 # ✅ Default: nested resume JSON (NOT a flat responsibilities file)
 from job_bot.config.project_config import RESUME_JSON_FILE as DEFAULT_RESUME_JSON_FILE
@@ -121,16 +124,21 @@ def run_flattened_responsibilities_pipeline_fsm(
 
     Worklist
     --------
-    - If `url` is provided: process only that URL.
-    - Else: fetch URLs where stage=FLATTENED_RESPONSIBILITIES AND status=NEW.
+    • If `url` is provided: process only that URL.
+    • Else: fetch URLs where stage=FLATTENED_RESPONSIBILITIES AND status=NEW.
 
     Behavior
     --------
     1) Parse/flatten responsibilities from resume JSON (per URL), validate via Pydantic.
     2) Insert into `flattened_responsibilities`:
-       - mode="append"  (default): PK-based dedup insert
-       - mode="replace": wipe all rows for that URL first (via broader key set)
+       - mode="append"  (default): PK-based dedup (per YAML config).
+       - mode="replace": broader delete per YAML config (full/URL-scoped as configured).
     3) Optionally sync `pipeline_control`.
+
+    Note
+    ----
+    This function intentionally does NOT advance FSM. It prepares data and leaves
+    URLs at FLATTENED_RESPONSIBILITIES/NEW, so downstream similarity-eval picks them up.
     """
     resume_json_path = Path(resume_json_file)
 
@@ -139,9 +147,8 @@ def run_flattened_responsibilities_pipeline_fsm(
         urls = [url]
         logger.info("🔎 Using single URL: %s", url)
     else:
-        urls = get_urls_by_stage_and_status(
+        urls = get_urls_ready_for_transition(
             stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
-            status=PipelineStatus.NEW,
         )
         logger.info(
             "🔎 Fetched %d NEW URL(s) at stage=%s",
@@ -153,6 +160,9 @@ def run_flattened_responsibilities_pipeline_fsm(
         logger.info("📭 No URLs to process for flattened responsibilities.")
         return
 
+    # ✅ create manager once
+    fsm_manager: PipelineFSMManager = PipelineFSMManager()
+
     for u in urls:
         logger.info(
             "📥 Processing resume JSON (%s) into flattened_responsibilities (mode=%s, url=%s)",
@@ -161,28 +171,65 @@ def run_flattened_responsibilities_pipeline_fsm(
             u,
         )
 
-        # 1) Process responsibilities → validated model
-        model: Responsibilities | None = process_responsibilities_from_resume(
-            resume_json_file=resume_json_path,
-            url=u,
+        # ✅ get FSM for this URL
+        fsm: PipelineFSM = fsm_manager.get_fsm(u)
+
+        # mark work start
+        fsm.mark_status(
+            PipelineStatus.IN_PROGRESS, notes="Flattening responsibilities…"
         )
-        if model is None:
-            logger.error("❌ Failed to process responsibilities for url=%s", u)
+
+        try:
+            # 1) Process responsibilities → validated model
+            model: Responsibilities | None = process_responsibilities_from_resume(
+                resume_json_file=resume_json_path,
+                url=u,
+            )
+            if model is None:
+                logger.error("❌ Failed to process responsibilities for url=%s", u)
+                fsm.mark_status(
+                    PipelineStatus.ERROR, notes="No responsibilities produced"
+                )
+                continue
+
+            # 2) Flatten to DataFrame aligned to table schema
+            df: pd.DataFrame = flatten_model_to_df(
+                model=model,
+                table_name=TableName.FLATTENED_RESPONSIBILITIES,
+                source_file=resume_json_path,
+            )
+            if df.empty:
+                logger.error("❌ Empty responsibilities DataFrame for %s", u)
+                fsm.mark_status(
+                    PipelineStatus.ERROR, notes="Empty responsibilities DataFrame"
+                )
+                continue
+
+            # 3) Insert — pass url so iteration inherits correctly if configured
+            insert_df_with_config(
+                df,
+                TableName.FLATTENED_RESPONSIBILITIES,
+                url=u,
+                mode=mode,
+            )
+            logger.info("📦 responsibilities → %d row(s) for %s", len(df), u)
+
+        except Exception:
+            logger.exception("❌ Flatten/insert failed for %s", u)
+            fsm.mark_status(PipelineStatus.ERROR, notes="DB insert failed")
             continue
 
-        # 2) Flatten to DataFrame aligned to table schema
-        df: pd.DataFrame = flatten_model_to_df(
-            model=model,
-            table_name=TableName.FLATTENED_RESPONSIBILITIES,
-            source_file=resume_json_path,
-        )
-
-        # 3) Insert (no explicit DB connection here)
-        insert_df_with_config(
-            df,
-            TableName.FLATTENED_RESPONSIBILITIES.value,
-            mode=mode,
-        )
+        # 4) Advance FSM
+        try:
+            fsm.mark_status(
+                PipelineStatus.COMPLETED, notes="Responsibilities flattened"
+            )
+            fsm.step()  # FLATTENED_RESPONSIBILITIES → next stage
+            logger.info("✅ Flatten responsibilities complete for %s", u)
+        except Exception:
+            logger.exception("❌ FSM transition failed for %s", u)
+            fsm.mark_status(PipelineStatus.ERROR, notes="FSM transition failed")
+            continue
 
     # 4) Optional control-plane sync
     if do_control_sync:

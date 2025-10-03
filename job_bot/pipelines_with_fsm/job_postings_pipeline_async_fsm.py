@@ -80,7 +80,7 @@ from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.flatten_and_rehydrate import flatten_model_to_df
 from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 from job_bot.db_io.state_sync import load_pipeline_state
-from job_bot.db_io.db_utils import get_urls_by_stage_and_status
+from job_bot.db_io.db_utils import get_urls_ready_for_transition
 
 # --- IO surface: function-style db_loaders ---
 # from job_bot.db_io.db_loaders import (
@@ -184,10 +184,6 @@ async def scrape_parse_persist_job_posting_async(
 
         # Advance FSM (FSM Step + Status update)
         fsm.step()
-        fsm.mark_status(
-            PipelineStatus.IN_PROGRESS,
-            notes="Job posting scraped, parsed, and persisted to db.",
-        )
 
         logger.info(
             f"✅ Scrape pipeline complete for {url} — status: {jobposting_model.status}"
@@ -298,10 +294,8 @@ async def run_job_postings_pipeline_async_fsm(
         else (PipelineStatus.NEW,)
     )
     # Fetch worklist
-    urls = get_urls_by_stage_and_status(
+    urls = get_urls_ready_for_transition(
         stage=PipelineStage.JOB_URLS,
-        status=status,  # accepts singular or sequence
-        iteration=iteration,
     )
 
     # Optional sebset filter

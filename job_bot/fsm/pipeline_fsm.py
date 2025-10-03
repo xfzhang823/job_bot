@@ -78,57 +78,22 @@ from datetime import datetime
 from typing import Optional
 
 # User defined
-from job_bot.db_io.state_sync import update_and_persist_pipeline_state
-from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
+from job_bot.db_io.persist_pipeline_state import update_and_persist_pipeline_state
+from job_bot.db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    PipelineProcessStatus,
+    TableName,
+)
 from job_bot.models.db_table_models import PipelineState
+from job_bot.fsm.fsm_stage_config import (
+    PIPELINE_STAGE_SEQUENCE,  # ordered enums
+    PIPELINE_STAGE_SEQUENCE_VALUES,  # ordered strings
+    next_stage as guarded_next_stage,
+    prev_stage as guarded_prev_stage,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _get_stage_names():
-    return [
-        PipelineStage.JOB_URLS.value,
-        PipelineStage.JOB_POSTINGS.value,
-        PipelineStage.EXTRACTED_REQUIREMENTS.value,
-        PipelineStage.FLATTENED_REQUIREMENTS.value,
-        PipelineStage.FLATTENED_RESPONSIBILITIES.value,
-        PipelineStage.EDITED_RESPONSIBILITIES.value,
-        PipelineStage.SIM_METRICS_EVAL.value,
-        PipelineStage.SIM_METRICS_REVAL.value,
-        PipelineStage.ALIGNMENT_REVIEW.value,
-        PipelineStage.FINAL_RESPONSIBILITIES.value,
-    ]
-
-
-def get_transitions(stages: list[str]) -> list[dict]:
-    """
-    Generate linear transition mappings for an ordered list of pipeline stages.
-
-    Each transition moves from one stage to the next in sequence using the trigger 'advance',
-    suitable for use with the `transitions` state machine library.
-
-    * Note: {"trigger": "advance", "source": "editing", "dest": "revaluation"} are
-    * standard parameters recognized by the transitions library.
-
-    Example:
-        Given stages = ["job_urls", "job_postings", "extracted_requirements"],
-        the returned transitions will be:
-            [
-                {"trigger": "advance", "source": "job_urls", "dest": "job_postings"},
-                {"trigger": "advance", "source": "job_postings", "dest": "extracted_requirements"},
-            ]
-
-    Args:
-        stages (list[str]): Ordered stage names representing pipeline progression.
-
-    Returns:
-        list[dict]: Transition rules in the format expected by the `transitions`
-        Machine.
-    """
-    return [
-        {"trigger": "advance", "source": s, "dest": d}
-        for s, d in zip(stages, stages[1:])
-    ]
 
 
 class PipelineFSM:
@@ -185,8 +150,11 @@ class PipelineFSM:
         ...                 notes="Requirements parsed and stored.")
     """
 
-    STAGES = _get_stage_names()
-    TRANSITIONS = get_transitions(STAGES)
+    STAGES = PIPELINE_STAGE_SEQUENCE
+    TRANSITIONS = [
+        {"source": s, "dest": d}
+        for s, d in zip(PIPELINE_STAGE_SEQUENCE[:-1], PIPELINE_STAGE_SEQUENCE[1:])
+    ]
 
     def __init__(self, state: PipelineState):
         """
@@ -216,15 +184,11 @@ class PipelineFSM:
         )
 
     @property
-    def state(self) -> str:
+    def state(self) -> PipelineStage:
         """Current state of the FSM."""
         return self._state
 
-    def _advance(self) -> None:
-        """Advance to the next state."""
-        pass  # Transitions will inject this method
-
-    def get_current_stage(self) -> str:
+    def get_current_stage(self) -> PipelineStage:
         """
         Get the current stage from the pipeline state.
 
@@ -233,7 +197,7 @@ class PipelineFSM:
         """
         return self._state
 
-    def get_next_stage(self) -> str | None:
+    def get_next_stage(self) -> Optional[PipelineStage]:
         """
         Get the next stage in the pipeline based on the current stage.
 
@@ -241,13 +205,10 @@ class PipelineFSM:
             str | None: The next pipeline stage or None if at final stage.
         """
         try:
-            for t in self.TRANSITIONS:
-                if t["source"] == self._state:
-                    return t["dest"]
-            return None
+            return guarded_next_stage(self._state)
         except Exception as e:
             logger.warning(
-                f"⚠️ Could not determine next stage from '{self._state}': {e}"
+                "⚠️ Could not determine next stage from '%s': %s", self._state, e
             )
             return None
 
@@ -300,36 +261,118 @@ class PipelineFSM:
 
     def step(self, table_name: TableName = TableName.PIPELINE_CONTROL) -> None:
         """
-        Advance to the next stage and persist the update.
-        Does not modify status (only `stage` and `updated_at`).
+        Advance to the next stage (mutates both `stage` and `status` and may
+            set `process_status`).
+        Contract:
+        - If already at the final stage, idempotently set `process_status=COMPLETED`
+            and return.
+        - Otherwise:
+            1) mark current stage as COMPLETED (in-memory),
+            2) hop to next stage,
+            3) set next stage status to NEW,
+            4) if we landed on final stage, set process_status=COMPLETED,
+            5) persist all changes in a single UPDATE that targets the row by
+                (url, iteration) only.
         """
         try:
-            final_stage = PipelineStage.list()[-1]  # relies on your enum utility
+            # --- Resolve canonical final stage explicitly (avoid ordering bugs) ---
+            ordered: tuple[PipelineStage, ...] = tuple(self.STAGES)
+            final_stage: PipelineStage = ordered[-1]
+
+            # --- Already final? Just idempotently stamp lifecycle and return ---
             if self._state == final_stage:
-                logger.info(
-                    "✅ Already at final stage for %s: %s",
-                    self.state_model.url,
-                    self._state.name,
-                )
+                if self.state_model.process_status != PipelineProcessStatus.COMPLETED:
+                    self.state_model.process_status = PipelineProcessStatus.COMPLETED
+                    self.state_model.updated_at = datetime.now()
+                    update_and_persist_pipeline_state(
+                        self.state_model,
+                        table_name,
+                    )
+                self._log_info("✅ Already at final stage: %s", self._state.name)
                 return
 
-            logger.info(
+            self._log_info(
                 "⏩ Advancing %s from '%s'", self.state_model.url, self._state.name
             )
 
-            # Advance internal FSM (your implementation should set the next stage)
-            self._advance()  # assumes this updates self._state internally
+            # --- 1) Close current stage ---
+            self.state_model.status = PipelineStatus.COMPLETED
 
-            # Mirror internal stage to the persisted model
-            self.state_model.stage = self._state
+            # --- 2) Compute next stage deterministically ---
+            try:
+                idx = ordered.index(self._state)
+            except ValueError:
+                raise RuntimeError(
+                    f"Current stage {self._state} not in canonical order."
+                )
+            if idx >= len(ordered) - 1:
+                # defensive: shouldn't happen due to early return above
+                self._log_info("✅ Already at final stage (defensive branch).")
+                self.state_model.process_status = PipelineProcessStatus.COMPLETED
+                self.state_model.updated_at = datetime.now()
+                update_and_persist_pipeline_state(
+                    self.state_model,
+                    table_name,
+                )
+                return
+
+            next_stage = ordered[idx + 1]
+
+            # --- 3) Hop & prime next stage ---
+            self._state = next_stage
+            self.state_model.stage = next_stage
+            self.state_model.status = PipelineStatus.NEW
+
+            # --- 4) If we just landed on final, close lifecycle ---
+            if next_stage == final_stage:
+                self.state_model.process_status = PipelineProcessStatus.COMPLETED
+            else:
+                # Make the next stage pickable
+                self.state_model.process_status = PipelineProcessStatus.NEW
+                # Optional gating reset if you use it
+                if hasattr(self.state_model, "decision_flag"):
+                    self.state_model.decision_flag = None
+                if hasattr(self.state_model, "transition_flag"):
+                    self.state_model.transition_flag = 0
+
+            # --- 5) Persist once, by PK only (NOT filtering by old stage!) ---
             self.state_model.updated_at = datetime.now()
 
-            update_and_persist_pipeline_state(self.state_model, table_name)
-            logger.info("✅ Advanced to: %s", self.state_model.stage.name)
+            update_and_persist_pipeline_state(
+                self.state_model,
+                table_name,
+            )
+
+            self._log_info(
+                "✅ Advanced to: %s (status=%s)",
+                self.state_model.stage.name,
+                self.state_model.status.value,
+            )
+
         except Exception as e:
-            logger.error(
+            self._log_error(
                 "❌ Failed to advance stage for %s: %s",
                 self.state_model.url,
                 e,
                 exc_info=True,
             )
+
+    # Helper: normalize enum fields so your DB sees strings, not Enum objects
+    def _serialize_for_update(self, m):
+        return {
+            "stage": getattr(m.stage, "value", str(m.stage)),
+            "status": getattr(m.status, "value", str(m.status)),
+            "process_status": (
+                getattr(m.process_status, "value", str(m.process_status))
+                if m.process_status is not None
+                else None
+            ),
+            "updated_at": m.updated_at,
+            # include any other columns you persist here (notes, version, etc.)
+        }
+
+    def _log_info(self, msg, *args):  # tiny sugar so this patch is drop-in
+        logger.info(msg, *args)
+
+    def _log_error(self, msg, *args, **kwargs):
+        logger.error(msg, *args, **kwargs)

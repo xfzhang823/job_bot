@@ -48,8 +48,7 @@ from job_bot.db_io.pipeline_enums import (
 from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
 
 # Worklist + IO
-from job_bot.db_io.db_utils import get_urls_by_stage_and_status
-from job_bot.db_io.db_transform import add_metadata
+from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
 
@@ -81,7 +80,7 @@ async def edit_and_persist_responsibilities_for_url(
     *,
     fsm_manager: PipelineFSMManager,
     semaphore: asyncio.Semaphore,
-    iteration: int | None = None,
+    # iteration: int | None = None,
     llm_provider: str,
     model_id: str,
     no_of_concurrent_workers_for_llm: int = 3,
@@ -225,9 +224,11 @@ async def edit_and_persist_responsibilities_for_url(
 
         # --- Advance FSM to EDITED_RESPONSIBILITIES → NEW
         try:
-            fsm.mark_status(PipelineStatus.COMPLETED, notes="Edited → DB")
+            fsm.mark_status(
+                PipelineStatus.COMPLETED, notes="Edited → DB"
+            )  # not needed but kept for notes
             fsm.step()  # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
-            fsm.mark_status(PipelineStatus.NEW, notes="Ready for next stage")
+
             logger.info("✅ Editing complete for %s", url)
             return True
         except Exception:
@@ -259,7 +260,7 @@ async def process_resume_editing_batch_async_fsm(
             u,
             fsm_manager=fsm_manager,
             semaphore=semaphore,
-            iteration=iteration,
+            # iteration=iteration,
             llm_provider=llm_provider,
             model_id=model_id,
             no_of_concurrent_workers_for_llm=no_of_concurrent_workers_for_llm,
@@ -329,9 +330,8 @@ async def run_resume_editing_pipeline_async_fsm(
         `pipeline_control` FSM state.
     """
     # Select urls to process (stage / version)
-    urls = get_urls_by_stage_and_status(
+    urls = get_urls_ready_for_transition(
         stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
-        status=PipelineStatus.NEW,
     )
 
     if filter_urls:

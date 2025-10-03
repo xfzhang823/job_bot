@@ -1,16 +1,21 @@
 """
 fsm/state_map_config.py
 
-This module defines a centralized config for managing the `state_map` JSON field
-in the pipeline_control table. It includes:
+Centralized config for managing the `state_map` JSON field
+in the `pipeline_control` table.
 
+This module defines:
 - Valid stages (from PipelineStage enum)
-- Valid status values per stage
-- Default state map initializer
+- Valid status values per stage (PipelineStatus)
+- Default state_map initializer
 - Helper functions for validation and patching
 
-Use this module to enforce consistency across ingestion, FSM updates, and
-dashboard tools.
+⚠️ Note:
+    This module only manages per-stage FSM statuses (PipelineStatus).
+    The higher-level lifecycle field `process_status`
+    (NEW, RUNNING, COMPLETED, SKIPPED) is tracked separately
+    at the row level in `pipeline_control` and is intentionally
+    out of scope here.
 """
 
 from typing import Dict

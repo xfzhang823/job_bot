@@ -13,28 +13,32 @@ Control-plane helpers that delegate to the unified loaders/inserters.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
-
+from typing import Any, cast, Optional
+from enum import Enum
 import pandas as pd
+import json
+import time
 
-from job_bot.db_io.pipeline_enums import TableName
-from job_bot.models.db_table_models import PipelineState
+# User defined
+from job_bot.db_io.get_db_connection import get_db_connection
+from job_bot.db_io.pipeline_enums import (
+    TableName,
+    PipelineProcessStatus,
+    PipelineStatus,
+    PipelineStage,
+)
 from job_bot.db_io.db_loaders import load_table
-from job_bot.db_io.db_inserters import insert_df_with_config
+from job_bot.db_io.persist_pipeline_state import update_and_persist_pipeline_state
+
+from job_bot.models.db_table_models import PipelineState
+from job_bot.fsm.pipeline_fsm import PipelineFSM
+
+from job_bot.fsm.fsm_stage_config import next_stage
+
 
 logger = logging.getLogger(__name__)
 
-
-def _enum_val(x: Any) -> Any:
-    """Return Enum.value for Enum instances; identity otherwise."""
-    try:
-        from enum import Enum
-
-        if isinstance(x, Enum):
-            return x.value
-    except Exception:
-        pass
-    return x
+URL_ONLY_STAGES: set[PipelineStage] = {PipelineStage.JOB_URLS}  # extend if needed
 
 
 def load_pipeline_state(
@@ -74,71 +78,328 @@ def load_pipeline_state(
         return None
 
 
-def update_and_persist_pipeline_state(
-    state_model: PipelineState,
-    table_name: TableName = TableName.PIPELINE_CONTROL,
-) -> None:
+def retry_error_one(url: str, *, table: TableName = TableName.PIPELINE_CONTROL) -> bool:
     """
-    Update and persist a PipelineState by delegating to `insert_df_with_config`.
-
-    FSM semantics
-    -------------
-    • Called whenever a PipelineState is initialized, advanced, retried, or marked.
-    • Guarantees a single authoritative row per (url, iteration) in `pipeline_control`.
-
-    DB semantics
-    ------------
-    • Implemented as an upsert (update-or-insert) via `insert_df_with_config`.
-    • Central inserter applies:
-        1. Deduplication (e.g., pk_scoped → delete existing PK rows before insert).
-        2. Stamping (created_at/updated_at, iteration, etc., per YAML config).
-        3. Schema alignment (column order, defaults).
-
-    Notes
-    -----
-    • The state is converted to a one-row DataFrame; enums are flattened to `.value`.
-    • If you need to carry an existing `created_at`, include it explicitly;
-        the inserter’s stamping rules will set it on first insert.
-
-    Args
-    ----
-    state_model : PipelineState
-        The validated PipelineState to persist.
-    table_name : TableName, default = PIPELINE_CONTROL
-        Target DuckDB table.
+    If row's *status* == ERROR, set it back to NEW at the same stage, persisted.
+    Uses PipelineFSM for invariant handling, but does not touch process_status.
     """
+    state = load_pipeline_state(url, table_name=table)
+    if state is None:
+        logger.warning("retry_error_one: no PipelineState for url=%s", url)
+        return False
 
-    try:
-        row = {
-            "url": state_model.url,
-            "iteration": state_model.iteration,
-            "stage": _enum_val(state_model.stage),
-            "status": _enum_val(state_model.status),
-            "version": _enum_val(getattr(state_model, "version", None)),
-            "source_file": getattr(state_model, "source_file", None),
-            "notes": getattr(state_model, "notes", None),
-            # If the schema includes created_at/updated_at and you want to
-            # explicitly carry them through, you can add them here.
-            # Otherwise, let YAML config handle them:
-            # "created_at": getattr(state_model, "created_at", None),
-            # "updated_at": getattr(state_model, "updated_at", None),
-        }
-        df = pd.DataFrame([row])
+    # Only status gate; do not consult/mutate process_status
+    if str(state.status).lower() != PipelineStatus.ERROR.value:
+        return False
 
-        insert_df_with_config(
-            df,
-            table_name,
-            # Provide url so inserter can resolve iteration inheritance
-            url=str(state_model.url),
-            # Any stamp:param fields can be supplied via kwargs here if needed:
-            # iteration=state_model.iteration, resp_llm_provider=..., resp_model_id=...
+    fsm = PipelineFSM(state)
+    # status-only change at same stage
+    fsm.mark_status(
+        PipelineStatus.NEW,
+        notes="auto-reset from ERROR by state_sync.retry_error_one",
+        table_name=table,
+    )
+    # mark_status already persisted through update_and_persist_pipeline_state
+    _status_flags_recompute_row(url, table=table.value)
+    logger.info("♻️ retry_error_one: %s → status=NEW @ %s", url, state.stage.value)
+    return True
+
+
+# commented out: old version
+# def advance_completed_one(
+#     url: str, *, table: TableName = TableName.PIPELINE_CONTROL
+# ) -> bool:
+#     """
+#     If row's *status* == COMPLETED, advance exactly one stage and set status=NEW.
+#     Does NOT touch process_status (i.e., we avoid PipelineFSM.step()).
+#     """
+#     state = load_pipeline_state(url, table_name=table)
+#     if state is None:
+#         logger.warning("advance_completed_one: no PipelineState for url=%s", url)
+#         return False
+
+#     logger.debug(
+#         f"state in advance_completed_one: {state}"
+#     )  # todo: debug; delete later
+
+#     if str(state.status) != PipelineStatus.COMPLETED.value:
+#         return False
+
+#     # ✅ Normalize status safely
+#     cur_status = (
+#         state.status
+#         if isinstance(state.status, PipelineStatus)
+#         else PipelineStatus(str(state.status).lower())
+#     )
+
+#     if cur_status is not PipelineStatus.COMPLETED:
+#         logger.debug(
+#             "advance_completed_one: %s not COMPLETED (status=%s)", url, state.status
+#         )
+#         return False
+
+#     cur_stage: PipelineStage = (
+#         state.stage
+#         if isinstance(state.stage, PipelineStage)
+#         else PipelineStage(str(state.stage))
+#     )
+
+#     nxt = next_stage(cur_stage)
+#     if nxt is None:
+#         # terminal; status is completed already, nothing to do (and we won't touch process_status)
+#         logger.info(
+#             "advance_completed_one: %s already at final stage %s", url, cur_stage.value
+#         )
+#         return False
+
+#     # Advance *without* calling fsm.step() (which would set process_status).
+#     # We still use FSM for mark_status persistence & notes formatting.
+#     state.stage = nxt
+#     state.status = PipelineStatus.NEW
+#     # Persist once
+#     update_and_persist_pipeline_state(state, table)
+#     _status_flags_recompute_row(url, table=table.value)
+
+#     logger.info(
+#         "➡️ advance_completed_one: %s %s → %s (status=NEW)",
+#         url,
+#         cur_stage.value,
+#         nxt.value,
+#     )
+#     return True
+
+
+def advance_completed_one(
+    url: str, *, table: TableName = TableName.PIPELINE_CONTROL
+) -> bool:
+    """
+    If row's *status* == COMPLETED, advance exactly one stage and set status=NEW.
+    Does NOT touch process_status (i.e., we avoid PipelineFSM.step()).
+    """
+    t0 = time.perf_counter()
+
+    # 1) Load state (NOTE: if you’re clamping iteration to 0, ensure load_pipeline_state does the same)
+    state = load_pipeline_state(url, table_name=table)
+    if state is None:
+        logger.warning(
+            "advance_completed_one: no PipelineState for url=%s (table=%s)",
+            url,
+            table.value if hasattr(table, "value") else table,
         )
-        logger.info("✅ Upserted pipeline state for %s", state_model.url)
+        return False
+
+    logger.debug("advance_completed_one: loaded state %s", _state_summary(state))
+
+    # 2) Normalize and guard status
+    raw_status = getattr(state, "status", None)
+    try:
+        status_str = (
+            raw_status.value
+            if hasattr(raw_status, "value")
+            else str(raw_status).lower()
+        )
+    except Exception:
+        status_str = str(raw_status)
+
+    logger.debug(
+        "advance_completed_one: raw_status=%r normalized=%r", raw_status, status_str
+    )
+
+    if status_str != PipelineStatus.COMPLETED.value:
+        logger.debug(
+            "advance_completed_one: (%s, iter=%s) not COMPLETED; status=%r",
+            url,
+            getattr(state, "iteration", None),
+            status_str,
+        )
+        return False
+
+    # 3) Normalize stage and compute next
+    raw_stage = getattr(state, "stage", None)
+    try:
+        cur_stage = (
+            raw_stage
+            if isinstance(raw_stage, PipelineStage)
+            else PipelineStage(str(raw_stage))
+        )
     except Exception as e:
         logger.error(
-            "❌ Failed to upsert pipeline state for %s: %s",
-            getattr(state_model, "url", "<unknown>"),
+            "advance_completed_one: invalid stage for url=%s: %r (%s)",
+            url,
+            raw_stage,
             e,
-            exc_info=True,
         )
-        raise
+        return False
+
+    nxt = next_stage(cur_stage)
+    logger.debug(
+        "advance_completed_one: current_stage=%s next_stage=%s",
+        getattr(cur_stage, "value", cur_stage),
+        getattr(nxt, "value", nxt),
+    )
+
+    if nxt is None:
+        logger.info(
+            "advance_completed_one: %s already at final stage %s; no-op",
+            url,
+            getattr(cur_stage, "value", cur_stage),
+        )
+        return False
+
+    # 4) Persist change (single upsert), log pre/post snapshots
+    pre_snapshot = _state_summary(state)
+    state.stage = nxt
+    state.status = PipelineStatus.NEW
+
+    try:
+        update_and_persist_pipeline_state(state, table)
+        # (Optional) recompute decision/transition flags for this URL
+        _status_flags_recompute_row(
+            url, table=table.value if hasattr(table, "value") else str(table)
+        )
+    except Exception:
+        logger.exception("advance_completed_one: persist failed for url=%s", url)
+        return False
+
+    # 5) Quick read-back verification (helps catch “allowed_fields”/upsert masks)
+    try:
+        post = load_pipeline_state(url, table_name=table)
+        post_snapshot = _state_summary(post) if post else "<missing>"
+        logger.debug(
+            "advance_completed_one: pre=%s -> post=%s", pre_snapshot, post_snapshot
+        )
+    except Exception:
+        logger.exception("advance_completed_one: read-back failed for url=%s", url)
+
+    dt_ms = int((time.perf_counter() - t0) * 1000)
+    logger.info(
+        "➡️ advance_completed_one: %s %s → %s (status=NEW) in %dms",
+        url,
+        getattr(cur_stage, "value", cur_stage),
+        getattr(nxt, "value", nxt),
+        dt_ms,
+    )
+    return True
+
+
+def sync_decision_flag_for_control_row(
+    url: str,
+    stage: PipelineStage,
+    *,
+    table_name: TableName = TableName.PIPELINE_CONTROL,
+    con=None,
+) -> None:
+    """
+    Single source of GO/NO-GO for the current (url, stage) row:
+
+    decision_flag = 0 if status IN {COMPLETED, SKIPPED}
+                    or process_status IN {COMPLETED, SKIPPED}
+                    else 1
+
+    transition_flag is always reset to 0.
+    """
+    owns_con = con is None
+    if owns_con:
+        con = get_db_connection()
+    try:
+        st_completed = PipelineStatus.COMPLETED.value
+        st_skipped = getattr(PipelineStatus, "SKIPPED", PipelineStatus.COMPLETED).value
+
+        ps_completed = PipelineProcessStatus.COMPLETED.value
+        ps_skipped = getattr(
+            PipelineProcessStatus, "SKIPPED", PipelineProcessStatus.COMPLETED
+        ).value
+
+        con.execute(
+            f"""
+            UPDATE {table_name.value}
+            SET decision_flag = CASE
+                                    WHEN status IN (?, ?)
+                                      OR process_status IN (?, ?)
+                                    THEN 0 ELSE 1
+                                END,
+                transition_flag = 0,
+                updated_at = now()
+            WHERE url = ? AND stage = ?
+            """,
+            (st_completed, st_skipped, ps_completed, ps_skipped, url, stage.value),
+        )
+    finally:
+        if owns_con:
+            con.close()
+
+
+def _enum_val(x: Any) -> Any:
+    """Return Enum.value for Enum instances; identity otherwise."""
+    try:
+        if isinstance(x, Enum):
+            return x.value
+    except Exception:
+        pass
+    return x
+
+
+def _get_control_row(
+    url: str, iteration: Optional[int] = None, table_name: str = "pipeline_control"
+):
+    con = get_db_connection()
+    if iteration is None:
+        df = con.execute(
+            f"SELECT * FROM {table_name} WHERE url = ? ORDER BY iteration DESC LIMIT 1",
+            (url,),
+        ).df()
+    else:
+        df = con.execute(
+            f"SELECT * FROM {table_name} WHERE url = ? AND iteration = ?",
+            (url, iteration),
+        ).df()
+    return None if df.empty else df.iloc[0].to_dict()
+
+
+def _status_flags_recompute_row(url: str, *, table: str = "pipeline_control") -> None:
+    """
+    Recompute decision/transition flags for this URL using *status only*:
+      decision_flag = 0 if status IN ('completed','skipped') else 1
+      transition_flag = 0
+    """
+    con = get_db_connection()
+    con.execute(
+        f"""
+        UPDATE {table}
+        SET decision_flag = CASE WHEN LOWER(status) IN ('completed','skipped') THEN 0 ELSE 1 END,
+            transition_flag = 0,
+            updated_at = now()
+        WHERE url = ?
+        """,
+        (url,),
+    )
+
+
+# for logging
+def _state_summary(state) -> str:
+    """
+    Compact one-line summary for PipelineState-like objects.
+    Avoids huge dumps while surfacing the key fields we care about.
+    """
+
+    # Safely pull attrs whether they're Enums or strings
+    def _val(x):
+        if x is None:
+            return None
+        try:
+            return x.value  # Enum
+        except AttributeError:
+            return str(x)
+
+    # Collect a stable subset of fields (add/remove as needed)
+    fields = {
+        "url": getattr(state, "url", None),
+        "iteration": getattr(state, "iteration", None),
+        "stage": _val(getattr(state, "stage", None)),
+        "status": _val(getattr(state, "status", None)),
+        "process_status": _val(getattr(state, "process_status", None)),
+        "updated_at": getattr(state, "updated_at", None),
+        "version": getattr(state, "version", None),
+    }
+    # Render compact JSON for readability in logs
+    return json.dumps(fields, default=str, separators=(",", ":"))

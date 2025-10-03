@@ -52,7 +52,9 @@ results come back as a dict of models, a file model, or a DataFrame.
 """
 
 # Std and 3rd party imports
-from typing import Any, Optional, Sequence, Dict, Union
+from __future__ import annotations
+import re
+from typing import Any, Optional, Sequence, List, Dict, Union
 import logging
 import pandas as pd
 from pydantic import BaseModel
@@ -72,59 +74,21 @@ from job_bot.config.project_config import DB_LOADERS_YAML
 
 logger = logging.getLogger(__name__)
 
+_ORDER_HINTS = ["updated_at", "created_at", "iteration"]
 
 # load config yaml once (or cache)
 with open(DB_LOADERS_YAML, "r") as f:
     LOADER_CFG = LoaderConfig.model_validate(yaml.safe_load(f))
     logger.info(f"Loaded yaml config ({DB_LOADERS_YAML}) into config model.")
 
-
-def _allowed_predicates(table: TableName, cfg_filters: Sequence[str]) -> set[str]:
-    schema = DUCKDB_SCHEMA_REGISTRY[table]
-    # union of PK + metadata from registry; intersect with config whitelist
-    allowed = set(schema.primary_keys) | set(schema.metadata_fields)
-    return allowed & set(cfg_filters)
-
-
-def _select_df(
-    table: TableName,
-    *,
-    predicates: Dict[str, Any],
-    order_by: Sequence[str],
-    columns: str = "*",
-) -> pd.DataFrame:
-    """
-    Execute a SQL script to query a table in DuckDB.
-
-    Args:
-        table: Target DuckDB table (from TableName enum).
-        predicates: Dict of column filters (validated upstream).
-        order_by: Sequence of ORDER BY clauses.
-        columns: Projection (default '*').
-
-    Returns:
-        pandas.DataFrame with query results.
-
-    Note: In SQL, predicates are the conditions that evaluate to
-    TRUE / FALSE (or UNKNOWN with NULLs).
-    """
-    schema = DUCKDB_SCHEMA_REGISTRY[table]
-    where_sql, params = [], []
-
-    for col, val in predicates.items():
-        if val is not None:
-            where_sql.append(f"{col} = ?")
-            params.append(val)
-
-    where = f"WHERE {' AND '.join(where_sql)}" if where_sql else ""
-    order_sql = f"ORDER BY {', '.join(order_by)}" if order_by else ""
-
-    sql = f"SELECT {columns} FROM {schema.table_name} {where} {order_sql}".strip()
-    con = get_db_connection()
-    try:
-        return con.execute(sql, params).df()
-    finally:
-        con.close()
+    # todo: debug; delete later
+    logger.debug("LOADER tables: %s", list(LOADER_CFG.tables.keys()))
+    logger.debug(
+        "pipeline_control.filters: %s", LOADER_CFG.tables["pipeline_control"].filters
+    )
+    logger.debug(
+        "pipeline_control.order_by: %s", LOADER_CFG.tables["pipeline_control"].order_by
+    )
 
 
 def load_table(
@@ -195,7 +159,8 @@ def load_table(
     rehydrate_fn = import_callable(tbl_loader_config.rehydrate)
     # model_or_file = rehydrate_fn(df)
 
-    # 2) If a single URL is requested → return one Model (pick newest rows automatically via order_by)
+    # 2) If a single URL is requested → return one Model
+    # (pick newest rows automatically via order_by)
     if "url" in preds and preds["url"]:
         # df already filtered to that URL; just rehydrate that slice
         return rehydrate_fn(df)
@@ -209,3 +174,101 @@ def load_table(
 
     # 4) Otherwise return a DataFrame (keeps things simple; avoids *Batch*)
     return df
+
+
+def _allowed_predicates(table: TableName, cfg_filters: Sequence[str]) -> set[str]:
+    schema = DUCKDB_SCHEMA_REGISTRY[table]
+    # union of PK + metadata from registry; intersect with config whitelist
+    allowed = set(schema.primary_keys) | set(schema.metadata_fields)
+
+    # todo: debug; delete later
+    logger.debug(f"schema pks: {set(schema.primary_keys)}")
+    logger.debug(f"schema meta fields: {set(schema.metadata_fields)}")
+    logger.debug(f"allowed_fields: {allowed}")
+
+    return allowed & set(cfg_filters)
+
+
+def _clean_order_by(order_by: Optional[Sequence[str]], cols: set[str]) -> List[str]:
+    """
+    Keep only order terms whose base column exists in this table.
+    Supports items like: 'updated_at DESC', 'iteration', 'col DESC NULLS LAST'.
+    """
+    cleaned: List[str] = []
+    if not order_by:
+        return cleaned
+    for term in order_by:
+        base = re.split(r"[ (]", term.strip(), maxsplit=1)[0]  # first token
+        if base in cols:
+            cleaned.append(term.strip())
+    return cleaned
+
+
+def _fallback_order_for(table: TableName, cols: set[str]) -> List[str]:
+    schema = DUCKDB_SCHEMA_REGISTRY[table]
+    # Prefer common recency hints, then PKs (minus url), then any *_key
+    for pref in [
+        [c for c in _ORDER_HINTS if c in cols],
+        [c for c in getattr(schema, "primary_keys", []) if c in cols and c != "url"],
+        [c for c in schema.column_order if c in cols and c.endswith("_key")],
+    ]:
+        if pref:
+            # default to DESC NULLS LAST for recency-ish sorts
+            return [f"{c} DESC NULLS LAST" for c in pref]
+    return []
+
+
+def _select_df(
+    table: TableName,
+    *,
+    predicates: Dict[str, Any],
+    order_by: Optional[Sequence[str]] = None,
+    columns: str = "*",
+) -> pd.DataFrame:
+    """
+    Execute a SQL script to query a table in DuckDB.
+
+    Args:
+        table: Target DuckDB table (from TableName enum).
+        predicates: Dict of column filters (validated upstream).
+        order_by: Sequence of ORDER BY clauses.
+        columns: Projection (default '*').
+
+    Returns:
+        pandas.DataFrame with query results.
+
+    Note: In SQL, predicates are the conditions that evaluate to
+    TRUE / FALSE (or UNKNOWN with NULLs).
+    """
+    schema = DUCKDB_SCHEMA_REGISTRY[table]
+    cols = set(schema.column_order)
+
+    where_sql, params = [], []
+    for col, val in predicates.items():
+        if val is None:
+            continue
+
+        # Type guard: treat val as a multi-value container only if it’s a list/tuple/set
+        if isinstance(val, (list, tuple, set)) and not isinstance(val, (str, bytes)):
+            vals = list(val)
+            if not vals:  # empty IN: make it false
+                where_sql.append("1=0")
+                continue
+            placeholders = ", ".join(["?"] * len(vals))
+            where_sql.append(f"{col} IN ({placeholders})")
+            params.extend(vals)
+        else:
+            where_sql.append(f"{col} = ?")
+            params.append(val)
+
+    where = f"WHERE {' AND '.join(where_sql)}" if where_sql else ""
+
+    chosen = _clean_order_by(order_by, cols) or _fallback_order_for(table, cols)
+    order_sql = f" ORDER BY {', '.join(chosen)}" if chosen else ""
+
+    sql = f"SELECT {columns} FROM {schema.table_name} {where}{order_sql}".strip()
+    con = get_db_connection()
+    try:
+        return con.execute(sql, params).df()
+    finally:
+        con.close()

@@ -11,7 +11,18 @@ Each function returns raw values or DataFrames depending on the context.
 
 # Standard
 import logging
-from typing import Optional, List, get_origin, get_args, Union, Sequence
+from typing import (
+    Any,
+    Iterable,
+    Optional,
+    List,
+    get_origin,
+    get_args,
+    Union,
+    Sequence,
+    Type,
+    TypeVar,
+)
 from datetime import datetime
 import json
 from enum import Enum
@@ -21,7 +32,12 @@ import pandas as pd
 
 # Project level
 from job_bot.db_io.get_db_connection import get_db_connection
-from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus
+from job_bot.db_io.pipeline_enums import (
+    PipelineStage,
+    PipelineStatus,
+    PipelineProcessStatus,
+    TableName,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,34 +59,45 @@ def align_df_with_schema(
     Args:
         - df (pd.DataFrame): Input DataFrame to validate and clean.
         - schema_columns (List[str]): Expected column names in final DuckDB order.
-
+        - strict:
+            if strict=True:
+                Any missing columns (before step 1) → error.
+            if False:
+                just warnings;
+                prune extras; create missing columns (w/t None)
+                proceed.
     Returns:
         pd.DataFrame: A cleaned and schema-aligned DataFrame.
     """
     df = df.copy()
 
+    # 1) dedupe
     original_len = len(df)
     df.drop_duplicates(inplace=True)
     deduped_len = len(df)
     if deduped_len < original_len:
         logger.info(f"Dropped {original_len - deduped_len} duplicate rows")
 
-    # Add missing columns
+    # 2) detect mismatches against the incoming df (BEFORE adding)
+    missing_before = [c for c in schema_columns if c not in df.columns]
+    extra_in_df = [c for c in df.columns if c not in schema_columns]
+
+    # 3) strict handling of missing
+    if strict and missing_before:
+        raise ValueError(f"Missing columns in DataFrame: {missing_before}")
+
+    # 4) always drop extras (be explicit + observable)
+    if extra_in_df:
+        logger.warning(f"Dropping unexpected columns: {extra_in_df}")
+        df = df.drop(columns=extra_in_df)
+
+    # 5) add any still-missing schema columns (fill with None)
     for col in schema_columns:
         if col not in df.columns:
             df[col] = None
             logger.debug(f"Added missing column: {col}")
 
-    # Drop unexpected columns (optional safety)
-    missing_in_df = [col for col in schema_columns if col not in df.columns]
-    extra_in_df = [col for col in df.columns if col not in schema_columns]
-
-    if strict:
-        if missing_in_df:
-            raise ValueError(f"Missing columns in DataFrame: {missing_in_df}")
-        if extra_in_df:
-            raise ValueError(f"Unexpected extra columns in DataFrame: {extra_in_df}")
-
+    # 6) reorder to schema
     df = df[[col for col in schema_columns]]
 
     # Coerce problematic types
@@ -151,29 +178,49 @@ def get_urls_by_stage_and_status(
     status: Union[PipelineStatus, Sequence[PipelineStatus]] = PipelineStatus.NEW,
     version: Optional[str] = None,
     iteration: Optional[int] = None,
+    active_urls_only: bool = True,
 ) -> List[str]:
     """
-    Return URLs from the pipeline_control table matching a specific stage
-    and one or more status, with optional filtering by version and iteration.
+    Return URLs from `pipeline_control` matching a specific stage and one or more status,
+    with optional filtering by version, iteration, and (by default) active lifecycle.
+
+    Lifecycle gating:
+        When active_urls_only=True, only rows with process_status IN ('new','running')
+        are considered. Set to False to ignore lifecycle.
 
     Args:
         stage: Pipeline stage (Enum) to match.
-        status: Single status or sequence of status to include (default = NEW).
+        status: Single status or a sequence of statuses to include (default = NEW).
         version: Optional version filter (e.g., "original").
         iteration: Optional iteration number.
+        active_urls_only: If True (default), include only NEW/RUNNING lifecycle rows.
 
     Returns:
-        List[str]: A list of DISTINCT URLs matching the criteria.
+        List[str]: DISTINCT URLs matching the criteria, ordered by recency.
     """
-    # Normalize to a list of status
+    # Normalize to a non-empty list of PipelineStatus
     if isinstance(status, PipelineStatus):
-        status = [status]
+        status_list: List[PipelineStatus] = [status]
     else:
-        status = list(status)  # assumes iterable of PipelineStatus
+        status_list = list(status)
+        if not status_list:
+            # Defensive: don't emit invalid SQL
+            return []
 
-    filters = ["stage = ?", f"status IN ({', '.join(['?'] * len(status))})"]
-    params: List[object] = [stage.value, *(s.value for s in status)]
+    filters = ["stage = ?"]
+    params: List[object] = [stage.value]
 
+    # Stage-local status filter
+    filters.append(f"status IN ({', '.join(['?'] * len(status_list))})")
+    params.extend(s.value for s in status_list)
+
+    # Optional lifecycle (process_status) gating
+    if active_urls_only:
+        process_allowed = (PipelineProcessStatus.NEW, PipelineProcessStatus.RUNNING)
+        filters.append(f"process_status IN ({', '.join(['?'] * len(process_allowed))})")
+        params.extend(p.value for p in process_allowed)
+
+    # Optional version/iteration filters
     if version is not None:
         filters.append("version = ?")
         params.append(version)
@@ -190,7 +237,7 @@ def get_urls_by_stage_and_status(
 
     con = get_db_connection()
     try:
-        df: pd.DataFrame = con.execute(sql, params).df()
+        df: pd.DataFrame = con.execute(sql, params).fetchdf()
         return df["url"].tolist()
     finally:
         con.close()
@@ -198,41 +245,74 @@ def get_urls_by_stage_and_status(
 
 # URL pre-filtering utility
 def get_urls_from_pipeline_control(
-    status: PipelineStatus = PipelineStatus.IN_PROGRESS,
-    url: Optional[str] = None,
-    iteration: Optional[int] = None,
+    *,
+    status: Optional[
+        Union[PipelineStatus, str, Sequence[Union[PipelineStatus, str]]]
+    ] = None,
+    stage: Optional[
+        Union[PipelineStage, str, Sequence[Union[PipelineStage, str]]]
+    ] = None,
+    active_urls_only: bool = True,
+    limit: Optional[int] = None,
+    table: TableName = TableName.PIPELINE_CONTROL,
+    con=None,
 ) -> List[str]:
     """
-    Returns a list of distinct URLs from the pipeline_control table
-    filtered by status and optional URL/iteration.
+    Return DISTINCT URLs from `pipeline_control` filtered by status/stage.
 
-    Args:
-        - status (PipelineStatus): Status to match (e.g., 'new', 'in_progress').
-        - url (Optional[str]): Optional job URL filter.
-        - iteration (Optional[int]): Optional iteration filter.
-
-    Returns:
-        List[str]: List of matching job posting URLs.
+    - `status` and `stage` can be a single value or a list (enum or string).
+    - When `active_urls_only=True`, exclude only rows with
+        process_status ∈ {'skipped','completed'}.
+      (NULL, 'running', 'new', 'error', etc. are allowed.)
+    - Ordered by updated_at DESC.
     """
-    filters = ["status = ?"]
-    params: List[str | int] = [status.value]
+    owns_con = con is None
+    if owns_con:
+        con = get_db_connection()
 
-    if url:
-        filters.append("url = ?")
-        params.append(url)
-    if iteration is not None:
-        filters.append("iteration = ?")
-        params.append(iteration)
+    try:
+        where: List[str] = []
+        params: List[Any] = []
 
-    sql = f"""
-        SELECT DISTINCT url
-        FROM pipeline_control
-        WHERE {' AND '.join(filters)}
-    """
+        # Normalize filters
+        status_vals = _to_values(status, PipelineStatus, lower=True)
+        stage_vals = _to_values(
+            stage, PipelineStage, lower=False
+        )  # stage names are already canonical
 
-    con = get_db_connection()
-    df = con.execute(sql, params).df()
-    return df["url"].tolist()
+        if status_vals:
+            placeholders = ",".join(["?"] * len(status_vals))
+            where.append(f"status IN ({placeholders})")
+            params.extend(status_vals)
+
+        if stage_vals:
+            placeholders = ",".join(["?"] * len(stage_vals))
+            where.append(f"stage IN ({placeholders})")
+            params.extend(stage_vals)
+
+        if active_urls_only:
+            # Include NULL and everything except the terminal process states you want to exclude.
+            where.append(
+                "(process_status IS NULL OR process_status NOT IN ('skipped','completed'))"
+            )
+
+        where_sql = " AND ".join(where) if where else "1=1"
+
+        sql = f"""
+            SELECT DISTINCT url
+            FROM {table.value}
+            WHERE {where_sql}
+            ORDER BY updated_at DESC
+            { 'LIMIT ?' if limit is not None else '' }
+        """
+        if limit is not None:
+            params.append(limit)
+
+        rows = con.execute(sql, params).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        if owns_con:
+            con.close()
 
 
 # ✅ URL Lookup Utilities
@@ -406,3 +486,131 @@ def generate_table_schema_from_model(
         f"    {field_block}"
         f"{pk_clause}\n);"
     )
+
+
+# ---- Transition Helpers -------
+
+
+def get_urls_ready_for_transition(
+    stage: PipelineStage, limit: int | None = None
+) -> list[str]:
+    """
+    Worklist picker: only rows with (decision_flag=1, transition_flag=0).
+    """
+    con = get_db_connection()
+    try:
+        sql = f"""
+            SELECT url
+            FROM {TableName.PIPELINE_CONTROL.value}
+            WHERE stage = ? AND decision_flag = 1
+        """
+        params: list[object] = [stage.value]  # <-- allow str + int
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)  # keep as int, not str
+        df = con.execute(sql, params).df()
+        return df["url"].tolist()
+    finally:
+        con.close()
+
+
+def set_decision(url: str, stage: PipelineStage, go: bool | None) -> None:
+    """
+    Decide GO/NO-GO (1/0) or clear to NULL (undecided). Keeps transition_flag at 0.
+    """
+    con = get_db_connection()
+    try:
+        con.execute(
+            """
+            UPDATE pipeline_control
+            SET decision_flag = ?, transition_flag = COALESCE(transition_flag, 0), updated_at = now()
+            WHERE url = ? AND stage = ?
+            """,
+            (None if go is None else (1 if go else 0), url, stage.value),
+        )
+    finally:
+        con.close()
+
+
+def apply_transition(
+    url: str, current_stage: PipelineStage, next_stage: PipelineStage | None
+) -> None:
+    """
+    Current: (1,0) -> (0,1). Next: create/activate as (1,0) if provided.
+    Keeps your status column compatible: current -> COMPLETED, next -> NEW.
+    """
+    con = get_db_connection()
+    try:
+        # current stage finalized
+        con.execute(
+            """
+            UPDATE pipeline_control
+            SET decision_flag = 0,
+                transition_flag = 1,
+                status = 'completed',
+                updated_at = now()
+            WHERE url = ? AND stage = ?
+            """,
+            (url, current_stage.value),
+        )
+
+        if next_stage:
+            # try update first
+            updated = con.execute(
+                """
+                UPDATE pipeline_control
+                SET decision_flag = 1,
+                    transition_flag = 0,
+                    status = 'new',
+                    updated_at = now()
+                WHERE url = ? AND stage = ?
+                """,
+                (url, next_stage.value),
+            ).rowcount  # DuckDB python returns rowcount
+
+            # if no row existed for next, insert a new one (inherit iteration)
+            if not updated:
+                con.execute(
+                    """
+                    INSERT INTO pipeline_control (url, iteration, stage, status, decision_flag, transition_flag, created_at)
+                    SELECT url, iteration, ?, 'new', 1, 0, now()
+                    FROM pipeline_control
+                    WHERE url = ? 
+                    ORDER BY iteration DESC
+                    LIMIT 1
+                    """,
+                    (next_stage.value, url),
+                )
+    finally:
+        con.close()
+
+
+E = TypeVar("E")  # enum type
+
+
+def _to_values(
+    item: Optional[Union[str, E, Sequence[Union[str, E]]]],
+    enum_cls: Optional[Type[E]] = None,
+    *,
+    lower: bool = True,
+) -> List[str]:
+    """
+    Normalize an enum/string or a sequence of them into a list of string values.
+    If enum_cls is provided, enum members become their .value; strings are optionally lowered.
+    """
+    if item is None:
+        return []
+    seq: Iterable[Union[str, E]]
+    if isinstance(item, (str,)) or (enum_cls and isinstance(item, enum_cls)):
+        seq = [item]  # single → list
+    else:
+        seq = item  # assume sequence
+
+    out: List[str] = []
+    for x in seq:
+        if enum_cls and isinstance(x, enum_cls):
+            out.append(getattr(x, "value"))
+        else:
+            s = str(x)
+            out.append(s.lower() if lower else s)
+    return out

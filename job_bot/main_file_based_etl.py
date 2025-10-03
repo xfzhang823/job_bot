@@ -39,7 +39,7 @@ facilitating modular, reusable code for various stages of the process.
 """
 
 # Dependencies
-from pipelines.hf_cache_refresh_and_lock_pipeline import (
+from job_bot.pipelines.hf_cache_refresh_and_lock_pipeline import (
     run_hf_cache_refresh_and_lock_pipeline,
 )
 
@@ -212,8 +212,8 @@ def main_anthropic():
     # # ✅ Step 2: Creating/updating mapping file for iteration 0
     # execute_pipeline("2a", llm_provider=ANTHROPIC)
 
-    # # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
-    # execute_pipeline("2b", llm_provider=ANTHROPIC)
+    # ✅ Step 3: Extracting & Flattening Job Requirements and Responsibilities
+    execute_pipeline("2b", llm_provider=ANTHROPIC)
 
     # # ✅ Step 4: Resume Evaluation (Calculate Similarity/Entailment Metrics)
     # execute_pipeline("2c_async", llm_provider=ANTHROPIC)
