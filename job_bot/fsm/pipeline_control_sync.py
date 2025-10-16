@@ -73,55 +73,6 @@ def list_intersection(a: Iterable[str], b: Iterable[str]) -> list[str]:
 
 
 # -------------------------------
-# Sync to set decision flat to 1 (if stuck on 0)
-# -------------------------------
-
-
-def sync_decision_flags_all(
-    *,
-    table_name: TableName = TableName.PIPELINE_CONTROL,
-    con=None,
-) -> int:
-    """
-    Recompute decision_flag for ALL rows in pipeline_control and reset transition_flag to 0.
-
-    Rule:
-      decision_flag = 0 if status IN {COMPLETED, SKIPPED}
-                      or process_status IN {COMPLETED, SKIPPED}
-                      else 1
-    """
-    owns_con = con is None
-    if owns_con:
-        con = get_db_connection()
-    try:
-        st_completed = PipelineStatus.COMPLETED.value
-        st_skipped = getattr(PipelineStatus, "SKIPPED", PipelineStatus.COMPLETED).value
-        ps_completed = PipelineProcessStatus.COMPLETED.value
-        ps_skipped = getattr(
-            PipelineProcessStatus, "SKIPPED", PipelineProcessStatus.COMPLETED
-        ).value
-
-        res = con.execute(
-            f"""
-            UPDATE {table_name.value}
-            SET decision_flag = CASE
-                                   WHEN status IN (?, ?) OR process_status IN (?, ?)
-                                   THEN 0 ELSE 1
-                                END,
-                transition_flag = 0,
-                updated_at = now()
-            """,
-            (st_completed, st_skipped, ps_completed, ps_skipped),
-        )
-        updated = getattr(res, "rowcount", 0)
-        logger.info("🔄 decision_flag full-table sync updated %s rows.", updated)
-        return updated
-    finally:
-        if owns_con:
-            con.close()
-
-
-# -------------------------------
 # Sync to advance stage (ensure that existing pipeline control is not "stuck")
 # -------------------------------
 
@@ -450,104 +401,6 @@ def sync_table_to_pipeline_control(
 
 
 # -------------------------------
-# Orchestrator entrypoint
-# -------------------------------
-
-
-def sync_all_tables_to_pipeline_control(
-    *,
-    full: bool = True,
-    create_table: bool = True,
-    integrity_check: bool = True,
-) -> None:
-    """
-    Orchestrate syncing stage/source tables into `pipeline_control`
-    (FSM control plane).
-
-    When to run
-    -----------
-    - Bootstrap: first-time setup to seed control rows from existing
-        stage tables.
-    - Recovery: after failures or manual edits, to realign control rows.
-    - Periodic refresh: keep `pipeline_control` consistent with stage tables.
-
-    What it does
-    ------------
-    - Optionally ensures the `pipeline_control` table exists.
-    - If `full=True`, runs all stage syncs in order
-      (job_urls → edited_responsibilities).
-    - Always refreshes similarity metrics (often your gating signal).
-    - Optionally runs a quick FSM integrity check.
-
-    Notes
-    -----
-    - Each sync is isolated with its own try/except so one failure does not
-      halt the rest.
-    - This function does not execute the stage pipelines;
-      it only manages control state.
-    """
-
-    logger.info("🧭 Starting pipeline state orchestration...")
-
-    if create_table:
-        try:
-            create_single_db_table(table_name=TableName.PIPELINE_CONTROL)
-        except Exception as e:
-            logger.warning(
-                f"⚠️ Could not ensure pipeline_control table exists: {e}", exc_info=True
-            )
-
-        # NEW: normalize any historical NULLs → 0
-        try:
-            con = get_db_connection()
-            try:
-                con.execute(
-                    """
-                    UPDATE pipeline_control
-                    SET decision_flag = COALESCE(decision_flag, 0),
-                        transition_flag = COALESCE(transition_flag, 0)
-                    WHERE decision_flag IS NULL OR transition_flag IS NULL
-                """
-                )
-            finally:
-                con.close()
-        except Exception as e:
-            logger.warning("⚠️ Could not backfill NULL flags to 0: %s", e, exc_info=True)
-
-    if full:
-        for item in SYNC_PLAN:
-            try:
-                sync_table_to_pipeline_control(
-                    source_table=item["source"],
-                    stage=item["stage"],
-                    set_status_on_insert=item["status"],
-                    insert_only=True,
-                    refresh_meta_fields=item.get(
-                        "refresh_meta_fields",
-                        ("source_file", "version"),
-                    ),
-                    preserve_stage_on_update=True,
-                    preserve_status_on_update=True,
-                    set_process_status_on_insert=PipelineProcessStatus.NEW,
-                    mode="append",
-                )
-            except Exception as e:
-                logger.error(
-                    f"❌ Failed syncing {item['source'].value}: {e}", exc_info=True
-                )
-
-    if integrity_check:
-        try:
-            check_fsm_integrity()
-        except Exception as e:
-            logger.warning(
-                f"⚠️ FSM integrity check encountered an issue: {e}", exc_info=True
-            )
-
-    logger.info("✅ Pipeline control table sync complete.")
-
-
-# -------------------------------
 # Data-driven sync plan
 # -------------------------------
 
@@ -700,3 +553,153 @@ def sync_similarity_metrics_to_pipeline_control():
         set_status_on_insert=PipelineStatus.IN_PROGRESS,
         set_process_status_on_insert=PipelineProcessStatus.NEW,
     )
+
+
+# todo: commented out; no longer use; delete later
+# def sync_all_tables_to_pipeline_control(
+#     *,
+#     full: bool = True,
+#     create_table: bool = True,
+#     integrity_check: bool = True,
+# ) -> None:
+#     """
+#     Orchestrate syncing stage/source tables into `pipeline_control`
+#     (FSM control plane).
+
+#     When to run
+#     -----------
+#     - Bootstrap: first-time setup to seed control rows from existing
+#         stage tables.
+#     - Recovery: after failures or manual edits, to realign control rows.
+#     - Periodic refresh: keep `pipeline_control` consistent with stage tables.
+
+#     What it does
+#     ------------
+#     - Optionally ensures the `pipeline_control` table exists.
+#     - If `full=True`, runs all stage syncs in order
+#       (job_urls → edited_responsibilities).
+#     - Always refreshes similarity metrics (often your gating signal).
+#     - Optionally runs a quick FSM integrity check.
+
+#     Notes
+#     -----
+#     - Each sync is isolated with its own try/except so one failure does not
+#       halt the rest.
+#     - This function does not execute the stage pipelines;
+#       it only manages control state.
+#     """
+
+#     logger.info("🧭 Starting pipeline state orchestration...")
+
+#     if create_table:
+#         try:
+#             create_single_db_table(table_name=TableName.PIPELINE_CONTROL)
+#         except Exception as e:
+#             logger.warning(
+#                 f"⚠️ Could not ensure pipeline_control table exists: {e}", exc_info=True
+#             )
+
+#         # NEW: normalize any historical NULLs → 0
+#         try:
+#             con = get_db_connection()
+#             try:
+#                 con.execute(
+#                     """
+#                     SET decision_flag = CASE
+#                         WHEN LOWER(status) IN ('completed','skipped') THEN 0
+#                         ELSE COALESCE(decision_flag, 0) -- initialize but never downgrade 1
+#                     END,
+#                     transition_flag = CASE
+#                         WHEN LOWER(status) IN ('completed','skipped') THEN 0
+#                     ELSE COALESCE(transition_flag, 0)
+#                     END
+#                 """
+#                 )
+#             finally:
+#                 con.close()
+#         except Exception as e:
+#             logger.warning("⚠️ Could not backfill NULL flags to 0: %s", e, exc_info=True)
+
+#     if full:
+#         for item in SYNC_PLAN:
+#             try:
+#                 sync_table_to_pipeline_control(
+#                     source_table=item["source"],
+#                     stage=item["stage"],
+#                     set_status_on_insert=item["status"],
+#                     insert_only=True,
+#                     refresh_meta_fields=item.get(
+#                         "refresh_meta_fields",
+#                         ("source_file", "version"),
+#                     ),
+#                     preserve_stage_on_update=True,
+#                     preserve_status_on_update=True,
+#                     set_process_status_on_insert=PipelineProcessStatus.NEW,
+#                     mode="append",
+#                 )
+#             except Exception as e:
+#                 logger.error(
+#                     f"❌ Failed syncing {item['source'].value}: {e}", exc_info=True
+#                 )
+
+#     if integrity_check:
+#         try:
+#             check_fsm_integrity()
+#         except Exception as e:
+#             logger.warning(
+#                 f"⚠️ FSM integrity check encountered an issue: {e}", exc_info=True
+#             )
+
+#     logger.info("✅ Pipeline control table sync complete.")
+
+
+# -------------------------------
+# Sync to set decision flat to 1 (if stuck on 0)
+# -------------------------------
+
+
+# def sync_decision_flags_all(
+#     *,
+#     table_name: TableName = TableName.PIPELINE_CONTROL,
+#     con=None,
+# ) -> int:
+#     """
+#     Recompute decision_flag for ALL rows in pipeline_control
+#     and reset transition_flag to 0.
+
+#     Rule:
+#       decision_flag = 0 if status or process_status IN {COMPLETED, SKIPPED}
+#                       else keep existing (COALESCE(decision_flag, 0))
+#     """
+#     owns_con = con is None
+#     if owns_con:
+#         con = get_db_connection()
+#     try:
+#         st_completed = PipelineStatus.COMPLETED.value
+#         st_skipped = getattr(
+#             PipelineStatus, PipelineStatus.SKIPPED, PipelineStatus.COMPLETED
+#         ).value
+#         ps_completed = PipelineProcessStatus.COMPLETED.value
+#         ps_skipped = getattr(
+#             PipelineProcessStatus, "SKIPPED", PipelineProcessStatus.COMPLETED
+#         ).value
+
+#         res = con.execute(
+#             f"""
+#             UPDATE {table_name.value}
+#             SET decision_flag = CASE
+#                                    WHEN status IN (?, ?) OR process_status IN (?, ?)
+#                                      THEN 0
+#                                    ELSE COALESCE(decision_flag, 0)
+#                                 END,
+#                 transition_flag = COALESCE(transition_flag, 0),
+#                 updated_at = now()
+#             """,
+#             (st_completed, st_skipped, ps_completed, ps_skipped),
+#         )
+#         updated = getattr(res, "rowcount", 0)
+#         logger.info("🔄 decision_flag full-table sync updated %s rows.", updated)
+#         return updated
+#     finally:
+#         if owns_con:
+#             con.close()

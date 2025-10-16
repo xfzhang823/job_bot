@@ -23,16 +23,14 @@ import time
 from job_bot.db_io.get_db_connection import get_db_connection
 from job_bot.db_io.pipeline_enums import (
     TableName,
-    PipelineProcessStatus,
     PipelineStatus,
     PipelineStage,
 )
 from job_bot.db_io.db_loaders import load_table
 from job_bot.db_io.persist_pipeline_state import update_and_persist_pipeline_state
-
+from job_bot.db_io import decision_flag
 from job_bot.models.db_table_models import PipelineState
 from job_bot.fsm.pipeline_fsm import PipelineFSM
-
 from job_bot.fsm.fsm_stage_config import next_stage
 
 
@@ -99,74 +97,9 @@ def retry_error_one(url: str, *, table: TableName = TableName.PIPELINE_CONTROL) 
         notes="auto-reset from ERROR by state_sync.retry_error_one",
         table_name=table,
     )
-    # mark_status already persisted through update_and_persist_pipeline_state
-    _status_flags_recompute_row(url, table=table.value)
+
     logger.info("♻️ retry_error_one: %s → status=NEW @ %s", url, state.stage.value)
     return True
-
-
-# commented out: old version
-# def advance_completed_one(
-#     url: str, *, table: TableName = TableName.PIPELINE_CONTROL
-# ) -> bool:
-#     """
-#     If row's *status* == COMPLETED, advance exactly one stage and set status=NEW.
-#     Does NOT touch process_status (i.e., we avoid PipelineFSM.step()).
-#     """
-#     state = load_pipeline_state(url, table_name=table)
-#     if state is None:
-#         logger.warning("advance_completed_one: no PipelineState for url=%s", url)
-#         return False
-
-#     logger.debug(
-#         f"state in advance_completed_one: {state}"
-#     )  # todo: debug; delete later
-
-#     if str(state.status) != PipelineStatus.COMPLETED.value:
-#         return False
-
-#     # ✅ Normalize status safely
-#     cur_status = (
-#         state.status
-#         if isinstance(state.status, PipelineStatus)
-#         else PipelineStatus(str(state.status).lower())
-#     )
-
-#     if cur_status is not PipelineStatus.COMPLETED:
-#         logger.debug(
-#             "advance_completed_one: %s not COMPLETED (status=%s)", url, state.status
-#         )
-#         return False
-
-#     cur_stage: PipelineStage = (
-#         state.stage
-#         if isinstance(state.stage, PipelineStage)
-#         else PipelineStage(str(state.stage))
-#     )
-
-#     nxt = next_stage(cur_stage)
-#     if nxt is None:
-#         # terminal; status is completed already, nothing to do (and we won't touch process_status)
-#         logger.info(
-#             "advance_completed_one: %s already at final stage %s", url, cur_stage.value
-#         )
-#         return False
-
-#     # Advance *without* calling fsm.step() (which would set process_status).
-#     # We still use FSM for mark_status persistence & notes formatting.
-#     state.stage = nxt
-#     state.status = PipelineStatus.NEW
-#     # Persist once
-#     update_and_persist_pipeline_state(state, table)
-#     _status_flags_recompute_row(url, table=table.value)
-
-#     logger.info(
-#         "➡️ advance_completed_one: %s %s → %s (status=NEW)",
-#         url,
-#         cur_stage.value,
-#         nxt.value,
-#     )
-#     return True
 
 
 def advance_completed_one(
@@ -253,10 +186,8 @@ def advance_completed_one(
 
     try:
         update_and_persist_pipeline_state(state, table)
-        # (Optional) recompute decision/transition flags for this URL
-        _status_flags_recompute_row(
-            url, table=table.value if hasattr(table, "value") else str(table)
-        )
+        decision_flag.approve(url, nxt)  # or approve(url, nxt) if you want auto-advance
+
     except Exception:
         logger.exception("advance_completed_one: persist failed for url=%s", url)
         return False
@@ -280,53 +211,6 @@ def advance_completed_one(
         dt_ms,
     )
     return True
-
-
-def sync_decision_flag_for_control_row(
-    url: str,
-    stage: PipelineStage,
-    *,
-    table_name: TableName = TableName.PIPELINE_CONTROL,
-    con=None,
-) -> None:
-    """
-    Single source of GO/NO-GO for the current (url, stage) row:
-
-    decision_flag = 0 if status IN {COMPLETED, SKIPPED}
-                    or process_status IN {COMPLETED, SKIPPED}
-                    else 1
-
-    transition_flag is always reset to 0.
-    """
-    owns_con = con is None
-    if owns_con:
-        con = get_db_connection()
-    try:
-        st_completed = PipelineStatus.COMPLETED.value
-        st_skipped = getattr(PipelineStatus, "SKIPPED", PipelineStatus.COMPLETED).value
-
-        ps_completed = PipelineProcessStatus.COMPLETED.value
-        ps_skipped = getattr(
-            PipelineProcessStatus, "SKIPPED", PipelineProcessStatus.COMPLETED
-        ).value
-
-        con.execute(
-            f"""
-            UPDATE {table_name.value}
-            SET decision_flag = CASE
-                                    WHEN status IN (?, ?)
-                                      OR process_status IN (?, ?)
-                                    THEN 0 ELSE 1
-                                END,
-                transition_flag = 0,
-                updated_at = now()
-            WHERE url = ? AND stage = ?
-            """,
-            (st_completed, st_skipped, ps_completed, ps_skipped, url, stage.value),
-        )
-    finally:
-        if owns_con:
-            con.close()
 
 
 def _enum_val(x: Any) -> Any:
@@ -354,25 +238,6 @@ def _get_control_row(
             (url, iteration),
         ).df()
     return None if df.empty else df.iloc[0].to_dict()
-
-
-def _status_flags_recompute_row(url: str, *, table: str = "pipeline_control") -> None:
-    """
-    Recompute decision/transition flags for this URL using *status only*:
-      decision_flag = 0 if status IN ('completed','skipped') else 1
-      transition_flag = 0
-    """
-    con = get_db_connection()
-    con.execute(
-        f"""
-        UPDATE {table}
-        SET decision_flag = CASE WHEN LOWER(status) IN ('completed','skipped') THEN 0 ELSE 1 END,
-            transition_flag = 0,
-            updated_at = now()
-        WHERE url = ?
-        """,
-        (url,),
-    )
 
 
 # for logging
@@ -403,3 +268,70 @@ def _state_summary(state) -> str:
     }
     # Render compact JSON for readability in logs
     return json.dumps(fields, default=str, separators=(",", ":"))
+
+
+# todo: commented out; not using anymore; delete later
+# def sync_decision_flag_for_control_row(
+#     url: str,
+#     stage: PipelineStage,
+#     *,
+#     table_name: TableName = TableName.PIPELINE_CONTROL,
+#     con=None,
+# ) -> None:
+#     """
+#     Single source of GO/NO-GO for the current (url, stage) row:
+
+#     decision_flag = 0 if status IN {COMPLETED, SKIPPED}
+#                     or process_status IN {COMPLETED, SKIPPED}
+#                     else 1
+
+#     transition_flag is always reset to 0.
+#     """
+#     owns_con = con is None
+#     if owns_con:
+#         con = get_db_connection()
+#     try:
+#         st_completed = PipelineStatus.COMPLETED.value
+#         st_skipped = getattr(PipelineStatus, "SKIPPED", PipelineStatus.COMPLETED).value
+
+#         ps_completed = PipelineProcessStatus.COMPLETED.value
+#         ps_skipped = getattr(
+#             PipelineProcessStatus, "SKIPPED", PipelineProcessStatus.COMPLETED
+#         ).value
+
+#         con.execute(
+#             f"""
+#             UPDATE {table_name.value}
+#             SET decision_flag = CASE
+#                                     WHEN status IN (?, ?)
+#                                       OR process_status IN (?, ?)
+#                                     THEN 0 ELSE 1
+#                                 END,
+#                 transition_flag = 0,
+#                 updated_at = now()
+#             WHERE url = ? AND stage = ?
+#             """,
+#             (st_completed, st_skipped, ps_completed, ps_skipped, url, stage.value),
+#         )
+#     finally:
+#         if owns_con:
+#             con.close()
+
+
+# def _status_flags_recompute_row(url: str, *, table: str = "pipeline_control") -> None:
+#     """
+#     Recompute decision/transition flags for this URL using *status only*:
+#       decision_flag = 0 if status IN ('completed','skipped') else 1
+#       transition_flag = 0
+#     """
+#     con = get_db_connection()
+#     con.execute(
+#         f"""
+#         UPDATE {table}
+#         SET decision_flag = CASE WHEN LOWER(status) IN ('completed','skipped') THEN 0 ELSE 1 END,
+#             transition_flag = 0,
+#             updated_at = now()
+#         WHERE url = ?
+#         """,
+#         (url,),
+#     )

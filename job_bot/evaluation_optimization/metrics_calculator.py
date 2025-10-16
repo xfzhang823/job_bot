@@ -290,9 +290,10 @@ def calculate_many_to_many_similarity_metrices(
     responsibilities: Dict[str, str], requirements: Dict[str, str]
 ) -> pd.DataFrame:
     """
-    Calculate text similarity metrics between EACH resume responsibility and EACH job requirement,
-    leveraging the AsymmetricTextSimilarity class due to the asymmetrical relationship between
-    experience/responsibilities and job requirements.
+    Calculate text similarity metrics between EACH resume responsibility
+    and EACH job requirement, leveraging the AsymmetricTextSimilarity class
+    due to the asymmetrical relationship between experience/responsibilities
+    and job requirements.
 
     Args:
         responsibilities (Dict[str, str]): Dictionary of flattened responsibilities from the resume.
@@ -339,8 +340,6 @@ def calculate_many_to_many_similarity_metrices(
 
     # Convert results to DataFrame
     df_results = pd.DataFrame(similarity_results)
-
-    logger.debug(f"df_results type: {type(df_results)}")  # todo: debug; delete later
 
     # Clean DataFrame - remove newline characters in string fields
     df_results = df_results.apply(

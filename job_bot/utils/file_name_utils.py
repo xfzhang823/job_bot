@@ -6,11 +6,15 @@ Functions:
 """
 
 import os
-from typing import List, Union, Optional
-
-import os
+import re
+import logging
 from pathlib import Path
 from typing import List, Union, Optional
+import hashlib
+from urllib.parse import urlparse, parse_qs
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_file_names(
@@ -76,18 +80,26 @@ def get_file_names(
     return matched_files
 
 
-def main():
-    dir_path = r"C:\github\Bot0_Release1\backend"
-    file_list = get_file_names(
-        dir_path,
-        full_path=True,
-        recursive=True,
-        file_types=".py",
-        file_type_inclusive=True,
-    )
-    for file in file_list:
-        print(file)
+# --- tiny helpers ---
 
 
-if __name__ == "__main__":
-    main()
+def _slug(s: str, max_len: int) -> str:
+    s = (s or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)  # non-alnum -> -
+    s = re.sub(r"-{2,}", "-", s).strip("-")  # collapse dashes
+    return s[:max_len] if max_len > 0 else s
+
+
+def _extract_job_id(url: str) -> str | None:
+    """
+    Prefer explicit query param like job_id=123..., else any 6+ digit run.
+    """
+    qs = parse_qs(urlparse(url).query)
+    if "job_id" in qs and qs["job_id"]:
+        return re.sub(r"\D+", "", qs["job_id"][0]) or None
+    m = re.search(r"(?<!\d)(\d{6,})(?!\d)", url)  # 6+ consecutive digits
+    return m.group(1) if m else None
+
+
+def _short_hash(url: str, n: int = 6) -> str:
+    return hashlib.md5(url.encode("utf-8")).hexdigest()[:n]

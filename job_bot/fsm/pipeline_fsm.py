@@ -331,7 +331,7 @@ class PipelineFSM:
                 self.state_model.process_status = PipelineProcessStatus.NEW
                 # Optional gating reset if you use it
                 if hasattr(self.state_model, "decision_flag"):
-                    self.state_model.decision_flag = None
+                    self.state_model.decision_flag = 1
                 if hasattr(self.state_model, "transition_flag"):
                     self.state_model.transition_flag = 0
 

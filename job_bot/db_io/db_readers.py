@@ -9,6 +9,7 @@ from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
 
 RESP, RESP_KEY = "responsibility", "responsibility_key"
 REQ, REQ_KEY = "requirement", "requirement_key"
+LLM_PROVIDER, MODEL_ID = "llm_provider", "model_id"
 
 
 def fetch_flattened_requirements(url: str) -> pd.DataFrame:
@@ -65,7 +66,8 @@ def fetch_edited_responsibilities(url: str) -> pd.DataFrame:
 
     Queries the `edited_responsibilities` table using the schema registry,
     projecting only the canonical columns: `url`, `responsibility_key`,
-    `responsibility`. Results are ordered by `responsibility_key`.
+    `responsibility`, 'llm_provider', 'model_id'.
+    Results are ordered by `responsibility_key`.
 
     Args:
         url (str): Job posting URL to filter on.
@@ -75,7 +77,9 @@ def fetch_edited_responsibilities(url: str) -> pd.DataFrame:
             the specified URL with columns: [url, responsibility_key, responsibility].
     """
     schema = DUCKDB_SCHEMA_REGISTRY[TableName.EDITED_RESPONSIBILITIES]
-    sql = schema.select_by_url_sql(["url", RESP_KEY, RESP], order_by=RESP_KEY)
+    sql = schema.select_by_url_sql(
+        ["url", RESP_KEY, RESP, LLM_PROVIDER, MODEL_ID], order_by=RESP_KEY
+    )
     con = get_db_connection()
     try:
         return con.execute(sql, (url,)).df()

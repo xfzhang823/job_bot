@@ -279,7 +279,7 @@ PIPELINE_DATA_DIR = BASE_DIR / "pipeline_data"  # input/output data folder
 DB_DIR = PIPELINE_DATA_DIR / "db"
 DUCKDB_FILE = DB_DIR / "pipeline_data.duckdb"
 
-"db_io/db_loaders_config.yaml"
+EXCEL_DIR = PIPELINE_DATA_DIR / "excel"
 # *LLM Models
 
 # llm_providers

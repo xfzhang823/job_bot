@@ -52,7 +52,6 @@ from job_bot.pipelines_with_fsm.update_job_urls_pipeline_fsm import (
 )
 from job_bot.fsm.pipeline_control_sync import (
     sync_job_urls_to_pipeline_control,
-    sync_decision_flags_all,
 )
 
 
@@ -84,6 +83,9 @@ from job_bot.pipelines_with_fsm.similarity_metrics_pipeline_async_fsm import (
     run_similarity_metrics_reval_async_fsm,
 )
 
+from job_bot.pipelines_with_fsm.alignment_review_pipeline_async_fsm import (
+    run_alignment_review_pipeline_async_fsm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,13 +152,14 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
     # run on FLATTENED_RESPONSIBILITIES
     await run_similarity_metrics_eval_async_fsm()
 
-    return
-
     # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
     await run_resume_editing_pipeline_async_fsm()
 
     # run on EDITED_RESPONSIBILITIES
     await run_similarity_metrics_reval_async_fsm()
+
+    # run on EDITED_RESPONSIBILITIES
+    await run_alignment_review_pipeline_async_fsm()
 
 
 if __name__ == "__main__":

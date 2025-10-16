@@ -11,8 +11,7 @@ import aiofiles
 from pydantic import BaseModel, ValidationError
 
 # User defined
-from utils.get_file_names import get_file_names
-from utils.generic_utils import convert_keys_and_paths_to_str
+from job_bot.utils.file_name_utils import get_file_names
 
 # Setup logger
 logger = logging.getLogger(__name__)

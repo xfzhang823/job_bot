@@ -68,28 +68,6 @@ def _normalize_process_status_for_stage(
     return PipelineProcessStatus.RUNNING
 
 
-def _recompute_decision_flag_row(
-    url: str, table_name: TableName = TableName.PIPELINE_CONTROL
-) -> int:
-    """
-    Status-only rule to avoid importing orchestrator:
-      decision_flag = 0 if status IN ('completed','skipped') else 1
-      transition_flag = 0
-    """
-    con = get_db_connection()
-    res = con.execute(
-        f"""
-        UPDATE {table_name.value}
-        SET decision_flag = CASE WHEN LOWER(status) IN ('completed','skipped') THEN 0 ELSE 1 END,
-            transition_flag = 0,
-            updated_at = now()
-        WHERE url = ?
-        """,
-        (url,),
-    )
-    return getattr(res, "rowcount", 0)
-
-
 def update_and_persist_pipeline_state(
     state_model: PipelineState,
     table_name: TableName = TableName.PIPELINE_CONTROL,
@@ -109,7 +87,6 @@ def update_and_persist_pipeline_state(
         1. Deduplication (e.g., pk_scoped → delete existing PK rows before insert).
         2. Stamping (created_at/updated_at, iteration, etc., per YAML config).
         3. Schema alignment (column order, defaults).
-    • Used sync_decision_flag_for_control_row to update go/no go (1/0) decision flag.
 
     Notes
     -----

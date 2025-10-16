@@ -41,8 +41,8 @@ tables:
   edited_responsibilities:
     dedup: pk_scoped
     stamp:
-      llm_provider: none
-      model_id: none
+      llm_provider: param
+      model_id: param
 
   extracted_responsibilities:
     dedup: pk_scoped

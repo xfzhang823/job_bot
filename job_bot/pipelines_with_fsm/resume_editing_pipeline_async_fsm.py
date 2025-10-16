@@ -14,12 +14,12 @@ Output (per URL):
             iteration, version, llm_provider, stage, status, created_at, updated_at
 
 Per-URL flow:
-  1) FSM: mark IN_PROGRESS for source stage (FLATTENED_RESPONSIBILITIES).
+  1) FSM: mark IN_PROGRESS for source stage (EDITED_RESPONSIBILITIES).
   2) Load flattened responsibilities + flattened requirements (DuckDB).
   3) Run async LLM editor (→ ResponsibilityMatches).
   4) Flatten to row-per-(responsibility_key, requirement_key).
- 5) INSERT into edited_responsibilities with standard metadata.
-  6) FSM: mark COMPLETE on source; step() → EDITED_RESPONSIBILITIES; mark NEW.
+  5) INSERT into edited_responsibilities with standard metadata.
+  6) FSM: mark COMPLETE on source; step() → SIM_METRICS_REVAL; mark NEW.
 
 Notes:
   • Strictly DB-native: no JSON/CSV file I/O.
@@ -50,13 +50,7 @@ from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
 # Worklist + IO
 from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_inserters import insert_df_with_config
-from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
-
-# Readers for inputs
-from job_bot.db_io.db_readers import (
-    fetch_flattened_requirements,
-    fetch_flattened_responsibilities,
-)
+from job_bot.db_io.db_loaders import load_table
 
 # The async editor that rewrites responsibilities against requirements
 from job_bot.evaluation_optimization.resumes_editing_async import (
@@ -64,12 +58,28 @@ from job_bot.evaluation_optimization.resumes_editing_async import (
 )
 
 # Pyd models (for types)
-from job_bot.models.resume_job_description_io_models import ResponsibilityMatches
+from job_bot.models.resume_job_description_io_models import (
+    ResponsibilityMatches,
+    Responsibilities,
+    Requirements,
+)
 
 # Configs
 from job_bot.config.project_config import OPENAI, GPT_4_1_NANO, ANTHROPIC, CLAUDE_HAIKU
 
 logger = logging.getLogger(__name__)
+
+
+def get_resps_dict_strict(obj) -> Dict[str, str]:
+    if isinstance(obj, Responsibilities):
+        return dict(obj.responsibilities)
+    raise TypeError(f"Expected Responsibilities, got {type(obj).__name__}")
+
+
+def get_reqs_dict_strict(obj) -> Dict[str, str]:
+    if isinstance(obj, Requirements):
+        return dict(obj.requirements)
+    raise TypeError(f"Expected Requirements, got {type(obj).__name__}")
 
 
 # =============================================================================
@@ -93,7 +103,7 @@ async def edit_and_persist_responsibilities_for_url(
     --------
     This function performs the "editing" stage for one job posting:
       - Guards on FSM stage: only runs if the URL is at
-        `FLATTENED_RESPONSIBILITIES`.
+        `EDITED_RESPONSIBILITIES`.
       - Marks the control row as IN_PROGRESS.
       - Loads the URL’s flattened responsibilities and flattened requirements
         from DuckDB.
@@ -130,47 +140,38 @@ async def edit_and_persist_responsibilities_for_url(
     async with semaphore:
         fsm = fsm_manager.get_fsm(url)
 
-        # Guard: only operate when current stage is FLATTENED_RESPONSIBILITIES
-        if fsm.get_current_stage() != PipelineStage.FLATTENED_RESPONSIBILITIES.value:
+        # Guard: only operate when current stage is EDITED_RESPONSIBILITIES
+        if fsm.get_current_stage() != PipelineStage.EDITED_RESPONSIBILITIES.value:
             logger.info("⏩ Skipping %s; current stage is %s", url, fsm.state)
             return False
 
         # IN_PROGRESS at current stage
         fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Editing responsibilities…")
 
-        # Load inputs
         try:
-            resps_df = fetch_flattened_responsibilities(
-                url
-            )  # responsibility_key, responsibility
-            reqs_df = fetch_flattened_requirements(url)  # requirement_key, requirement
-            if resps_df.empty or reqs_df.empty:
-                raise ValueError("Missing flattened responsibilities or requirements")
+            resps_model = load_table(TableName.FLATTENED_RESPONSIBILITIES, url=url)
+            reqs_model = load_table(TableName.FLATTENED_REQUIREMENTS, url=url)
 
-            # Clean NaNs
-            resps_df = resps_df.dropna(subset=["responsibility_key", "responsibility"])
-            reqs_df = reqs_df.dropna(subset=["requirement_key", "requirement"])
+            # Validate loader return types up front (great errors when config drifts)
+            resps_dict = get_resps_dict_strict(resps_model)
+            reqs_dict = get_reqs_dict_strict(reqs_model)
+
+            if not resps_dict or not reqs_dict:
+                raise ValueError(
+                    "Empty responsibilities or requirements after rehydration"
+                )
 
         except Exception:
-            logger.exception("❌ Failed to load inputs for %s", url)
+            logger.exception("❌ Failed to load/rehydrate inputs for %s", url)
             fsm.mark_status(PipelineStatus.ERROR, notes="Load inputs failed")
             return False
 
-        # Build the dicts required by the editor function signature
-        responsibilities: Dict[str, str] = dict(
-            zip(resps_df["responsibility_key"], resps_df["responsibility"])
-        )
-        requirements: Dict[str, str] = dict(
-            zip(reqs_df["requirement_key"], reqs_df["requirement"])
-        )
-
-        # Call async editor (LLM) to generate edited responsibilities
-        # --- Call the async editor with EXACT signature
+        # Editor call stays simple (dict[str,str], dict[str,str])
         try:
             matches: ResponsibilityMatches = (
                 await modify_multi_resps_based_on_reqs_async(
-                    responsibilities=responsibilities,
-                    requirements=requirements,
+                    responsibilities=resps_dict,
+                    requirements=reqs_dict,
                     llm_provider=llm_provider,
                     model_id=model_id,
                     no_of_concurrent_workers=no_of_concurrent_workers_for_llm,
@@ -183,26 +184,19 @@ async def edit_and_persist_responsibilities_for_url(
 
         # --- Flatten ResponsibilityMatches → rows
         try:
-            # ResponsibilityMatches is a Pydantic wrapper. Get its plain dict.
-            payload: Dict[str, Any] = matches.model_dump() if hasattr(matches, "model_dump") else dict(matches)  # type: ignore
 
             # Expected shape: { resp_key: { req_key: "edited text", ... }, ... }
             rows: List[Dict[str, Any]] = []
-            for resp_key, by_req in payload.items():
-                if not isinstance(by_req, dict):
-                    logger.warning(
-                        "No per-requirement edits for resp=%s; skipping row(s).",
-                        resp_key,
-                    )
-                    continue
-                for req_key, edited_text in by_req.items():
+            for resp_key, by_req in matches.responsibilities.items():
+                for req_key, optimized_text in by_req.optimized_by_requirements.items():
                     rows.append(
                         {
                             "responsibility_key": resp_key,
                             "requirement_key": req_key,
-                            "responsibility": str(edited_text),
+                            "responsibility": optimized_text.optimized_text,  # real string, not a dict repr
                         }
                     )
+            logger.debug("Edited sample: %s", rows[:2])
 
             edited_df = pd.DataFrame(rows)
             if edited_df.empty:
@@ -227,7 +221,7 @@ async def edit_and_persist_responsibilities_for_url(
             fsm.mark_status(
                 PipelineStatus.COMPLETED, notes="Edited → DB"
             )  # not needed but kept for notes
-            fsm.step()  # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
+            fsm.step()  # EDITED_RESPONSIBILITIES → SIM_METRICS_REVAL
 
             logger.info("✅ Editing complete for %s", url)
             return True
@@ -331,13 +325,15 @@ async def run_resume_editing_pipeline_async_fsm(
     """
     # Select urls to process (stage / version)
     urls = get_urls_ready_for_transition(
-        stage=PipelineStage.FLATTENED_RESPONSIBILITIES,
+        stage=PipelineStage.EDITED_RESPONSIBILITIES,
     )
 
     if filter_urls:
         urls = [u for u in urls if u in filter_urls]
     if not urls:
-        logger.info("📭 No URLs to edit at 'flattened_responsibilities' stage.")
+        logger.info(
+            f"📭 No URLs to edit at {PipelineStage.EDITED_RESPONSIBILITIES.value} stage."
+        )
         return
     if limit_urls:
         urls = urls[:limit_urls]

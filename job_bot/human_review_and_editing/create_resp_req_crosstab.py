@@ -283,8 +283,9 @@ def create_resp_req_crosstab(
     Creates a responsibility-requirement crosstab DataFrame, optionally including
     the 'Original Responsibility' column.
 
-    This function is a wrapper that first builds a core crosstab using `create_core_resp_req_crosstab`
-    and then optionally inserts the 'Original Responsibility' column using `insert_original_responsibility`.
+    This function is a wrapper that first builds a core crosstab using
+    `create_core_resp_req_crosstab` and then optionally inserts the
+    'Original Responsibility' column using `insert_original_responsibility`.
 
     The resulting DataFrame has responsibilities as rows and requirements as columns,
     with similarity scores between them. The first row contains the `requirement_key` values,

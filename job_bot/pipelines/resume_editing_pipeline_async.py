@@ -333,13 +333,6 @@ async def run_resume_editing_pipeline_async(
             f"After modify_multi_resps_based_on_reqs_async()"
         )  # todo: debug; delete later
 
-        # todo: debug; delete later; Log before moving to NestedResponsibilities
-        logger.info(f"Before constructing NestedResponsibilities")
-        logger.info(f"Type of modified_resps: {type(modified_resps)}")
-        logger.info(
-            f"Is instance of ResponsibilityMatches? {isinstance(modified_resps, ResponsibilityMatches)}"
-        )  # todo: debugging; delete later
-
         # Step 4: ResponsibilityMatches -> NestedResponsibilities model
         logger.info(
             f"Constructing NestedResponsibilities with url: {url}"

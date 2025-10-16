@@ -413,45 +413,6 @@ async def generate_metrics_from_nested_json_async(
                         requirement_key=requirement_key,
                         requirement=requirement_text,
                         **similarity_metrics,  # ✅ Automatically adds all fields from the dict
-                        # bert_score_precision=similarity_metrics[
-                        #     "bert_score_precision"
-                        # ],  # Explicit mapping
-                        # soft_similarity=similarity_metrics[
-                        #     "soft_similarity"
-                        # ],  # Explicit mapping
-                        # word_movers_distance=similarity_metrics[
-                        #     "word_movers_distance"
-                        # ],  # Explicit mapping
-                        # deberta_entailment_score=similarity_metrics[
-                        #     "deberta_entailment_score"
-                        # ],  # Explicit mapping
-                        # # Optional fields (if present in similarity metrics)
-                        # bert_score_precision_cat=similarity_metrics.get(
-                        #     "bert_score_precision_cat"
-                        # ),
-                        # soft_similarity_cat=similarity_metrics.get(
-                        #     "soft_similarity_cat"
-                        # ),
-                        # word_movers_distance_cat=similarity_metrics.get(
-                        #     "word_movers_distance_cat"
-                        # ),
-                        # deberta_entailment_score_cat=similarity_metrics.get(
-                        #     "deberta_entailment_score_cat"
-                        # ),
-                        # scaled_bert_score_precision=similarity_metrics.get(
-                        #     "scaled_bert_score_precision"
-                        # ),
-                        # scaled_deberta_entailment_score=similarity_metrics.get(
-                        #     "scaled_deberta_entailment_score"
-                        # ),
-                        # scaled_soft_similarity=similarity_metrics.get(
-                        #     "scaled_soft_similarity"
-                        # ),
-                        # scaled_word_movers_distance=similarity_metrics.get(
-                        #     "scaled_word_movers_distance"
-                        # ),
-                        # composite_score=similarity_metrics.get("composite_score"),
-                        # pca_score=similarity_metrics.get("pca_score"),
                     )
 
                     validated_rows.append(similarity_metrics_model.model_dump())
@@ -483,7 +444,7 @@ async def generate_metrics_from_nested_json_async(
             return
 
         # Display the top rows of the DataFrame for verification
-        display(df.head(5))
+        print(df.head(5))
 
 
 async def run_metrics_processing_pipeline_async(

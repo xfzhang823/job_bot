@@ -12,7 +12,7 @@ import pandas as pd
 import demjson3
 
 # From project modules
-from job_bot.utils.get_file_names import get_file_names
+from job_bot.utils.file_name_utils import get_file_names
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -280,6 +280,64 @@ def check_if_json(file_path: str):
         return False
 
 
+# Function to support save_to_json_file function
+def convert_keys_to_str(obj: Any) -> Any:
+    """
+    Recursively convert all dictionary keys in the given object to strings.
+
+    Args:
+        obj (Any): The object to process.
+
+    Returns:
+        Any: The processed object with string keys.
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for key, value in obj.items():
+            new_key = str(key)
+            new_value = convert_keys_to_str(value)
+            new_dict[new_key] = new_value
+        return new_dict
+    elif isinstance(obj, list):
+        return [convert_keys_to_str(item) for item in obj]
+    elif isinstance(obj, BaseModel):
+        return convert_keys_to_str(obj.model_dump())
+    else:
+        return obj
+
+
+# Function to support save to json file function
+def convert_keys_and_paths_to_str(obj: Any) -> Any:
+    """
+    Recursively convert all dictionary keys to strings and Path objects to strings.
+
+    Args:
+        obj (Any): The object to process.
+
+    Returns:
+        Any: The processed object with string keys and string values where necessary.
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for key, value in obj.items():
+            # Convert key to string if it's not already
+            new_key = str(key) if not isinstance(key, str) else key
+            # Recursively process the value
+            new_value = convert_keys_and_paths_to_str(value)
+            new_dict[new_key] = new_value
+        return new_dict
+    elif isinstance(obj, list):
+        return [convert_keys_and_paths_to_str(item) for item in obj]
+    elif isinstance(obj, Path):
+        # Convert Path object to string
+        return str(obj)
+    elif isinstance(obj, BaseModel):
+        # Convert Pydantic model to dict and process recursively
+        return convert_keys_and_paths_to_str(obj.model_dump())
+    else:
+        return obj
+
+
 # Utils tool to list to dict format
 def ensure_dict_format(data, prefix="item"):
     """
@@ -304,8 +362,8 @@ def ensure_dict_format(data, prefix="item"):
 
 def fetch_new_urls(existing_url_list_file, url_list_file):
     """
-    Fetch job posting URLs from the new jobs file, compare them with the existing jobs file,
-    and return only the new URLs that have not been previously processed.
+    Fetch job posting URLs from the new jobs file, compare them with the existing
+    jobs file, and return only the new URLs that have not been previously processed.
 
     Args:
         job_descriptions_json_file (str): File path of the JSON file containing
@@ -599,64 +657,6 @@ def replace_spaces_in_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     df.columns = df.columns.str.replace(" ", "_")
     return df
-
-
-# Function to support save_to_json_file function
-def convert_keys_to_str(obj: Any) -> Any:
-    """
-    Recursively convert all dictionary keys in the given object to strings.
-
-    Args:
-        obj (Any): The object to process.
-
-    Returns:
-        Any: The processed object with string keys.
-    """
-    if isinstance(obj, dict):
-        new_dict = {}
-        for key, value in obj.items():
-            new_key = str(key)
-            new_value = convert_keys_to_str(value)
-            new_dict[new_key] = new_value
-        return new_dict
-    elif isinstance(obj, list):
-        return [convert_keys_to_str(item) for item in obj]
-    elif isinstance(obj, BaseModel):
-        return convert_keys_to_str(obj.model_dump())
-    else:
-        return obj
-
-
-# Function to support save to json file function
-def convert_keys_and_paths_to_str(obj: Any) -> Any:
-    """
-    Recursively convert all dictionary keys to strings and Path objects to strings.
-
-    Args:
-        obj (Any): The object to process.
-
-    Returns:
-        Any: The processed object with string keys and string values where necessary.
-    """
-    if isinstance(obj, dict):
-        new_dict = {}
-        for key, value in obj.items():
-            # Convert key to string if it's not already
-            new_key = str(key) if not isinstance(key, str) else key
-            # Recursively process the value
-            new_value = convert_keys_and_paths_to_str(value)
-            new_dict[new_key] = new_value
-        return new_dict
-    elif isinstance(obj, list):
-        return [convert_keys_and_paths_to_str(item) for item in obj]
-    elif isinstance(obj, Path):
-        # Convert Path object to string
-        return str(obj)
-    elif isinstance(obj, BaseModel):
-        # Convert Pydantic model to dict and process recursively
-        return convert_keys_and_paths_to_str(obj.model_dump())
-    else:
-        return obj
 
 
 def save_to_json_file(data: Any, file_path: Union[str, Path]) -> None:

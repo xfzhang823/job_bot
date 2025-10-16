@@ -15,7 +15,7 @@ from job_bot.models.resume_job_description_io_models import (
     Requirements,
     Responsibilities,
 )
-from job_bot.utils.get_file_names import get_file_names
+from job_bot.utils.file_name_utils import get_file_names
 from job_bot.evaluation_optimization.multivariate_indexer import MultivariateIndexer
 from job_bot.preprocessing.resume_preprocessor import ResumeParser
 from job_bot.preprocessing.requirements_preprocessor import JobRequirementsParser

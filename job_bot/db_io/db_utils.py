@@ -38,8 +38,11 @@ from job_bot.db_io.pipeline_enums import (
     PipelineProcessStatus,
     TableName,
 )
+from job_bot.db_io import decision_flag
 
 logger = logging.getLogger(__name__)
+
+E = TypeVar("E")  # enum type
 
 
 def align_df_with_schema(
@@ -495,7 +498,7 @@ def get_urls_ready_for_transition(
     stage: PipelineStage, limit: int | None = None
 ) -> list[str]:
     """
-    Worklist picker: only rows with (decision_flag=1, transition_flag=0).
+    Worklist picker: only rows with (decision_flag=1).
     """
     con = get_db_connection()
     try:
@@ -512,80 +515,6 @@ def get_urls_ready_for_transition(
         return df["url"].tolist()
     finally:
         con.close()
-
-
-def set_decision(url: str, stage: PipelineStage, go: bool | None) -> None:
-    """
-    Decide GO/NO-GO (1/0) or clear to NULL (undecided). Keeps transition_flag at 0.
-    """
-    con = get_db_connection()
-    try:
-        con.execute(
-            """
-            UPDATE pipeline_control
-            SET decision_flag = ?, transition_flag = COALESCE(transition_flag, 0), updated_at = now()
-            WHERE url = ? AND stage = ?
-            """,
-            (None if go is None else (1 if go else 0), url, stage.value),
-        )
-    finally:
-        con.close()
-
-
-def apply_transition(
-    url: str, current_stage: PipelineStage, next_stage: PipelineStage | None
-) -> None:
-    """
-    Current: (1,0) -> (0,1). Next: create/activate as (1,0) if provided.
-    Keeps your status column compatible: current -> COMPLETED, next -> NEW.
-    """
-    con = get_db_connection()
-    try:
-        # current stage finalized
-        con.execute(
-            """
-            UPDATE pipeline_control
-            SET decision_flag = 0,
-                transition_flag = 1,
-                status = 'completed',
-                updated_at = now()
-            WHERE url = ? AND stage = ?
-            """,
-            (url, current_stage.value),
-        )
-
-        if next_stage:
-            # try update first
-            updated = con.execute(
-                """
-                UPDATE pipeline_control
-                SET decision_flag = 1,
-                    transition_flag = 0,
-                    status = 'new',
-                    updated_at = now()
-                WHERE url = ? AND stage = ?
-                """,
-                (url, next_stage.value),
-            ).rowcount  # DuckDB python returns rowcount
-
-            # if no row existed for next, insert a new one (inherit iteration)
-            if not updated:
-                con.execute(
-                    """
-                    INSERT INTO pipeline_control (url, iteration, stage, status, decision_flag, transition_flag, created_at)
-                    SELECT url, iteration, ?, 'new', 1, 0, now()
-                    FROM pipeline_control
-                    WHERE url = ? 
-                    ORDER BY iteration DESC
-                    LIMIT 1
-                    """,
-                    (next_stage.value, url),
-                )
-    finally:
-        con.close()
-
-
-E = TypeVar("E")  # enum type
 
 
 def _to_values(
