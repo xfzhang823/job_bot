@@ -60,7 +60,8 @@ class PipelineStage(str, Enum):
     # ✅ Preprocessing Stages
     JOB_URLS = "job_urls"
     JOB_POSTINGS = "job_postings"
-    EXTRACTED_REQUIREMENTS = "extracted_requirements"
+    # EXTRACTED_REQUIREMENTS = "extracted_requirements" # commented out:
+    # job posting should go straight to flattend requirements
 
     # ✅ Flattened Requirements
     FLATTENED_REQUIREMENTS = "flattened_requirements"
@@ -91,55 +92,51 @@ class PipelineStage(str, Enum):
 
 class PipelineStatus(str, Enum):
     """
-    * Class to define Status
+    Machine lifecycle per stage.
+    Tracks progress within a stage.
+
+    - Represents the automated system's internal notion of
+      progress or completion.
+    - Distinct from `PipelineTaskState`, which is human-facing
+      (READY / PAUSED / SKIP / HOLD).
 
     ! Pipeline Status is different from status in JobPostings and ExtractedRequirements tables,
     ! which refers LLM API call status
-
-    Example:
-        >>> df["status"] = PipelineStatus.NEW.value
-        >>> assert df["status"] in PipelineStatus.list()
     """
 
-    NEW = "new"  # Not yet started
+    NEW = "NEW"  # Not yet started
     IN_PROGRESS = (
-        "in_progress"  # This stage completed successfully, but the pipeline continues
+        "IN_PROGRESS"  # This stage completed successfully, but the pipeline continues
     )
-    COMPLETED = "completed"  # Final stage completed successfully (end of pipeline)
-    ERROR = "error"  # Current stage failed
-    SKIPPED = "skipped"  # Explicitly skipped (optional path or filtered out)
-
-    @classmethod
-    def list(cls) -> list[str]:
-        return [stage.value for stage in cls]
+    COMPLETED = "COMPLETED"  # Final stage completed successfully (end of pipeline)
+    ERROR = "ERROR"  # Current stage failed
+    SKIPPED = "SKIPPED"  # Explicitly skipped (optional path or filtered out)
 
 
-class PipelineProcessStatus(str, Enum):
+class PipelineTaskState(str, Enum):
     """
-    High-level lifecycle status for a pipeline run (per URL/iteration).
+    Human gate for pipeline tasks.
+    Controls *availability* of rows to the automated pipeline.
 
-    This enum is distinct from per-stage `PipelineStatus`:
+    Distinct from `PipelineStatus`, which represents machine lifecycle.
     - `PipelineStatus` tracks work progress *within* a stage
       (e.g., NEW → IN_PROGRESS → DONE/ERROR).
-    - `PipelineProcessStatus` tracks the *entire pipeline iteration*
+    - `PipelineTaskState` tracks the *entire pipeline iteration*
       from start to finish.
 
     States:
-        NEW:
-            Pipeline has never been started for this URL/iteration.
-        RUNNING:
-            Pipeline is actively processing one or more stages.
-        COMPLETED:
-            Pipeline reached its final stage successfully.
-        SKIPPED:
-            Pipeline was intentionally bypassed (manual decision,
-            filtering, or early exit).
+        READY = "READY"  # ✅ eligible for machine processing
+        PAUSED = "PAUSED"  # ⏸️ temporarily held by human (do not process)
+        SKIP = "SKIP"  # 🚫 permanently skip this record
+        HOLD = "HOLD"  # 🕓 optional: used for pending manual review (intermediate)
+
+    Note: Use upper case per convention.
     """
 
-    NEW = "new"  # never touched
-    RUNNING = "running"  # actively in pipeline
-    COMPLETED = "completed"  # reached final stage OK
-    SKIPPED = "skipped"  # intentionally not run (manual decision, filter, etc.)
+    READY = "READY"
+    PAUSED = "PAUSED"
+    SKIP = "SKIP"
+    HOLD = "HOLD"
 
 
 class TableName(str, Enum):

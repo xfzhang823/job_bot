@@ -7,7 +7,6 @@ from job_bot.db_io.pipeline_enums import PipelineStage
 PIPELINE_STAGE_SEQUENCE: list[PipelineStage] = [
     PipelineStage.JOB_URLS,
     PipelineStage.JOB_POSTINGS,
-    PipelineStage.EXTRACTED_REQUIREMENTS,
     PipelineStage.FLATTENED_REQUIREMENTS,
     PipelineStage.FLATTENED_RESPONSIBILITIES,
     PipelineStage.SIM_METRICS_EVAL,  # eval BEFORE edited

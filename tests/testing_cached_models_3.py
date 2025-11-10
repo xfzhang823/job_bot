@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 
 
-from utils.find_project_root import (
+from job_bot.utils.find_project_root import (
     find_project_root,
 )
 
@@ -21,7 +21,7 @@ else:
     raise RuntimeError("Project root not found!")
 
 # Enable logging to check if Hugging Face API is called
-logging.basicConfig(level=logging.DEBUG)
+
 
 print("🚀 Testing if 'bert-base-uncased' loads from cache...")
 

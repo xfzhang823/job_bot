@@ -73,14 +73,22 @@ Dependencies:
 # Standard libraries
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
+from datetime import datetime, timedelta
+
 
 # Project-level imports
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.flatten_and_rehydrate import flatten_model_to_df
 from job_bot.db_io.pipeline_enums import PipelineStage, PipelineStatus, TableName
 from job_bot.db_io.state_sync import load_pipeline_state
-from job_bot.db_io.db_utils import get_urls_ready_for_transition
+from job_bot.db_io.db_utils import (
+    get_claimable_worklist,
+    try_claim_one,
+    release_one,
+    generate_worker_id,
+)
+
 
 # --- IO surface: function-style db_loaders ---
 # from job_bot.db_io.db_loaders import (
@@ -106,7 +114,7 @@ logger = logging.getLogger(__name__)
 
 async def scrape_parse_persist_job_posting_async(
     url: str,
-    fsm_manager: PipelineFSMManager,
+    iteration: int,
     semaphore: asyncio.Semaphore,
     *,
     llm_provider: str = OPENAI,
@@ -118,22 +126,27 @@ async def scrape_parse_persist_job_posting_async(
     Scrapes, parses, validates, and persists a single job posting from the web.
 
     Args:
-        url (str): Job posting URL.
-        fsm_manager (PipelineFSMManager): Manager to track and control pipeline state.
-        semaphore (asyncio.Semaphore): Concurrency limiter for I/O-intensive steps.
-        model_id (str): LLM model to use.
-        llm_provider (str): LLM provider ("openai", "anthropic", etc.).
-        max_tokens (int): Max tokens for LLM generation.
-        temperature (float): Sampling temperature.
+        url: Job posting URL.
+        iteration: Current iteration index (part of PK in pipeline_control).
+        fsm_manager: FSM manager controlling pipeline state transitions.
+        semaphore: Concurrency limiter for I/O-intensive steps.
+        llm_provider: LLM provider ("openai", "anthropic", etc.).
+        model_id: LLM model identifier.
+        max_tokens: Maximum tokens for LLM generation.
+        temperature: Sampling temperature.
 
     Returns:
         Optional[JobSiteResponse]: Parsed job posting model, or None on failure.
+
+
+    Note:
+      - This function performs the work only.
+      - Do NOT mark/release leases or mutate FSM state here.
+      - The caller (batch orchestrator) handles claim/release and fsm.step().
     """
-    logger.info(f"🌐 Starting scrape/parse for: {url}")
+    logger.info("🌐 Starting scrape/parse for: %s [iter=%s]", url, iteration)
 
-    fsm = fsm_manager.get_fsm(url)
-
-    # Step 1: Scrape + LLM parse (inside semaphore)
+    # 1) Scrape + LLM parse (I/O under semaphore)
     try:
         async with semaphore:
             job_postings_batch_model = await process_webpages_to_json_async(
@@ -143,61 +156,70 @@ async def scrape_parse_persist_job_posting_async(
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-    except Exception as e:
-        logger.exception(f"❌ Scraping or LLM failed at URL: {url}")
-        fsm.mark_status(PipelineStatus.ERROR, notes="Scraping or LLM call failed")
+    except Exception:
+        logger.exception("❌ Scraping or LLM failed: %s", url)
         return None
 
-    # Step 2: Validation + Flattening + Persistence
+    # 2) Validate + Flatten + Persist
     try:
-        jobposting_model = job_postings_batch_model.root[url]  # type: ignore[attr-defined]
+        # Defensive lookup for the URL key
+        root_map = getattr(job_postings_batch_model, "root", {})  # type: ignore[attr-defined]
+        jobposting_model = root_map.get(url)
+        if jobposting_model is None:
+            logger.warning("🚫 Parser returned no entry for URL key: %s", url)
+            return None
 
-        # ✅ Data is a Pydantic model, not a dict
-        data = jobposting_model.data
-        content = data.content
-
-        # Check for content richness
+        # Validate content richness
+        data = getattr(jobposting_model, "data", None)
+        content = getattr(data, "content", None)
         has_text = bool(
             isinstance(content, dict)
             and any(isinstance(v, str) and v.strip() for v in content.values())
         )
+
         if not has_text:
             jobposting_model.status = "error"
             jobposting_model.message = "Empty/uninformative content extracted"
-            logger.warning(f"🚫 Skipping (empty content): {url}")
+            logger.warning("🚫 Skipping (empty content): %s", url)
         else:
             jobposting_model.status = "success"
             jobposting_model.message = "Job description parsed successfully"
 
-        # Flatten model and insert to DuckDB
+        # Flatten to DF and persist (sync call off-thread)
         job_posting_batch = JobPostingsBatch(root={url: jobposting_model})  # type: ignore[arg-type]
         job_df = flatten_model_to_df(
             model=job_posting_batch,
             table_name=TableName.JOB_POSTINGS,
-            iteration=None,
+            iteration=iteration,  # <- use the iteration provided by control-plane
             llm_provider=llm_provider,
             model_id=model_id,
         )
-        insert_df_with_config(
-            job_df, TableName.JOB_POSTINGS, url=url
-        )  # pass url so iteration inherits correctly
-
-        # Advance FSM (FSM Step + Status update)
-        fsm.step()
+        await asyncio.to_thread(
+            insert_df_with_config,
+            job_df,
+            TableName.JOB_POSTINGS,
+            url=url,
+            iteration=iteration,
+        )
 
         logger.info(
-            f"✅ Scrape pipeline complete for {url} — status: {jobposting_model.status}"
+            "✅ Persisted job posting for %s [iter=%s] — status: %s",
+            url,
+            iteration,
+            jobposting_model.status,
         )
         return jobposting_model
 
     except Exception:
         logger.exception("💾 Post-process or persist failed: %s", url)
-        fsm.mark_status(PipelineStatus.ERROR, notes="Post-processing/persist failed")
         return None
 
 
 async def process_job_postings_batch_async_fsm(
-    urls: List[str],
+    items: List[Tuple[str, int]],
+    *,
+    worker_id: str,
+    lease_minutes: int = 10,
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_1_NANO,
     max_tokens: int = 2048,
@@ -205,53 +227,136 @@ async def process_job_postings_batch_async_fsm(
     no_of_concurrent_workers: int = 5,
 ) -> List[asyncio.Task]:
     """
-    Prepares a list of asyncio Tasks to scrape, parse, and persist job postings
-    using FSM tracking.
+    Prepare asyncio.Tasks for scraping/parsing/persisting job postings using the
+    lease + human-gate FSM model.
 
-    This function handles a batch of job posting URLs in parallel (with concurrency
-    limits), verifies that each job is at the correct stage (`job_urls`) via
-    a finite state machine (FSM), and delegates execution to a lower-level
-    async function if eligible.
+    Each `item` is a (url, iteration) pair. For each item:
+      1) Verify it's at stage = JOB_URLS (FSM).
+      2) Try to claim (machine lease) scoped to (url, iteration).
+      3) Do the work (scrape → parse → persist).
+      4) Release the lease with final_status = COMPLETED or ERROR.
+      5) On success, advance FSM to next stage via fsm.step().
 
     Args:
-        - urls (List[str]): List of job posting URLs to process.
-        - llm_provider (str): LLM provider to use (e.g., "openai", "anthropic").
-        - model_id (str): The model identifier (e.g., "gpt-4", "claude-haiku").
-        - max_tokens (int): Maximum tokens for the LLM output.
-        - temperature (float): Sampling temperature for LLM generation.
-        - no_of_concurrent_workers (int): Maximum number of concurrent workers
-        (semaphore limit).
+        items: List of (url, iteration) pairs considered claimable upstream.
+        worker_id: Stable ID for this runner (generate once per process).
+        lease_seconds: Lease duration per claim (auto-expire if worker dies).
+        llm_provider, model_id, max_tokens, temperature: LLM config for downstream.
+        no_of_concurrent_workers: Concurrency cap via a semaphore.
 
     Returns:
-        List[asyncio.Task]: A list of asyncio Tasks ready to be awaited via
-        `asyncio.gather`.
+        List[asyncio.Task] — schedule with asyncio.gather().
     """
     semaphore = asyncio.Semaphore(no_of_concurrent_workers)
 
-    async def run_one(url: str):
-        state = load_pipeline_state(url)
+    async def run_one(url: str, iteration: int):
+        # Optional: ensure we have a control row; if not, skip
+        state = load_pipeline_state(
+            url
+        )  # if your loader also needs iteration, adjust here
         if state is None:
-            logger.warning(f"⚠️ No pipeline state for URL: {url}")
+            logger.warning("⚠️ No pipeline state for URL: %s", url)
             return
 
+        # Stage gate (human gate is enforced upstream in the claimable query)
         fsm_manager = PipelineFSMManager()
         fsm = fsm_manager.get_fsm(url)
-
         if fsm.state != PipelineStage.JOB_URLS.value:
             logger.info("⏩ Skip (stage=%s): %s", fsm.state, url)
             return
 
-        await scrape_parse_persist_job_posting_async(
+        # Machine lease claim (single worker for (url, iteration))
+        claimed = await asyncio.to_thread(
+            try_claim_one,
             url=url,
-            fsm_manager=fsm_manager,
-            semaphore=semaphore,
-            llm_provider=llm_provider,
-            model_id=model_id,
-            max_tokens=max_tokens,
-            temperature=temperature,
+            iteration=iteration,
+            worker_id=worker_id,
+            lease_minutes=lease_minutes,
         )
+        if not claimed:
+            logger.info("🔒 Busy; could not claim: %s [%s]", url, iteration)
+            return
 
-    return [asyncio.create_task(run_one(url)) for url in urls]
+        released = False
+        try:
+            # Do the work under concurrency control
+            async with semaphore:
+                result = await scrape_parse_persist_job_posting_async(
+                    url=url,
+                    iteration=iteration,
+                    semaphore=semaphore,  # you may remove if the callee doesn't need it
+                    llm_provider=llm_provider,
+                    model_id=model_id,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+
+            # Decide finalization
+            if result is not None:
+                # Persist succeeded; release as COMPLETED and advance FSM
+                await asyncio.to_thread(
+                    release_one,
+                    url=url,
+                    iteration=iteration,
+                    worker_id=worker_id,
+                    final_status=PipelineStatus.COMPLETED,
+                )
+                released = True
+                try:
+                    fsm.step()  # stage-wise progression after successful persist
+                except Exception as e:
+                    # If step fails, keep the row COMPLETED (data is saved);
+                    # log for retry of FSM step
+                    logger.exception(
+                        "FSM step() failed for %s [%s]: %s", url, iteration, e
+                    )
+            else:
+                # Worker ran but produced no result → ERROR
+                await asyncio.to_thread(
+                    release_one,
+                    url=url,
+                    iteration=iteration,
+                    worker_id=worker_id,
+                    final_status=PipelineStatus.ERROR,
+                )
+                released = True
+
+        except Exception as e:
+            logger.exception("Unhandled exception for %s [%s]: %s", url, iteration, e)
+            # Ensure we release with ERROR if something blew up and we still hold the lease
+            try:
+                await asyncio.to_thread(
+                    release_one,
+                    url=url,
+                    iteration=iteration,
+                    worker_id=worker_id,
+                    final_status=PipelineStatus.ERROR,
+                )
+                released = True
+            except Exception:
+                logger.exception(
+                    "Failed to release lease after exception for %s [%s]",
+                    url,
+                    iteration,
+                )
+        finally:
+            if not released:
+                # Extremely defensive: do not leave leases dangling
+                try:
+                    await asyncio.to_thread(
+                        release_one,
+                        url=url,
+                        iteration=iteration,
+                        worker_id=worker_id,
+                        final_status=PipelineStatus.ERROR,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Final lease cleanup failed for %s [%s]", url, iteration
+                    )
+
+    # Schedule one task per (url, iteration)
+    return [asyncio.create_task(run_one(u, it)) for (u, it) in items]
 
 
 async def run_job_postings_pipeline_async_fsm(
@@ -262,54 +367,142 @@ async def run_job_postings_pipeline_async_fsm(
     temperature: float = 0.3,
     max_concurrent_tasks: int = 5,
     filter_keys: Optional[list[str]] = None,
-    iteration: int = 0,
     retry_errors: bool = False,
-):
+    lease_minutes: int = 10,
+) -> None:
     """
-    FSM-aware pipeline to scrape and parse job postings asynchronously.
+    Asynchronous FSM-aware pipeline for the **Job Postings** stage.
 
-    This function:
-    - Retrieves job URLs with 'new' status at the 'job_urls' stage.
-    - Filters by `filter_keys` if provided.
-    - Uses a concurrency-controlled async batch runner to scrape and
-    parse job content.
-    - Updates FSM stages and status fields per job URL on success or failure.
+    This stage pulls job URLs from the `pipeline_control` table at the
+    `job_urls` stage, claims eligible rows using the lease + human-gate
+    concurrency model, and then runs scraping and parsing tasks in parallel.
 
-    Args:
-        - llm_provider (str): LLM provider ("openai" or "anthropic").
-        - model_id (str): Model ID to use for parsing.
-        - max_tokens (int): Max tokens for LLM call.
-        - temperature (float): Sampling temperature.
-        - max_concurrent_tasks (int): Max number of parallel workers.
-        - filter_keys (Optional[list[str]]): Subset of URLs to process.
-            If None, all matching URLs are processed.
-        - retry_errors (bool): if retry_errors=True, also includes rows
-            currently marked ERROR.
+    -------------------------------------------------------------------------
+    🔁  High-Level Flow
+    -------------------------------------------------------------------------
+    1. **Worklist selection (human-gate + lease aware)**
+       - Pulls all (url, iteration) pairs where:
+         - `stage = 'job_urls'`
+         - `status IN ('NEW', 'ERROR' if retry_errors=True)`
+         - `task_state = 'READY'` (human gate open)
+         - `(is_claimed = FALSE OR lease_until < now())` (not leased)
+       - These are potential rows for this machine to process.
 
+    2. **Optional filtering**
+       - If `filter_keys` is provided, only URLs in that list are processed.
+
+    3. **Worker identity**
+       - A `worker_id` is generated per process (e.g. "job_postings_20251106_abc123").
+       - Used only for `try_claim_one()` / `release_one()` to enforce single-worker
+         ownership of each `(url, iteration)` row during the lease period.
+
+    4. **Parallel batch execution**
+       - For each claimable `(url, iteration)`:
+         a. `try_claim_one()` → sets `is_claimed=TRUE`, `worker_id`, and `lease_until`
+         b. `scrape_parse_persist_job_posting_async()` → performs the actual scraping,
+            parsing, model validation, and DuckDB persistence (no FSM mutation).
+         c. `release_one()` → safely releases the lease with final status
+            (`COMPLETED` or `ERROR`), and clears `worker_id`.
+         d. `fsm.step()` → advances the FSM to the next stage if persisted successfully.
+
+    5. **Concurrency management**
+       - A shared asyncio semaphore (`max_concurrent_tasks`) limits active
+         scrape/parse workers.
+       - `asyncio.gather()` waits for all tasks to finish before exiting.
+
+    6. **Iteration tracking**
+       - `iteration` comes from the control table (part of primary key `(url, iteration)`).
+       - It enables multiple processing passes over the same URL across different runs.
+       - For now, iteration may be 0 globally — future-safe for versioned reprocessing.
+
+    -------------------------------------------------------------------------
+    ⚙️  Parameters
+    -------------------------------------------------------------------------
+    llm_provider (str)
+        Name of the LLM provider to use (e.g., "openai", "anthropic").
+    model_id (str)
+        Model identifier to pass to the LLM (e.g., "gpt-4-1-nano").
+    max_tokens (int)
+        Maximum token limit for LLM outputs.
+    temperature (float)
+        Sampling temperature for LLM generation.
+    max_concurrent_tasks (int)
+        Maximum number of parallel async scraping workers.
+    filter_keys (Optional[list[str]])
+        Subset of URLs to process. If provided, all other URLs are ignored.
+    retry_errors (bool)
+        Whether to include rows currently marked as `ERROR` in addition to `NEW`.
+    lease_minutes (int)
+        Duration (in minutes) of the machine lease per claimed row. If the
+        worker crashes or hangs beyond this time, other workers can reclaim it.
+
+    -------------------------------------------------------------------------
+    🧱  Side Effects
+    -------------------------------------------------------------------------
+    - Updates `pipeline_control` rows via:
+        * `try_claim_one()` — mark as claimed, set lease time.
+        * `release_one()` — mark as completed or error, clear claim.
+    - Writes parsed job postings into `job_postings` DuckDB table.
+    - Advances FSM stage on successful completion.
+
+    -------------------------------------------------------------------------
+    🧾  Example
+    -------------------------------------------------------------------------
+    ```python
+    await run_job_postings_pipeline_async_fsm(
+        llm_provider="openai",
+        model_id="gpt-4-1-nano",
+        max_concurrent_tasks=10,
+        retry_errors=True,
+    )
+    ```
+
+    -------------------------------------------------------------------------
+    ✅  Summary
+    -------------------------------------------------------------------------
+    This function ensures that:
+      - Only human-approved (`READY`) and unclaimed jobs are processed.
+      - Each (url, iteration) is handled by exactly one worker at a time.
+      - Failures don’t block other URLs from progressing.
+      - FSM transitions remain consistent and idempotent.
     """
-    # Decide which status to pull
-    status = (
+    # 1) Determine which statuses to include
+    statuses = (
         (PipelineStatus.NEW, PipelineStatus.ERROR)
         if retry_errors
         else (PipelineStatus.NEW,)
     )
-    # Fetch worklist
-    urls = get_urls_ready_for_transition(
+
+    # 2) Get claimable worklist (respects human gate + lease expiration)
+    worklist: list[tuple[str, int]] = get_claimable_worklist(
         stage=PipelineStage.JOB_URLS,
+        status=statuses,
+        max_rows=max_concurrent_tasks * 4 or 1000,
     )
 
-    # Optional sebset filter
+    # 3) Optional subset filter
     if filter_keys:
-        urls = [url for url in urls if url in filter_keys]
+        filter_set = set(filter_keys)
+        worklist = [(u, it) for (u, it) in worklist if u in filter_set]
 
-    if not urls:
-        logger.info("📭 No job URLs to process at 'job_urls' stage.")
+    if not worklist:
+        logger.info("📭 No claimable (url, iteration) at stage 'job_urls'.")
         return
 
-    logger.info(f"🚀 Processing {len(urls)} job URLs at stage 'job_urls'...")
+    # 4) Create a stable worker identity for this run
+    worker_id = generate_worker_id(prefix="job_postings")
 
+    logger.info(
+        "🚀 Starting job_postings pipeline | %d items | worker_id=%s | stage=job_urls",
+        len(worklist),
+        worker_id,
+    )
+
+    # 5) Launch the batch
     tasks = await process_job_postings_batch_async_fsm(
-        urls=urls,
+        items=worklist,
+        worker_id=worker_id,
+        lease_minutes=lease_minutes,
         llm_provider=llm_provider,
         model_id=model_id,
         max_tokens=max_tokens,
@@ -318,5 +511,4 @@ async def run_job_postings_pipeline_async_fsm(
     )
 
     await asyncio.gather(*tasks)
-
-    logger.info("✅ Finished job postings FSM pipeline.")
+    logger.info("✅ Finished job_postings FSM pipeline.")

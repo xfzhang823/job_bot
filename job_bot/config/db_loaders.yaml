@@ -43,7 +43,7 @@ tables:
 
   pipeline_control:
     rehydrate: null            # just rows/DF for control-plane
-    filters: [url, iteration, stage, status, process_status]
+    filters: [url, iteration, stage, status, task_state]
     order_by:
       - updated_at DESC
     group_by_url: false        # control-plane rows are 1-per-(url,iteration); no dict-of-url needed

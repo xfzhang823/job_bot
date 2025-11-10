@@ -5,7 +5,7 @@ defaults:
     created_at: now
     updated_at: now
   inherit:
-    iteration: pipeline_control     # resolve from control by default
+    iteration: pipeline_control
   llm_defaults:
     llm_provider: OPENAI
     model_id: GPT_4_1_NANO
@@ -14,50 +14,49 @@ tables:
   job_urls:
     dedup: pk_scoped
     stamp:
-      created_at: now
+      created_at: now_on_insert
       updated_at: now
       iteration: none
       llm_provider: none
       model_id: none
+      source_file: param
 
   job_postings:
     dedup: pk_scoped
     stamp:
-      llm_provider: none
-      model_id: none
-
-  extracted_requirements:
-    dedup: pk_scoped
-    stamp:
-      llm_provider: default
-      model_id: default
+      iteration: param
+      llm_provider: param
+      model_id: param
 
   flattened_responsibilities:
     dedup: pk_scoped
     stamp:
-      llm_provider: default
-      model_id: default
+      iteration: param
+      llm_provider: param
+      model_id: param
 
   edited_responsibilities:
     dedup: pk_scoped
     stamp:
+      iteration: param
       llm_provider: param
       model_id: param
 
   extracted_responsibilities:
     dedup: pk_scoped
     stamp:
+      iteration: param
       llm_provider: default
       model_id: default
 
   similarity_metrics:
     dedup: pk_scoped
     stamp:
+      iteration: param
       resp_llm_provider: param
       resp_model_id: param
 
   pipeline_control:
     dedup: pk_scoped
     stamp:
-      iteration: none         # FSM sets this explicitly
-
+      iteration: none

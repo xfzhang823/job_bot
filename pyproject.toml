@@ -25,7 +25,7 @@ dependencies = [
     "trafilatura==1.12.1",
     "bert-score>=0.3.13",
     "jsonschema>=4.23.0",
-    "numpy>=1.26.4",
+    "numpy==1.26.4",
     "python-dotenv>=1.1.0",
     "demjson3>=3.0.6",
     "aiolimiter>=1.2.1",
@@ -38,6 +38,9 @@ dependencies = [
     "jupyter>=1.1.1",
     "black>=25.1.0",
     "openpyxl>=3.1.5",
+    "pylint>=3.3.8",
+    "tenacity>=9.1.2",
+    "xlsxwriter>=3.2.9",
 ]
 
 [build-system]

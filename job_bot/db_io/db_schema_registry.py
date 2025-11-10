@@ -56,7 +56,6 @@ from job_bot.models.db_table_models import (
     PipelineState,
     JobUrlsRow,
     JobPostingsRow,
-    ExtractedRequirementsRow,
     FlattenedRequirementsRow,
     FlattenedResponsibilitiesRow,
     EditedResponsibilitiesRow,
@@ -79,7 +78,7 @@ STANDARD_METADATA_FIELDS = {
     # FSM control
     "stage",
     "status",
-    "process_status",
+    "task_state",
 }
 
 # --- 🔒 Explicit column order per table (authoritative) ---
@@ -90,7 +89,10 @@ DUCKDB_COLUMN_ORDER = {
         "iteration",
         "stage",
         "status",
-        "process_status",
+        "task_state",
+        "is_claimed",
+        "worker_id",
+        "lease_until",
         "decision_flag",  # NEW: 1 / 0 (go / no go)
         "transition_flag",  # NEW 1 / 0 (have applied / not applied)
         "version",
@@ -124,6 +126,8 @@ DUCKDB_COLUMN_ORDER = {
         "updated_at",
     ],
     # ✅ Includes llm_provider/model_id
+    # todo: This table is to be retired completely
+    # todo: only for transferring file from file ETL pipeline into db
     TableName.EXTRACTED_REQUIREMENTS.value: [
         "url",
         "iteration",
@@ -138,6 +142,8 @@ DUCKDB_COLUMN_ORDER = {
     TableName.FLATTENED_REQUIREMENTS.value: [
         "url",
         "iteration",
+        "llm_provider",
+        "model_id",
         "requirement_key",
         "requirement",
         "source_file",
@@ -273,34 +279,68 @@ class TableSchema:
             except Exception:
                 pass
 
-    def select_by_url_sql(self, cols: list[str], order_by: str | None = None) -> str:
+    def select_by_url_sql(
+        self,
+        cols: list[str],
+        order_by: str | list[str] | None = None,  # ← widened type
+    ) -> str:
         """
         Build a parameterized SELECT to retrieve all rows for a given URL.
 
         Args:
             cols: Columns to project (must exist in this table).
-            order_by: Optional column to ORDER BY (must exist if provided).
+            order_by: Optional ordering; can be:
+                - a single column name: "col"
+                - comma-separated columns: "col1, col2 DESC"
+                - a list of columns: ["col1", "col2 DESC"]
+            Each column must exist in this table; direction must be ASC or DESC if given.
 
         Returns:
             SQL string using `?` placeholder for the URL parameter.
-
-        Example:
-            >>> schema = DUCKDB_SCHEMA_REGISTRY[TableName.FLATTENED_REQUIREMENTS]
-            >>> sql = schema.select_by_url_sql(["url", "requirement_key", "requirement"],
-            ...                                order_by="requirement_key")
-            >>> con.execute(sql, ("https://example.com/job1",)).df()
         """
+        # Validate projection columns
         unknown = [c for c in cols if c not in self.column_order]
         if unknown:
             raise ValueError(f"{self.table_name}: unknown columns requested: {unknown}")
-        if order_by and order_by not in self.column_order:
-            raise ValueError(f"{self.table_name}: unknown order_by: {order_by}")
+
+        # Normalize and validate ORDER BY
+        order_clause = ""
+        if order_by:
+            if isinstance(order_by, (list, tuple)):
+                raw_items = list(order_by)
+            else:
+                # Split comma-separated string into items
+                raw_items = [
+                    tok.strip() for tok in str(order_by).split(",") if tok.strip()
+                ]
+
+            normalized_items: list[str] = []
+            for item in raw_items:
+                parts = item.split()
+                col = parts[0]
+                if col not in self.column_order:
+                    raise ValueError(
+                        f"{self.table_name}: unknown order_by column: {col}"
+                    )
+                # Optional direction
+                direction = ""
+                if len(parts) > 1:
+                    dir_upper = parts[1].upper()
+                    if dir_upper not in ("ASC", "DESC"):
+                        raise ValueError(
+                            f"{self.table_name}: invalid sort direction for {col}: {parts[1]}"
+                        )
+                    direction = f" {dir_upper}"
+
+                normalized_items.append(f"{col}{direction}")
+
+            if normalized_items:
+                order_clause = " ORDER BY " + ", ".join(normalized_items)
 
         select_list = ", ".join(cols)
-        sql = f"SELECT {select_list} FROM {self.table_name} WHERE url = ?"
-        if order_by:
-            sql += f" ORDER BY {order_by}"
-        return sql
+        return (
+            f"SELECT {select_list} FROM {self.table_name} WHERE url = ?{order_clause}"
+        )
 
     def summary(self) -> str:
         """
@@ -343,25 +383,31 @@ DUCKDB_SCHEMA_REGISTRY = {
         primary_keys=["url", "iteration", "llm_provider", "model_id"],
         column_order=DUCKDB_COLUMN_ORDER[TableName.JOB_POSTINGS.value],
     ),
-    # Requirements extracted from posting (per pass; provider/model stamped in PK)
-    TableName.EXTRACTED_REQUIREMENTS: TableSchema(
-        model=ExtractedRequirementsRow,
-        table_name=TableName.EXTRACTED_REQUIREMENTS.value,
-        primary_keys=[
-            "url",
-            "iteration",
-            "requirement_key",
-            "requirement_category_key",
-            "llm_provider",
-            "model_id",
-        ],
-        column_order=DUCKDB_COLUMN_ORDER[TableName.EXTRACTED_REQUIREMENTS.value],
-    ),
+    # # Requirements extracted from posting (per pass; provider/model stamped in PK)
+    # TableName.EXTRACTED_REQUIREMENTS: TableSchema(
+    #     model=ExtractedRequirementsRow,
+    #     table_name=TableName.EXTRACTED_REQUIREMENTS.value,
+    #     primary_keys=[
+    #         "url",
+    #         "iteration",
+    #         "requirement_key",
+    #         "requirement_category_key",
+    #         "llm_provider",
+    #         "model_id",
+    #     ],
+    #     column_order=DUCKDB_COLUMN_ORDER[TableName.EXTRACTED_REQUIREMENTS.value],
+    # ),
     # Flattened requirements used for matching (per pass)
     TableName.FLATTENED_REQUIREMENTS: TableSchema(
         model=FlattenedRequirementsRow,
         table_name=TableName.FLATTENED_REQUIREMENTS.value,
-        primary_keys=["url", "iteration", "requirement_key"],
+        primary_keys=[
+            "url",
+            "iteration",
+            "requirement_key",
+            "llm_provider",
+            "model_id",
+        ],
         column_order=DUCKDB_COLUMN_ORDER[TableName.FLATTENED_REQUIREMENTS.value],
     ),
     # Canonical resume bullets (per pass)

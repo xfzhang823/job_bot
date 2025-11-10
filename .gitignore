@@ -1,13 +1,16 @@
-# Document, data, and other folders
+# Document and pipeline directories
 data/
 documents/
 sandbox/
 input_output/
 pipeline_data/
 
+# Schema dirs
+schemas/
+
 # Specific files to exclude
 verification.py
-src/temp_tools.ipynb
+job_bot/temp_tools.ipynb
 
 # API Keys
 .env

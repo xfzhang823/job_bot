@@ -7,8 +7,12 @@ does **not** modify process-level flags beyond the per-stage status.
 
 Key behaviors
 -------------
-- Worklist is supplied by `get_urls_ready_for_transition(stage='alignment_review')`.
-- Claim sets:   NEW → IN_PROGRESS  and decision_flag=0  (for this stage only).
+- Worklist is sourced via the lease-aware helpers (`get_claimable_worklist` →
+    `try_claim_one`).
+- Claim sets: NEW → IN_PROGRESS and stamps lease fields
+    (`is_claimed`, `worker_id`, `lease_until`).
+- This stage does not set or clear `decision_flag`; FSM stepping logic
+    remains external.
 - Export builds an XLSX "Alignment Review" sheet with the legacy layout:
   * Column 0: "Resp Key / Req Key"
   * Optional column 1: reference text ("Original Responsibility" OR
@@ -20,10 +24,8 @@ Key behaviors
 
 Notes
 -----
-- Do *not* call decision_flag.sync_all() here; keep that in your control-plane
-  housekeeping so flags don’t flip mid-pickup.
 - `PipelineStage` / `PipelineStatus` values are used in lowercase form.
-- `process_status` is orchestrator-managed; this module only updates the
+- `task_state` is orchestrator-managed; this module only updates the
   current stage’s status for the URL(s).
 """
 
@@ -33,7 +35,7 @@ import asyncio
 import logging
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Any, List, Dict
+from typing import Any, Dict
 import pandas as pd
 
 from job_bot.config.project_config import EXCEL_DIR
@@ -42,7 +44,15 @@ from job_bot.db_io.db_readers import (
     fetch_flattened_responsibilities,
     fetch_edited_responsibilities,
 )  # readers read into df instead of models
-from job_bot.db_io.db_utils import get_urls_ready_for_transition
+
+# from job_bot.db_io.db_utils import get_urls_ready_for_transition
+from job_bot.db_io.db_utils import (
+    generate_worker_id,
+    get_claimable_worklist,
+    try_claim_one,
+    release_one,
+    finalize_one_row_in_pipeline_control,
+)
 from job_bot.db_io.get_db_connection import get_db_connection
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
@@ -343,24 +353,28 @@ def _edited_resps_best_match_map(
     df_metrics: pd.DataFrame, df_edited: pd.DataFrame
 ) -> Dict[str, str]:
     """
-    Build a map {responsibility_key → edited responsibility text}.
+    Build a mapping of {responsibility_key → edited responsibility text (best match)}.
 
-    For each responsibility_key, pick the edited responsibility whose requirement_key
-    has the highest composite_score in df_metrics.
+    For each responsibility_key in the similarity metrics:
+      1. Identify the requirement_key with the highest composite_score.
+      2. Join that (responsibility_key, requirement_key) pair to the edited
+         responsibilities table to retrieve the corresponding edited text.
+      3. Return a dictionary mapping each responsibility_key to its best-match
+         edited responsibility text.
 
-    For each responsibility_key, pick the requirement with the maximum
-    `composite_score` in `df_metrics` and STRICTLY join to `df_edited` on
-    (responsibility_key, requirement_key). No fallbacks
+    Both DataFrames must include compatible key columns:
+      - df_metrics: responsibility_key, requirement_key, composite_score
+      - df_edited: responsibility_key, requirement_key, responsibility
 
     Args:
-        df_metrics: Similarity metrics for a single URL.
+        df_metrics: Similarity metrics for a single URL (version='edited').
         df_edited: Edited responsibilities for the same URL.
 
     Returns:
-        A dict mapping responsibility_key → edited responsibility text, or None
-        if no mapping can be constructed.
+        A dictionary mapping responsibility_key → best-match edited responsibility text.
 
-    Returns {responsibility_key: edited_text}.
+    Raises:
+        ValueError: If either input DataFrame is missing required columns.
     """
     needed_m = {"responsibility_key", "requirement_key", "composite_score"}
     missing_m = needed_m - set(df_metrics.columns)
@@ -374,9 +388,17 @@ def _edited_resps_best_match_map(
             f"edited_responsibilities missing columns: {sorted(missing_e)}"
         )
 
-    # best requirement per responsibility by composite_score
+    # Normalize join keys to strings to avoid dtype mismatches
+    dfm = df_metrics.copy()
+    dfe = df_edited.copy()
+    dfm["responsibility_key"] = dfm["responsibility_key"].astype(str)
+    dfm["requirement_key"] = dfm["requirement_key"].astype(str)
+    dfe["responsibility_key"] = dfe["responsibility_key"].astype(str)
+    dfe["requirement_key"] = dfe["requirement_key"].astype(str)
+
+    # Best requirement per responsibility by highest composite_score
     best = (
-        df_metrics.sort_values(
+        dfm.sort_values(
             ["responsibility_key", "composite_score"], ascending=[True, False]
         )
         .groupby("responsibility_key", as_index=False)
@@ -385,7 +407,7 @@ def _edited_resps_best_match_map(
 
     ref = (
         best.merge(
-            df_edited[["responsibility_key", "requirement_key", "responsibility"]],
+            dfe[["responsibility_key", "requirement_key", "responsibility"]],
             on=["responsibility_key", "requirement_key"],
             how="left",
         )
@@ -518,121 +540,22 @@ def _export_one_url_alignment_review(
 
 
 # ----------------------------
-# URL-only claim/finalize (NO process_status here)
-# ----------------------------
-def _claim_by_urls(urls: List[str], *, stage: PipelineStage) -> int:
-    """
-    Claim a batch of URLs at the given stage (URL-only gate).
-
-    Transitions rows in `pipeline_control` from NEW → IN_PROGRESS for the
-    specified `stage`, and resets `decision_flag` to 0.
-
-    No `process_status` changes occur here;
-
-    `get_urls_ready_for_transition` is the sole place that
-    may consider process-level policy.
-
-    Args:
-        urls: Candidate URLs to claim.
-        stage: PipelineStage for which to claim.
-
-    Returns:
-        The number of rows transitioned to IN_PROGRESS.
-
-    # * Note: claim ensures that the same URL will not be used in multiple jobs
-    # * (important for concurrency)
-    """
-    if not urls:
-        return 0
-    con = get_db_connection()
-    df = pd.DataFrame({"url": [str(u) for u in urls]})
-    con.register("u", df)
-    try:
-        result = con.execute(
-            """
-            UPDATE pipeline_control AS pc
-            SET status = ?,
-                decision_flag = 0,
-                updated_at = now()
-            FROM u
-            WHERE pc.url = u.url
-              AND pc.stage = ?
-              AND pc.status = ?
-              AND COALESCE(pc.decision_flag,0)=1
-            """,
-            [PipelineStatus.IN_PROGRESS.value, stage.value, PipelineStatus.NEW.value],
-        )
-        return result.rowcount or 0
-    finally:
-        try:
-            con.unregister("u")
-        except Exception:
-            pass
-
-
-def _fetch_claimed_urls(urls: List[str], *, stage: PipelineStage) -> List[str]:
-    """Subset of given URLs currently IN_PROGRESS at this stage (no process_status)."""
-    if not urls:
-        return []
-    con = get_db_connection()
-    df = pd.DataFrame({"url": [str(u) for u in urls]})
-    con.register("u", df)
-    try:
-        out = con.execute(
-            """
-            SELECT pc.url
-            FROM pipeline_control pc
-            JOIN u USING (url)
-            WHERE pc.stage = ?
-              AND pc.status = ?
-            """,
-            [stage.value, PipelineStatus.IN_PROGRESS.value],
-        ).df()
-        return out["url"].astype(str).tolist()
-    finally:
-        try:
-            con.unregister("u")
-        except Exception:
-            pass
-
-
-def _finalize_by_url(
-    url: str, *, stage: PipelineStage, ok: bool, notes: str | None = None
-) -> None:
-    """Finalize all in-progress rows for this URL at this stage (no process_status here)."""
-    con = get_db_connection()
-    con.execute(
-        """
-        UPDATE pipeline_control
-        SET status = ?,
-            notes = COALESCE(?, notes),
-            updated_at = now()
-        WHERE url = ?
-          AND stage = ?
-          AND status = ?
-        """,
-        [
-            (PipelineStatus.COMPLETED.value if ok else PipelineStatus.ERROR.value),
-            notes,
-            url,
-            stage.value,
-            PipelineStatus.IN_PROGRESS.value,
-        ],
-    )
-
-
-# ----------------------------
 # Async per-URL wrapper (URL-only)
 # ----------------------------
 async def _run_one_url_async(
     url: str,
     *,
+    iteration: int,
+    worker_id: str,
     score_threshold: float,
     out_dir: str | Path,
     reference_column_enum: Version,
-    stage: PipelineStage,
     sem: asyncio.Semaphore,
 ) -> bool:
+    """
+    Run the per-URL export in a thread (blocking I/O) and finalize this (url, iteration)
+    lease-aware via _finalize_one_row. Caller must have already claimed the row.
+    """
     async with sem:
         try:
             out_path = await asyncio.to_thread(
@@ -642,17 +565,33 @@ async def _run_one_url_async(
                 out_dir=out_dir,
                 reference_column_enum=reference_column_enum,
             )
-            await asyncio.to_thread(
-                _finalize_by_url,
+            # Success → finalize this exact row (clears lease, sets COMPLETED)
+            ok = await asyncio.to_thread(
+                finalize_one_row_in_pipeline_control,
                 url,
-                stage=stage,
+                iteration,
+                worker_id=worker_id,
                 ok=True,
                 notes=f"Exported: {out_path}",
             )
-            return True
+            if not ok:
+                logger.warning(
+                    "Finalize returned False for url=%s iter=%s", url, iteration
+                )
+            return ok
         except Exception as e:
+            # Failure → finalize with ERROR
+            err = str(e)
             await asyncio.to_thread(
-                _finalize_by_url, url, stage=stage, ok=False, notes=str(e)
+                finalize_one_row_in_pipeline_control,
+                url,
+                iteration,
+                worker_id=worker_id,
+                ok=False,
+                notes=err[:2000],  # keep notes reasonable
+            )
+            logger.exception(
+                "Export failed for url=%s iter=%s: %s", url, iteration, err
             )
             return False
 
@@ -667,58 +606,121 @@ async def run_alignment_review_pipeline_async_fsm(
     out_dir: str | Path = EXCEL_DIR,
     reference_column_enum: Version = Version.ORIGINAL,
     max_concurrency: int = 4,
+    iteration: int = 0,
+    retry_errors: bool = False,
 ) -> int:
     """
-    URL-only async orchestrator (matches your other pipelines).
+    Alignment Review: async FSM-aware runner with human gate + lease control.
 
-    get_urls_ready_for_transition(stage=...) is the ONLY layer that may filter
-    by process_status.
+    Flow:
+      1) Read claimable rows
+        (stage/status + task_state='READY' + unleased/expired)
+      2) Atomically try to claim each (sets status=IN_PROGRESS on success)
+      3) Process concurrently
+      4) Release each row with final status (COMPLETED/ERROR)
+
+    Notes:
+      - No use of get_urls_ready_for_transition (read-only helpers aren’t
+        safe to drive runners)
+      - This function assumes the following DB helpers exist in db_utils:
+          - generate_worker_id(prefix: str) -> str
+          - get_claimable_worklist(stage, status, limit=None) ->
+            List[Tuple[str, int]]
+          - try_claim_one(url, iteration, worker_id, lease_minutes=15) ->
+            Optional[dict]
+          - release_one(url, iteration, worker_id, final_status) -> bool
+      - If a single URL may have multiple iterations, we always operate on
+        (url, iteration) pairs.
     """
-    # 0) URLs ready (helper handles any process_status policy)
+    # --- setup ---------------------------------------------------------------
     out_dir = Path(out_dir) if isinstance(out_dir, str) else out_dir
+    stage_enum = PipelineStage.ALIGNMENT_REVIEW
+    worker_id = generate_worker_id("align")
 
-    urls: List[str] = get_urls_ready_for_transition(
-        stage=PipelineStage.ALIGNMENT_REVIEW
+    statuses = (
+        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        if retry_errors
+        else (PipelineStatus.NEW,)
     )
-    if not urls:
-        logger.info(
-            "📭 No URLs in worklist for stage=%s.", PipelineStage.ALIGNMENT_REVIEW.value
+
+    # 1) Pull *claimable* worklist (lease + human gate). Respect batch_limit if provided.
+    claimables = get_claimable_worklist(
+        stage=stage_enum,
+        status=statuses,
+        max_rows=(
+            batch_limit if (batch_limit is not None and batch_limit >= 0) else None
+        ),
+    )
+
+    if not claimables:
+        logger.info("📭 No claimable rows for stage=%s.", stage_enum.value)
+        return 0
+
+    # 2) Atomically claim; only process what we actually claimed
+    claimed: list[tuple[str, int]] = []
+    for url, iteration in claimables:
+        row = try_claim_one(
+            url=url, iteration=iteration, worker_id=worker_id, lease_minutes=20
         )
+        if row:
+            claimed.append((url, iteration))
+
+    if not claimed:
+        logger.info("🔒 Nothing claimed (contention or already leased).")
         return 0
 
-    logger.info(f"urls to be transitioned: {urls}")
+    logger.info("🔎 Claimed %d rows for stage=%s", len(claimed), stage_enum.value)
 
-    if batch_limit is not None and batch_limit >= 0:
-        urls = urls[:batch_limit]
-
-    # 1) Claim by URL (NEW→IN_PROGRESS; zero decision_flag). No process_status here.
-    claimed_n = await asyncio.to_thread(
-        _claim_by_urls, urls, stage=PipelineStage.ALIGNMENT_REVIEW
-    )
-    if claimed_n == 0:
-        logger.info("🔒 Nothing claimed (maybe contended by another worker).")
-        return 0
-
-    # 2) Process only the subset actually claimed (stage/status only).
-    claimed_urls = await asyncio.to_thread(
-        _fetch_claimed_urls, urls, stage=PipelineStage.ALIGNMENT_REVIEW
-    )
-    if not claimed_urls:
-        logger.info("🔄 Claimed set is empty after re-check; exiting.")
-        return 0
-
-    # 3) Run per-URL concurrently
+    # 3) Process concurrently. We keep iteration for releasing later.
     sem = asyncio.Semaphore(max_concurrency)
-    tasks = [
-        _run_one_url_async(
-            url,
-            score_threshold=score_threshold,
-            out_dir=out_dir,
-            reference_column_enum=reference_column_enum,
-            stage=PipelineStage.ALIGNMENT_REVIEW,
-            sem=sem,
+
+    async def _process_one(url: str, iteration: int) -> tuple[bool, str, int]:
+        """
+        Run the existing per-URL worker.
+
+        If the worker can accept iteration/worker_id,
+        pass them through; otherwise it can ignore extra context.
+        """
+        async with sem:
+            try:
+                ok = await _run_one_url_async(
+                    url,
+                    score_threshold=score_threshold,
+                    out_dir=out_dir,
+                    reference_column_enum=reference_column_enum,
+                    worker_id=worker_id,
+                    sem=sem,
+                    iteration=iteration,
+                )
+                return bool(ok), url, iteration
+            except Exception:
+                logger.exception(
+                    "❌ Error processing url=%s iteration=%s", url, iteration
+                )
+                return False, url, iteration
+
+    results = await asyncio.gather(
+        *[_process_one(url, iteration) for (url, iteration) in claimed],
+        return_exceptions=False,
+    )
+
+    # 4) Release leases with final status
+    successes = 0
+    for ok, url, iteration in results:
+        final_status = PipelineStatus.COMPLETED if ok else PipelineStatus.ERROR
+        released = release_one(
+            url=url, iteration=iteration, worker_id=worker_id, final_status=final_status
         )
-        for url in claimed_urls
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
-    return sum(1 for ok in results if ok)
+        if not released:
+            logger.warning(
+                "⚠️ Release failed (mismatched worker or lost lease?) url=%s iter=%s",
+                url,
+                iteration,
+            )
+        if ok:
+            successes += 1
+
+    logger.info(
+        "✅ Alignment review finished. success=%d total=%d", successes, len(results)
+    )
+    return successes

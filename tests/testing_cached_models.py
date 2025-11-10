@@ -2,10 +2,9 @@ import os
 import logging
 from transformers.utils import is_offline_mode
 from transformers import AutoModel, AutoTokenizer
-from utils.model_loader import get_hf_model, get_spacy_model
+from job_bot.utils.model_loader import get_hf_model, get_spacy_model
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Check if Hugging Face is in offline mode

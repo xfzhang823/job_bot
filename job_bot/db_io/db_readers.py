@@ -78,7 +78,8 @@ def fetch_edited_responsibilities(url: str) -> pd.DataFrame:
     """
     schema = DUCKDB_SCHEMA_REGISTRY[TableName.EDITED_RESPONSIBILITIES]
     sql = schema.select_by_url_sql(
-        ["url", RESP_KEY, RESP, LLM_PROVIDER, MODEL_ID], order_by=RESP_KEY
+        ["url", RESP_KEY, RESP, REQ_KEY, LLM_PROVIDER, MODEL_ID],
+        order_by=f"{RESP_KEY}, {REQ_KEY}",
     )
     con = get_db_connection()
     try:

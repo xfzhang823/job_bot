@@ -18,16 +18,13 @@ from typing import Optional, Union
 
 # From project modules
 from job_bot.db_io.get_db_connection import get_db_connection
-from job_bot.db_io.pipeline_enums import TableName, PipelineStage, PipelineProcessStatus
+from job_bot.db_io.pipeline_enums import TableName, PipelineStage, PipelineTaskState
 from job_bot.fsm.pipeline_fsm import PipelineFSM
 from job_bot.models.db_table_models import PipelineState
 
 logger = logging.getLogger(__name__)
 
-ACTIVE_PROCESS_STATUSES = (
-    PipelineProcessStatus.NEW,
-    PipelineProcessStatus.RUNNING,
-)
+ACTIVE_TASK_STATE = PipelineTaskState.READY
 
 
 class PipelineFSMManager:
@@ -78,7 +75,7 @@ class PipelineFSMManager:
                 The job posting URL whose state we want to fetch.
             active_only (bool):
                 If active_only=True (default), only considers rows
-                    process_status ∈ {new, running}.
+                    task_state ∈ {new, running}.
                 Otherwise returns the most recently updated row regardless of
                     lifecycle.
 
@@ -102,22 +99,14 @@ class PipelineFSMManager:
         params: list[object] = [url_str]
 
         if active_only:
-            # Ensure we pass strings to DuckDB if these are Enums
+            # Restrict to human-gate states that are eligible for machine processing
             try:
-                new_val = getattr(
-                    PipelineProcessStatus.NEW, "value", PipelineProcessStatus.NEW
-                )
-                run_val = getattr(
-                    PipelineProcessStatus.RUNNING,
-                    "value",
-                    PipelineProcessStatus.RUNNING,
-                )
+                ready_val = getattr(PipelineTaskState.READY, "value", "READY")
             except Exception:
-                # Fallback if these aren't Enums
-                new_val = "new"
-                run_val = "running"
-            clauses.append("process_status IN (?, ?)")
-            params.extend([new_val, run_val])
+                ready_val = "READY"
+
+            clauses.append("task_state = ?")
+            params.append(ready_val)
 
         query = f"""
             SELECT *
@@ -151,7 +140,7 @@ class PipelineFSMManager:
                 The job posting URL for which to build the FSM.
             active_only (bool):
                 If active_only=True (default), only considers rows
-                    process_status ∈ {new, running}.
+                    task_state ∈ {new, running}.
                 Otherwise returns the most recently updated row regardless of
                     lifecycle.
         Returns:

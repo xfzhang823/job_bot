@@ -1,0 +1,80 @@
+## ✅ Goal
+
+Have **two fully self-contained pipelines**:
+
+1. **File-saving pipeline** (your current `main.py`): produces JSON, Excel, etc.
+2. **FSM-driven DuckDB pipeline**: runs entirely inside DuckDB, with FSM control, no filesystem dependency.
+
+Both must be **modular enough** so a future hybrid is possible, but each pipeline should be runnable on its own.
+
+---
+
+## ✅ Current State
+
+* **DuckDB schema registry** (`db_schema_registry.py`) defines all core tables:
+
+  * `job_urls`
+  * `job_postings`
+  * `extracted_requirements`
+  * `flattened_requirements`
+  * `flattened_responsibilities`
+  * `edited_responsibilities`
+  * `similarity_metrics`
+  * `pruned_responsibilities`
+  * `pipeline_control` (FSM table)
+* Each **stage in the FSM** aligns with one of these tables.
+* Some pipeline modules already updated for FSM/DuckDB; others still run file-based only.
+
+---
+
+## ✅ What Needs Work
+
+**Pipeline stage alignment**
+
+   * Each stage must read from DuckDB instead of filesystem.
+   * If not yet updated, modify stage modules so they:
+
+     * Pull worklist from `pipeline_control`.
+     * Run their process (scraping, evaluation, editing, etc.).
+     * Write results back into the appropriate DuckDB table.
+     * Update FSM state for the URL.
+
+**State orchestration**
+
+   * `run_state_orchestration_pipeline()` syncs data **into** `pipeline_control`.
+   * In the FSM pipeline, this should run after each stage (or at key checkpoints) to ensure the control table stays in sync.
+
+**Consistency checks**
+
+   * Use FSM integrity checks (`fsm_integrity_checker`, `fsm_state_control`).
+   * Validate transitions so URLs only progress through valid stage paths.
+
+---
+Snapshot by module now:
+
+job_postings_pipeline_async_fsm → ✅ DB + FSM (good)
+Declares DuckDB read/write true; no filesystem I/O; networking+LLM present. This is the intended DB-native stage runner.
+
+
+job_requirements_pipeline_async_fsm → 🚧 FSM yes, DuckDB not wired
+Side effects list DuckDB = false (and filesystem false), so it isn’t persisting to DuckDB yet. Needs DB writes + FSM advance wired in.
+
+
+preprocessing_pipeline_async_fsm → 🟡 Hybrid (files + DuckDB)
+Reads/writes filesystem and DuckDB; still uses file helpers. Needs a DB-only variant to be fully FSM-native.
+
+
+resume_eval_pipeline_async_with_fsm → ❌ File-based
+Filesystem read/write true; DuckDB read/write false. Metrics are produced to files, not DB. Needs refactor to write to similarity_metrics directly and advance FSM.
+
+
+resume_editing_pipeline_async_fsm → ❌ File-based
+Filesystem read/write true; DuckDB = false. Needs DB persistence to edited_responsibilities and FSM step.
+
+resps_reqs_crosstab_pipeline_async_fsm → ❌ File-based (by design)
+Filesystem read/write true; DuckDB = false. Generates Excel reports (not a DuckDB table). That’s okay if you want to keep reports as artifacts.
+
+state_orchestration_pipeline → ✅ DB control-plane
+DuckDB present/read/write true; does the syncs into pipeline_control.
+
+

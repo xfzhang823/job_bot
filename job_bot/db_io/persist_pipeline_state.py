@@ -1,71 +1,63 @@
 # job_bot/db_io/persist_pipeline_state.py
 from __future__ import annotations
 import logging
-from typing import Optional, cast
+from typing import Optional
 
 import pandas as pd
 
 from job_bot.db_io.pipeline_enums import (
     TableName,
     PipelineStatus,
-    PipelineProcessStatus,
+    PipelineTaskState,
     PipelineStage,
 )
 from job_bot.models.db_table_models import PipelineState
 from job_bot.db_io.db_inserters import insert_df_with_config
-from job_bot.db_io.get_db_connection import get_db_connection
-
+from job_bot.fsm.fsm_stage_config import PIPELINE_STAGE_SEQUENCE
 
 logger = logging.getLogger(__name__)
 
 URL_ONLY_STAGES: set[PipelineStage] = {PipelineStage.JOB_URLS}  # extend if needed
 
 
-def _normalize_process_status_for_stage(
-    state_model: PipelineState,
-) -> PipelineProcessStatus:
+def _normalize_task_state_for_stage(state_model: PipelineState) -> PipelineTaskState:
     """
-    Enforce: if stage is URL-only -> NEW; else -> RUNNING,
-    unless already terminal (COMPLETED or SKIPPED).
+    Normalize the human gate for persistence.
+
+    Rules (new model):
+      • Preserve explicit human choices:
+          - SKIP  → terminal (never process)
+          - PAUSED → terminal (machine finished or manually paused)
+          - HOLD → non-terminal, keep as-is (manual review)
+      • If machine has COMPLETED the stage:
+          - If we're at the final stage → PAUSED (pipeline cycle complete)
+          - Else                       → READY (eligible for next stage)
+      • Otherwise (not completed) → READY (eligibility is managed by lease fields)
     """
-    # Safely typed reads
-    status: Optional[PipelineStatus] = cast(
-        Optional[PipelineStatus], getattr(state_model, "status", None)
-    )
-    pstat: Optional[PipelineProcessStatus] = cast(
-        Optional[PipelineProcessStatus], getattr(state_model, "process_status", None)
-    )
-    stage: Optional[PipelineStage] = cast(
-        Optional[PipelineStage], getattr(state_model, "stage", None)
-    )
+    # Safe reads
+    status: Optional[PipelineStatus] = getattr(state_model, "status", None)
+    task_state: Optional[PipelineTaskState] = getattr(state_model, "task_state", None)
+    stage: Optional[PipelineStage] = getattr(state_model, "stage", None)
 
-    # Terminal sets (no 'CANCELED' in your project)
-    TERMINAL_PS: set[PipelineProcessStatus] = {PipelineProcessStatus.COMPLETED}
-    if hasattr(PipelineProcessStatus, "SKIPPED"):
-        TERMINAL_PS.add(
-            getattr(PipelineProcessStatus, "SKIPPED")
-        )  # still a PipelineProcessStatus
+    # Canonical final stage (import PIPELINE_STAGE_SEQUENCE from your config/module)
+    final_stage: PipelineStage = PIPELINE_STAGE_SEQUENCE[-1]
 
-    # 1) If already terminal, keep it.
-    if pstat in TERMINAL_PS:
-        return pstat  # type: ignore[return-value]  # safe: membership guarantees non-None, correct enum
-
-    # 2) Map terminal *status* to process_status terminal
-    if status in {PipelineStatus.COMPLETED} | (
-        {getattr(PipelineStatus, "SKIPPED")}
-        if hasattr(PipelineStatus, "SKIPPED")
-        else set()
+    # 1) Preserve explicit human choices first
+    if task_state in (
+        PipelineTaskState.SKIP,
+        PipelineTaskState.PAUSED,
+        PipelineTaskState.HOLD,
     ):
-        if hasattr(PipelineProcessStatus, "SKIPPED") and status == getattr(
-            PipelineStatus, "SKIPPED", None
-        ):
-            return getattr(PipelineProcessStatus, "SKIPPED")  # exact enum
-        return PipelineProcessStatus.COMPLETED
+        return task_state  # type: ignore[return-value]
 
-    # 3) Non-terminal: derive from stage
-    if stage in URL_ONLY_STAGES:
-        return PipelineProcessStatus.NEW
-    return PipelineProcessStatus.RUNNING
+    # 2) Map machine COMPLETED to human gate
+    if status == PipelineStatus.COMPLETED:
+        if stage == final_stage:
+            return PipelineTaskState.PAUSED  # terminal human gate at end of pipeline
+        return PipelineTaskState.READY  # allow next stage to pick it up
+
+    # 3) Default: eligible (actual "in-progress" is tracked by lease fields)
+    return PipelineTaskState.READY
 
 
 def update_and_persist_pipeline_state(
@@ -104,7 +96,7 @@ def update_and_persist_pipeline_state(
 
     try:
         # Ensure correct project status
-        state_model.process_status = _normalize_process_status_for_stage(state_model)
+        state_model.task_state = _normalize_task_state_for_stage(state_model)
 
         # 2) Dump the ENTIRE model in JSON mode so Enums → values, HttpUrl → str
         #    exclude_none=False ensures optional columns (e.g., decision_flag) are included

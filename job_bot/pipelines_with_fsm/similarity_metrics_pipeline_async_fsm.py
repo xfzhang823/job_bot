@@ -1,56 +1,61 @@
 """
 pipelines_with_fsm/similarity_pipeline_async_fsm.py
 
-DB-native similarity evaluation pipeline (FSM-driven; no fallback).
+DB-native similarity evaluation pipeline (FSM-driven; lease-aware claimables).
 
-Worklists:
-   • EVAL:    SIM_METRICS_EVAL / NEW     ← URLs are pulled from pipeline_control
-   • RE-EVAL: SIM_METRICS_REVAL / NEW    ← URLs are pulled from pipeline_control
+Worklists (from pipeline_control, human-gated + lease-aware):
+   • EVAL:    SIM_METRICS_EVAL / NEW
+    (optionally include ERROR if retry_errors=True)
+   • RE-EVAL: SIM_METRICS_REVAL / NEW
+    (optionally include ERROR if retry_errors=True)
 
 DB inputs (per URL):
   • flattened_requirements    (requirement_key, requirement)
   • responsibilities:
-      - EVAL   → flattened_responsibilities   (responsibility_key, responsibility)
-      - RE-EVAL→ edited_responsibilities      (responsibility_key, responsibility)
+      - EVAL   → flattened_responsibilities
+        (responsibility_key, responsibility)
+      - RE-EVAL→ edited_responsibilities
+        (responsibility_key, responsibility, requirement_key)
 
 Output:
-  • similarity_metrics / NEW
-    (rows stamped with stage = PipelineStage.SIM_METRICS_EVAL or
-    PipelineStage.SIM_METRICS_REVAL)
+  • similarity_metrics (rows stamped with stage via inserter config)
+    - version: Version.ORIGINAL (EVAL) or Version.EDITED (RE-EVAL)
+    - resp_llm_provider / resp_model_id stamped via inserter for RE-EVAL
 
-Per-URL flow (no filesystem I/O, no LLM):
-  1) FSM: mark IN_PROGRESS on the current responsibilities stage (flattened or edited).
-  2) Read responsibilities (per stage) and flattened requirements from DuckDB.
-  3) Compute pairwise similarity (many-to-many), categorize scores,
-    add multivariate indices.
-  4) (Optional) Validate rows against the SimilarityMetrics Pydantic model.
-  5) Stamp metadata, align to registry schema, insert into `similarity_metrics`
-    de-dup.
-  6) FSM: mark COMPLETED → step(SIM_METRICS_EVAL or SIM_METRICS_REVAL) → mark NEW.
+Orchestration (claimables model):
+  1) Build claimable worklist
+    (stage=SIM_METRICS_EVAL|SIM_METRICS_REVAL, status IN NEW[, ERROR])
+    respecting human gate and expired leases.
+  2) Generate a worker_id for this run.
+  3) For each (url, iteration):
+       a) try_claim_one(url, iteration, worker_id) → acquire lease or skip.
+       b) evaluate_similarity_for_url_async(...) → pure compute + DB insert
+        (no FSM mutation).
+       c) finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok=...)
+          - Sets final status & clears lease if worker still owns it.
+       d) If ok: fsm.step() to advance the control-plane stage.
 
 Notes:
-  • No fallback path; the stage determines which responsibility table is read.
-  • Vectorized compute on DataFrames for speed (no Pydantic round-trips in
-    the hot path).
-  • Keys are canonicalized as *_key (requirement_key, responsibility_key)
-    to match the registry.
-  • URL is the unit of work; the pipeline is idempotent and concurrency-safe.
+  • Vectorized compute on DataFrames for speed.
+  • Keys canonicalized as *_key (requirement_key, responsibility_key).
+  • URL is the unit of work; idempotent and safe for concurrency.
 """
 
-# --- Standard & 3rd party imports
 from __future__ import annotations
+
+# --- Standard & 3rd party imports
 import asyncio
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 from time import perf_counter
-import pandas as pd
+from collections.abc import Hashable
 import numpy as np
 from pydantic import TypeAdapter
-from collections.abc import Hashable
+from time import perf_counter
+import pandas as pd
 
-# --- Project imports (adjust the package prefix to match your repo layout) ---
+# --- Project imports ---
 from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
-from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.pipeline_enums import (
     TableName,
@@ -64,10 +69,16 @@ from job_bot.db_io.db_readers import (
     fetch_flattened_responsibilities,
     fetch_flattened_requirements,
 )
+from job_bot.db_io.state_sync import load_pipeline_state
+from job_bot.db_io.db_utils import (
+    get_claimable_worklist,
+    try_claim_one,
+    finalize_one_row_in_pipeline_control,
+    generate_worker_id,
+)
 
-# Reuse compute from the file ETL (computation only; no file I/O)
+# Reuse compute from your evaluation code (computation only; no file I/O)
 from job_bot.evaluation_optimization.metrics_calculator import (
-    calculate_many_to_many_similarity_metrices,  # note: name as defined in your codebase
     categorize_scores_for_df,
     calculate_text_similarity_metrics,
 )
@@ -86,274 +97,522 @@ VALIDATE_WITH_PYDANTIC: bool = False  # Set to False for faster speed
 
 
 # =============================================================================
-# Per-URL worker
+# Per-URL worker (pure compute + insert; does not mutate leases or FSM)
 # =============================================================================
 
 
-async def evaluate_similarity_for_url(
+async def evaluate_similarity_for_url_async(
     url: str,
     *,
-    fsm_manager: PipelineFSMManager,
-    semaphore: asyncio.Semaphore,
+    iteration: int,
     metrics_stage: PipelineStage,  # SIM_METRICS_EVAL or SIM_METRICS_REVAL
 ) -> bool:
     """
-    Evaluate and persist similarity metrics for a single job posting URL.
+    Evaluate and persist similarity metrics for a single (url, iteration).
 
-    Flow
-    ----
-    1. Guard on FSM stage and mark IN_PROGRESS.
-       • EVAL  → FLATTENED_RESPONSIBILITIES
-       • REVAL → EDITED_RESPONSIBILITIES
-    2. Load responsibilities + requirements from DuckDB.
-    3. Compute similarity scores using the stage-specific function:
-       • EVAL  → _compute_eval_similarity_df_async (many-to-many)
-       • REVAL → _compute_reval_similarity_df_async (aligned pairs)
-    4. Normalize keys, (optionally) validate via Pydantic, and stamp business metadata.
-    5. Insert into SIMILARITY_METRICS per YAML config.
-    6. Mark FSM COMPLETED and step.
+    Caller is responsible for claim/finalize and FSM step. This function:
+      1) Loads responsibilities + flattened requirements from DuckDB (per stage).
+      2) Builds (responsibility, requirement) pairs.
+      3) Scores pairs concurrently, adds categories and multivariate indices.
+      4) Normalizes/stamps required columns and inserts rows into similarity_metrics.
+
+    Returns:
+      True on success (rows persisted), False on any failure or empty result.
+    """
+    # Load inputs
+    reqs = await asyncio.to_thread(fetch_flattened_requirements, url)
+    if metrics_stage == PipelineStage.SIM_METRICS_EVAL:
+        resps = fetch_flattened_responsibilities(url)
+        version = Version.ORIGINAL
+        resp_prov: tuple[str | None, str | None] = (None, None)
+    elif metrics_stage == PipelineStage.SIM_METRICS_REVAL:
+        resps = fetch_edited_responsibilities(url)
+        version = Version.EDITED
+        # Infer a single (llm_provider, model_id) pair for provenance
+        pairs = list(
+            resps[["llm_provider", "model_id"]]
+            .dropna()
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        )
+        if not pairs:
+            logger.error(
+                "No (llm_provider, model_id) for edited responsibilities: %s", url
+            )
+            return False
+        if len(pairs) > 1:
+            logger.error(
+                "Multiple edited sets for %s; provide editor_llm_provider/model_id. Found: %s",
+                url,
+                pairs,
+            )
+            return False
+        resp_prov = pairs[0]
+    else:
+        logger.error("Unsupported metrics_stage: %s", metrics_stage)
+        return False
+
+    if reqs.empty or resps.empty:
+        logger.warning(
+            "%s: missing reqs/resps (reqs=%d, resps=%d)", url, len(reqs), len(resps)
+        )
+        return False
+
+    try:
+        # Build pairs for BOTH stages
+        pairs_df = build_pairs_df(resps, reqs, stage=metrics_stage)
+        if pairs_df.empty:
+            logger.error(
+                "%s: empty pairs_df after build_pairs_df (%s)", url, metrics_stage
+            )
+            return False
+
+        # Score
+        df = await _compute_similarity_df_async(pairs_df)
+        if df.empty:
+            return False
+
+        # Normalize keys, ensure URL, and validate if enabled
+        df = _normalize_similarity_keys(df)
+        if "url" not in df.columns:
+            df.insert(0, "url", url)
+
+        if VALIDATE_WITH_PYDANTIC:
+            df = _validate_similarity_rows(df)
+
+        # Required columns
+        if not {"url", "responsibility_key", "requirement_key"}.issubset(df.columns):
+            logger.error("Missing required columns after normalization/validation")
+            return False
+
+        # ---- Add categories and multivariate indices BEFORE stamping/inserting ----
+        try:
+            df = categorize_scores_for_df(df)
+        except Exception as e:
+            logger.warning("Categorization failed; continuing without *_cat: %s", e)
+
+        try:
+            df = add_multivariate_indices(df)
+        except Exception as e:
+            logger.warning(
+                "Index computation failed; will continue without indices: %s", e
+            )
+
+        # Stage-owned fields
+        df["version"] = version.value
+
+        # If your table owns backend columns and they’re missing, set defaults
+        schema = DUCKDB_SCHEMA_REGISTRY[TableName.SIMILARITY_METRICS]
+        owned = set(getattr(schema, "metadata_fields", [])) | set(schema.column_order)
+        for col in ("similarity_backend", "nli_backend"):
+            if col in owned and col not in df.columns:
+                df[col] = None
+
+        # Rename optimized_text / requirement_text back to responsibility / requirement if needed
+        if "optimized_text" in df.columns and "responsibility" not in df.columns:
+            df["responsibility"] = df["optimized_text"]
+        if "requirement_text" in df.columns and "requirement" not in df.columns:
+            df["requirement"] = df["requirement_text"]
+
+        # Insert (REVAL stamps editor provenance via YAML stamp:param)
+        if version == Version.EDITED:
+            if not VALIDATE_WITH_PYDANTIC:
+                for col in ("resp_llm_provider", "resp_model_id"):
+                    if col not in df.columns:
+                        df[col] = None
+
+            insert_df_with_config(
+                df,
+                TableName.SIMILARITY_METRICS,
+                url=url,
+                resp_llm_provider=resp_prov[0],  # YAML stamp:param
+                resp_model_id=resp_prov[1],  # YAML stamp:param
+                iteration=iteration,  # ← pass iteration
+            )
+        else:
+            insert_df_with_config(
+                df,
+                TableName.SIMILARITY_METRICS,
+                url=url,
+                resp_llm_provider="N/A",
+                resp_model_id="N/A",
+                iteration=iteration,  # ← pass iteration
+            )
+
+        logger.info(
+            "✅ Similarity rows inserted: %s (stage=%s)", url, metrics_stage.value
+        )
+        return True
+
+    except Exception:
+        logger.exception("❌ Compute/insert failed for %s", url)
+        return False
+
+
+# =============================================================================
+# Batch runner (claim → run → finalize → step)
+# =============================================================================
+
+
+async def process_similarity_batch_async_fsm(
+    url_iter_pairs: list[tuple[str, int]],
+    *,
+    worker_id: str,
+    metrics_stage: PipelineStage,
+    no_of_concurrent_workers: int = 5,
+) -> list[asyncio.Task]:
+    """
+    Claim → run pure op → finalize/step. Mirrors the updated patterns used elsewhere.
+
+    - The worker attempts to claim each (url, iteration).
+    - If claimed, it performs similarity compute/insert.
+    - Finalizes row with ok status and steps FSM on success.
+    """
+    semaphore = asyncio.Semaphore(no_of_concurrent_workers)
+    fsm_manager = PipelineFSMManager()
+
+    async def run_one(url: str, iteration: int) -> None:
+        # Optional: pre-flight existence check
+        if load_pipeline_state(url) is None:
+            logger.warning("⚠️ No pipeline_state row for %s", url)
+
+        # Lease: claim or skip
+        if not try_claim_one(url=url, iteration=iteration, worker_id=worker_id):
+            logger.info("⏭️ Skipping %s@%s — already claimed.", url, iteration)
+            return
+
+        try:
+            ok = await evaluate_similarity_for_url_async(
+                url,
+                iteration=iteration,
+                semaphore=semaphore,
+                metrics_stage=metrics_stage,
+            )
+
+            finalized = finalize_one_row_in_pipeline_control(
+                url=url,
+                iteration=iteration,
+                worker_id=worker_id,
+                ok=ok,
+                notes="Similarity saved to DB" if ok else "Similarity compute failed",
+            )
+            if not finalized:
+                logger.warning(
+                    "[finalize] Lost lease for %s@%s; not stepping.", url, iteration
+                )
+                return
+
+            if ok:
+                try:
+                    expected_source_stage = metrics_stage
+                    fsm = fsm_manager.get_fsm(url)
+                    if fsm.get_current_stage() == expected_source_stage.value:
+                        fsm.step()
+                    else:
+                        logger.info(
+                            "Not stepping %s@%s: stage moved from %s → %s elsewhere.",
+                            url,
+                            iteration,
+                            expected_source_stage.value,
+                            fsm.state,
+                        )
+                except Exception:
+                    logger.exception("FSM step() failed for %s@%s", url, iteration)
+        except Exception as e:
+            logger.exception("❌ Failure in run_one for %s@%s: %s", url, iteration, e)
+            # Best-effort error finalize (still lease-validated)
+            finalized = finalize_one_row_in_pipeline_control(
+                url=url,
+                iteration=iteration,
+                worker_id=worker_id,
+                ok=False,
+                notes=f"similarity failed: {e}",
+            )
+            if not finalized:
+                logger.warning(
+                    "[finalize] Could not mark ERROR for %s@%s (lease mismatch).",
+                    url,
+                    iteration,
+                )
+
+    return [asyncio.create_task(run_one(u, it)) for (u, it) in url_iter_pairs]
+
+
+# =============================================================================
+# Entrypoints
+# =============================================================================
+
+
+async def run_similarity_metrics_eval_pipeline_async_fsm(
+    *,
+    max_concurrent_tasks: int = 5,
+    filter_keys: Optional[list[str]] = None,
+    retry_errors: bool = False,
+) -> None:
+    """
+    Run the similarity **EVAL** pipeline (flattened_responsibilities × flattened_requirements).
+
+    Workflow (lease-aware, human-gated, claimables pattern)
+    -------------------------------------------------------
+    1) Build worklist (DB): call `get_claimable_worklist(stage=SIM_METRICS_EVAL, status=...)`
+       • Status set = {NEW} by default, or {NEW, ERROR} if `retry_errors=True`
+       • Enforces human gate (`task_state='READY'`) and lease rules (not claimed or lease expired)
+       • Returns a list of (url, iteration) pairs
+    2) Optional filter: if `filter_keys` provided, restrict worklist to those URLs.
+    3) Worker identity: generate a `worker_id` (stable per run) via `generate_worker_id("sim_metrics_eval")`.
+    4) Process batch (bounded concurrency):
+       For each (url, iteration) in the worklist:
+         a) `try_claim_one(url, iteration, worker_id)` — acquire a lease or skip if already claimed
+         b) `evaluate_similarity_for_url_async(...)` — pure compute & insert (no lease/FSM mutation):
+              - Load inputs: flattened responsibilities + flattened requirements
+              - Build pairs: full m×n cartesian product (per URL)
+              - Score: concurrent CPU-bound similarity metrics (thread offloaded)
+              - Categorize + multivariate indices; stamp version=ORIGINAL
+              - Insert rows into `similarity_metrics` (via `insert_df_with_config`)
+         c) Finalize:
+              `finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)`
+              - Atomically sets final status (COMPLETED/ERROR) and clears lease **iff** `worker_id` still owns it
+              - Returns True/False (finalized or not)
+         d) Step on success:
+              If `ok` and `finalized` → `fsm.step()` to advance the control-plane stage
+    5) Await all tasks and log completion.
+
+    Parameters
+    ----------
+    max_concurrent_tasks : int
+        Maximum number of (url, iteration) workers running simultaneously.
+    filter_keys : list[str] | None
+        Optional restrict-to-URLs filter (bypasses other URLs present in the worklist).
+    retry_errors : bool
+        If True, include rows with status=ERROR in the claimable worklist in addition to NEW.
 
     Returns
     -------
-    pd.DataFrame
-        Pairwise scores (ready for downstream validation/insert).
+    None
+
+    Notes
+    -----
+    • This entrypoint does not mutate leases directly; claim/finalize/step is handled per item.
+    • The EVAL path stamps Version.ORIGINAL and uses `resp_llm_provider="N/A"`, `resp_model_id="N/A"`.
+    • Idempotent per URL/iteration: repeated runs safely dedupe at insert according to your table config.
     """
-    async with semaphore:
-        fsm = fsm_manager.get_fsm(url)
+    statuses = (
+        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        if retry_errors
+        else (PipelineStatus.NEW,)
+    )
+    worklist: list[tuple[str, int]] = get_claimable_worklist(
+        stage=PipelineStage.SIM_METRICS_EVAL,
+        status=statuses,
+        max_rows=max(1000, max_concurrent_tasks * 4),
+    )
 
-        # We only run when the control row is already at the metrics stage
-        if fsm.get_current_stage() != metrics_stage.value:
-            logger.info(
-                "⏩ Skipping %s; need %s, current %s", url, metrics_stage, fsm.state
-            )
-            return False
+    if filter_keys:
+        filt = set(filter_keys)
+        worklist = [(u, it) for (u, it) in worklist if u in filt]
 
-        fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Evaluating similarity…")
+    if not worklist:
+        logger.info("📭 No claimable rows at SIM_METRICS_EVAL.")
+        return
 
-        # Load inputs
-        reqs = fetch_flattened_requirements(url)
-        if metrics_stage == PipelineStage.SIM_METRICS_EVAL:
-            resps = fetch_flattened_responsibilities(url)
-            version = Version.ORIGINAL
-            resp_prov: tuple[str | None, str | None] = (None, None)
+    worker_id = generate_worker_id("sim_metrics_eval")
+    logger.info(
+        "🚀 Starting SIM_METRICS_EVAL | %d items | worker_id=%s",
+        len(worklist),
+        worker_id,
+    )
 
-        elif metrics_stage == PipelineStage.SIM_METRICS_REVAL:
-            resps = fetch_edited_responsibilities(url)
-            version = Version.EDITED
-
-            # Infer a single (llm_provider, model_id) pair for provenance
-            pairs = list(
-                resps[["llm_provider", "model_id"]]
-                .dropna()
-                .drop_duplicates()
-                .itertuples(index=False, name=None)
-            )
-            if not pairs:
-                fsm.mark_status(
-                    PipelineStatus.ERROR, notes="No edited responsibilities provenance"
-                )
-                logger.error(
-                    "No (llm_provider, model_id) for edited responsibilities: %s", url
-                )
-                return False
-            if len(pairs) > 1:
-                fsm.mark_status(
-                    PipelineStatus.ERROR,
-                    notes="Ambiguous edited sets; specify provider/model",
-                )
-                logger.error(
-                    "Multiple edited sets for %s; provide editor_llm_provider/model_id. Found: %s",
-                    url,
-                    pairs,
-                )
-                return False
-            resp_prov = pairs[0]
-
-        else:
-            logger.error("❌ Unsupported metrics_stage: %s", metrics_stage)
-            return False
-
-        if reqs.empty or resps.empty:
-            logger.warning(
-                "%s: missing reqs/resps (reqs=%d, resps=%d)", url, len(reqs), len(resps)
-            )
-            fsm.mark_status(PipelineStatus.ERROR, notes="Missing reqs or resps")
-            return False
-
-        try:
-            # Stage-specific compute
-            if metrics_stage == PipelineStage.SIM_METRICS_EVAL:
-                # EVAL: many-to-many
-                # Keep only required cols (defensive)
-                resps_e = resps[["responsibility_key", "responsibility"]].copy()
-                reqs_e = reqs[["requirement_key", "requirement"]].copy()
-                df = await _compute_eval_similarity_df_async(resps_e, reqs_e)
-
-            else:
-                # REVAL: aligned pairs → build pairs_df and compute
-                pairs_df = build_pairs_df(resps, reqs)
-                if pairs_df.empty:
-                    fsm.mark_status(
-                        PipelineStatus.ERROR, notes="No aligned pairs to score"
-                    )
-                    logger.error("REVAL: empty pairs_df after merge for %s", url)
-                    return False
-
-                df = await _compute_reval_similarity_df_async(pairs_df)
-
-            if df.empty:
-                fsm.mark_status(PipelineStatus.ERROR, notes="No similarity rows")
-                return False
-
-            # Normalize keys, ensure URL, and validate if enabled
-            df = _normalize_similarity_keys(df)
-            if "url" not in df.columns:
-                df.insert(0, "url", url)
-
-            if VALIDATE_WITH_PYDANTIC:
-                df = _validate_similarity_rows(df)
-
-            # Required core columns
-            if not {"url", "responsibility_key", "requirement_key"}.issubset(
-                df.columns
-            ):
-                raise ValueError(
-                    "Missing required columns after normalization/validation"
-                )
-
-            # Stage-owned fields
-            df["version"] = version.value
-
-            # If your table owns backend columns and they’re missing, you can set None defaults
-            schema = DUCKDB_SCHEMA_REGISTRY[TableName.SIMILARITY_METRICS]
-            owned = set(getattr(schema, "metadata_fields", [])) | set(
-                schema.column_order
-            )
-            for col in ("similarity_backend", "nli_backend"):
-                if col in owned and col not in df.columns:
-                    df[col] = None
-
-            # Insert once; REVAL stamps editor provenance via YAML stamp:param
-            if version == Version.EDITED:
-                if not VALIDATE_WITH_PYDANTIC:
-                    for col in ("resp_llm_provider", "resp_model_id"):
-                        if col not in df.columns:
-                            df[col] = None
-
-                insert_df_with_config(
-                    df,
-                    TableName.SIMILARITY_METRICS,
-                    url=url,
-                    resp_llm_provider=resp_prov[0],  # YAML stamp:param
-                    resp_model_id=resp_prov[1],  # YAML stamp:param
-                )
-            else:
-                insert_df_with_config(
-                    df,
-                    TableName.SIMILARITY_METRICS,
-                    url=url,
-                    resp_llm_provider="N/A",
-                    resp_model_id="N/A",
-                )
-
-        except Exception:
-            logger.exception("❌ Compute/insert failed for %s", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="Compute or DB insert failed")
-            return False
-
-        # Advance FSM
-        try:
-            fsm.mark_status(PipelineStatus.COMPLETED, notes="Similarity saved to DB")
-            fsm.step()
-            logger.info("✅ Similarity complete: %s", url)
-            return True
-        except Exception:
-            logger.exception("❌ FSM transition failed for %s", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="FSM transition failed")
-            return False
-
-
-# =============================================================================
-# Entrypoints: run eval pipe; run re-eval pipe
-# =============================================================================
-# Public entrypoints (no fallback; strict two-stage similarity)
-
-
-async def run_similarity_metrics_eval_async_fsm(
-    *,
-    max_concurrent: int = 4,
-    filter_urls: Optional[list[str]] = None,
-) -> None:
-    """
-    Run the similarity EVAL pipeline.
-
-    - Worklist: SIM_METRICS_EVAL / NEW.
-    - Reads flattened responsibilities + flattened requirements.
-    - Writes to `similarity_metrics` with stage = PipelineStage.SIM_METRICS_EVAL.
-    - Advances FSM to SIM_METRICS_EVAL and marks NEW for downstream stages.
-    """
-    await _run_similarity_metrics(
-        max_concurrent=max_concurrent,
+    tasks = await process_similarity_batch_async_fsm(
+        url_iter_pairs=worklist,
+        worker_id=worker_id,
         metrics_stage=PipelineStage.SIM_METRICS_EVAL,
-        filter_urls=filter_urls,
+        no_of_concurrent_workers=max_concurrent_tasks,
     )
+    await asyncio.gather(*tasks)
+    logger.info("✅ Finished similarity FSM run (SIM_METRICS_EVAL).")
 
 
-async def run_similarity_metrics_reval_async_fsm(
+async def run_similarity_metrics_reval_pipeline_async_fsm(
     *,
-    max_concurrent: int = 4,
-    filter_urls: Optional[list[str]] = None,
+    max_concurrent_tasks: int = 5,
+    filter_keys: Optional[list[str]] = None,
+    retry_errors: bool = False,
 ) -> None:
     """
-    Run the similarity RE-EVAL pipeline.
+    Run the similarity **RE-EVAL** pipeline (edited_responsibilities aligned
+        to requirements).
 
-    - Worklist: SIM_METRICS_REVAL / NEW.
-    - Reads edited responsibilities + flattened requirements.
-    - Writes to `similarity_metrics` with stage = SIM_METRICS_REVAL.
-    - Advances FSM to SIM_METRICS_REVAL and marks NEW for downstream stages.
+    Workflow (lease-aware, human-gated, claimables pattern)
+    -------------------------------------------------------
+    1) Build worklist (DB):
+        call `get_claimable_worklist(stage=SIM_METRICS_REVAL, status=...)`
+       • Status set = {NEW} by default, or {NEW, ERROR} if `retry_errors=True`
+       • Enforces human gate (`task_state='READY'`) and lease rules (not claimed or
+        lease expired)
+       • Returns a list of (url, iteration) pairs
+    2) Optional filter: if `filter_keys` provided, restrict worklist to those URLs.
+    3) Worker identity:
+        generate a `worker_id` via `generate_worker_id("sim_metrics_reval")`.
+    4) Process batch (bounded concurrency):
+       For each (url, iteration) in the worklist:
+         a) `try_claim_one(url, iteration, worker_id)` — acquire a lease or skip
+            if already claimed
+         b) `evaluate_similarity_for_url_async(...)` — pure compute & insert
+            (no lease/FSM mutation):
+              - Load inputs: edited responsibilities (pre-aligned to `requirement_key`)
+              + flattened requirements
+              - Build pairs: join on `requirement_key` (no cartesian product)
+              - Score: concurrent CPU-bound similarity metrics (thread offloaded)
+              - Categorize + multivariate indices; stamp version=EDITED
+              - Insert rows into `similarity_metrics`, stamping editor provenance:
+                    `resp_llm_provider`,
+                    `resp_model_id` (from edited rows; validated single pair)
+         c) Finalize:
+              `finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)`
+              - Atomically sets final status (COMPLETED/ERROR)
+                and clears lease **iff** `worker_id` still owns it
+              - Returns True/False (finalized or not)
+         d) Step on success:
+              If `ok` and `finalized` → `fsm.step()` to advance the control-plane stage
+    5) Await all tasks and log completion.
+
+    Parameters
+    ----------
+    max_concurrent_tasks : int
+        Maximum number of (url, iteration) workers running simultaneously.
+    filter_keys : list[str] | None
+        Optional restrict-to-URLs filter (bypasses other URLs present in the worklist).
+    retry_errors : bool
+        If True, include rows with status=ERROR in the claimable worklist in addition to NEW.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    • The RE-EVAL path requires a single (llm_provider, model_id) pair across edited rows;
+        if multiple or none
+      are detected, the item fails and is finalized as ERROR.
+    • Idempotent per URL/iteration: repeated runs safely dedupe at insert
+        according to your table config.
+    • Keep concurrency modest if edited sets are large to avoid long leases.
     """
-    await _run_similarity_metrics(
-        max_concurrent=max_concurrent,
+    statuses = (
+        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        if retry_errors
+        else (PipelineStatus.NEW,)
+    )
+    worklist: list[tuple[str, int]] = get_claimable_worklist(
+        stage=PipelineStage.SIM_METRICS_REVAL,
+        status=statuses,
+        max_rows=max(1000, max_concurrent_tasks * 4),
+    )
+
+    if filter_keys:
+        filt = set(filter_keys)
+        worklist = [(u, it) for (u, it) in worklist if u in filt]
+
+    if not worklist:
+        logger.info("📭 No claimable rows at SIM_METRICS_REVAL.")
+        return
+
+    worker_id = generate_worker_id("sim_metrics_reval")
+    logger.info(
+        "🚀 Starting SIM_METRICS_REVAL | %d items | worker_id=%s",
+        len(worklist),
+        worker_id,
+    )
+
+    tasks = await process_similarity_batch_async_fsm(
+        url_iter_pairs=worklist,
+        worker_id=worker_id,
         metrics_stage=PipelineStage.SIM_METRICS_REVAL,
-        filter_urls=filter_urls,
+        no_of_concurrent_workers=max_concurrent_tasks,
     )
+    await asyncio.gather(*tasks)
+    logger.info("✅ Finished similarity FSM run (SIM_METRICS_REVAL).")
 
 
 # =============================================================================
-# Internal helpers/utils
+# Pairing & compute helpers
 # =============================================================================
 
 
-def build_pairs_df(edited_resps: pd.DataFrame, reqs: pd.DataFrame) -> pd.DataFrame:
+def build_pairs_df(
+    resps: pd.DataFrame,
+    reqs: pd.DataFrame,
+    *,
+    stage: PipelineStage,  # SIM_METRICS_EVAL or SIM_METRICS_REVAL
+) -> pd.DataFrame:
     """
-    edited_resps: columns required →
-        ["url", "responsibility_key", "requirement_key", "responsibility"]  # edited text
-    reqs: columns required →
-        ["url", "requirement_key", "requirement"]                           # requirement text
+    Build pairs DataFrame with columns:
+        ["url", "responsibility_key", "requirement_key", "optimized_text", "requirement_text"]
+
+    - EVAL  → cross-join flattened responsibilities × flattened requirements
+    - REVAL → merge edited_responsibilities on requirement_key
+
+    Guardrails:
+    - REVAL requires 'requirement_key' in `resps` (edited rows are aligned).
+    - EVAL does NOT require 'requirement_key' in `resps`.
     """
-    pairs = (
-        edited_resps[["url", "responsibility_key", "requirement_key", "responsibility"]]
-        .merge(
-            reqs[["url", "requirement_key", "requirement"]],
-            on=["url", "requirement_key"],
-            how="inner",
-            validate="many_to_one",  # req_key should map to exactly one requirement row per URL
-        )
-        .drop_duplicates(subset=["url", "responsibility_key", "requirement_key"])
-        .rename(
-            columns={
-                "responsibility": "optimized_text",
-                "requirement": "requirement_text",
-            }
-        )
-    )
+    if stage == PipelineStage.SIM_METRICS_REVAL:
+        needed = {"url", "responsibility_key", "requirement_key", "responsibility"}
+        missing = needed.difference(resps.columns)
+        if missing:
+            raise ValueError(f"REVAL: edited_responsibilities missing {missing}")
 
-    # Guardrails: drop empty strings/NaNs
-    pairs = pairs[
-        pairs["optimized_text"].astype(str).str.strip().ne("")
-        & pairs["requirement_text"].astype(str).str.strip().ne("")
-    ].reset_index(drop=True)
+        pairs = (
+            resps[["url", "responsibility_key", "requirement_key", "responsibility"]]
+            .rename(columns={"responsibility": "optimized_text"})
+            .merge(
+                reqs.rename(columns={"requirement": "requirement_text"}),
+                on=["url", "requirement_key"],
+                how="inner",
+                validate="many_to_one",
+            )
+            .drop_duplicates(subset=["url", "responsibility_key", "requirement_key"])
+            .reset_index(drop=True)
+        )
 
+    elif stage == PipelineStage.SIM_METRICS_EVAL:
+        needed = {"url", "responsibility_key", "responsibility"}
+        missing = needed.difference(resps.columns)
+        if missing:
+            raise ValueError(f"EVAL: flattened_responsibilities missing {missing}")
+
+        resps = resps.rename(columns={"responsibility": "optimized_text"})
+        reqs = reqs.rename(columns={"requirement": "requirement_text"})
+
+        urls = sorted(set(resps["url"]).intersection(set(reqs["url"])))
+        chunks = []
+        for u in urls:
+            r_u = resps.loc[resps["url"] == u].assign(_k=1)
+            q_u = reqs.loc[reqs["url"] == u].assign(_k=1)
+            chunk = (
+                r_u.merge(q_u, on="_k", how="inner")
+                .drop(columns="_k")
+                .reset_index(drop=True)
+            )
+            chunks.append(chunk)
+
+        pairs = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+
+    else:
+        raise ValueError(f"Unsupported stage for build_pairs_df: {stage}")
+
+    # Drop blanks and dedupe
+    if not pairs.empty:
+        pairs = (
+            pairs[
+                pairs["optimized_text"].astype(str).str.strip().ne("")
+                & pairs["requirement_text"].astype(str).str.strip().ne("")
+            ]
+            .drop_duplicates(
+                subset=["url", "responsibility_key", "requirement_key"], keep="last"
+            )
+            .reset_index(drop=True)
+        )
     return pairs
 
 
@@ -361,16 +620,6 @@ def _normalize_similarity_keys(df: pd.DataFrame) -> pd.DataFrame:
     """
     Ensure canonical *_key columns exist in the similarity DataFrame,
     regardless of calculator output names.
-
-    - Maps resp_id / responsibility_id → responsibility_key
-    - Maps req_id / requirement_id → requirement_key
-
-    Args:
-        df (pd.DataFrame): DataFrame with similarity results.
-
-    Returns:
-        pd.DataFrame: DataFrame with guaranteed `responsibility_key` and
-        `requirement_key` columns.
     """
     ALT_RESP_ID_COLS = ("responsibility_key", "resp_id", "responsibility_id")
     ALT_REQ_ID_COLS = ("requirement_key", "req_id", "requirement_id")
@@ -394,128 +643,20 @@ def _validate_similarity_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
     Validate DataFrame rows against the Pydantic `SimilarityMetrics` model and return
     a normalized DataFrame ready for insertion.
-
-    This enforces schema alignment and types based on your Pyd models.
     """
     adapter = TypeAdapter(list[SimilarityMetrics])
     models = adapter.validate_python(df.to_dict(orient="records"))
     return pd.DataFrame([m.model_dump() for m in models])
 
 
-# =============================================================================
-# Core internal compute (score → categorize → multivariate indices)
-# =============================================================================
-
-
-async def _compute_eval_similarity_df_async(
-    resps: pd.DataFrame,
-    reqs: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Compute many-to-many similarity for the EVAL stage (original/flattened
-    responsibilities).
-
-    This runs the full Cartesian grid between responsibilities and requirements,
-    then applies categorization and multivariate indices.
-
-    CPU-bound work is dispatched to a thread to keep the event loop responsive.
-
-    Parameters
-    ----------
-    resps : pd.DataFrame
-        Must contain columns: ["responsibility_key", "responsibility"].
-    reqs : pd.DataFrame
-        Must contain columns: ["requirement_key", "requirement"].
-
-    Returns
-    -------
-    pd.DataFrame
-        Pairwise scores (ready for downstream validation/insert).
-    """
-    t0 = perf_counter()
-
-    required_resps = {"responsibility_key", "responsibility"}
-    required_reqs = {"requirement_key", "requirement"}
-    if not required_resps.issubset(resps.columns) or not required_reqs.issubset(
-        reqs.columns
-    ):
-        missing_r = required_resps.difference(resps.columns)
-        missing_q = required_reqs.difference(reqs.columns)
-        msg = f"Missing required columns. resps missing={missing_r or None}, reqs missing={missing_q or None}"
-        logger.error(msg)
-        raise ValueError(msg)
-
-    # Early exits
-    if resps.empty or reqs.empty:
-        logger.info(
-            "EVAL: empty input (resps=%d, reqs=%d). Returning empty result.",
-            len(resps),
-            len(reqs),
-        )
-        return pd.DataFrame()
-
-    # Dicts for many-to-many calculator
-    resp_map = dict(zip(resps["responsibility_key"], resps["responsibility"]))
-    req_map = dict(zip(reqs["requirement_key"], reqs["requirement"]))
-
-    try:
-        base_scores = await asyncio.to_thread(
-            calculate_many_to_many_similarity_metrices,
-            responsibilities=resp_map,
-            requirements=req_map,
-        )
-        with_categories = await asyncio.to_thread(categorize_scores_for_df, base_scores)
-        with_composites = await asyncio.to_thread(
-            add_multivariate_indices, with_categories
-        )
-
-        # Order to just be safe
-        with_composites = with_composites.sort_values(
-            ["responsibility_key", "requirement_key"]
-        ).reset_index(drop=True)
-
-    except Exception:
-        logger.exception("EVAL: similarity computation failed.")
-        raise
-
-    logger.info(
-        "EVAL: computed m×n similarities (m=%d, n=%d) → %d rows in %.2fs.",
-        len(resp_map),
-        len(req_map),
-        len(with_composites) if hasattr(with_composites, "__len__") else -1,
-        perf_counter() - t0,
-    )
-    return with_composites
-
-
-async def _compute_reval_similarity_df_async(
+async def _compute_similarity_df_async(
     pairs_df: pd.DataFrame,
     *,
     max_concurrency: int = 6,
 ) -> pd.DataFrame:
     """
-    Compute pairwise similarity for the REVAL stage (edited, pre-aligned pairs).
-
-    Each row represents one (responsibility_key, requirement_key, optimized_text,
-    requirement_text) pair.
-
-
-    Work is performed concurrently with a bounded semaphore via asyncio.to_thread.
-
-    Parameters
-    ----------
-    pairs_df : pd.DataFrame
-        Must contain columns:
-        ["url", "responsibility_key", "requirement_key", "optimized_text",
-        "requirement_text"]
-    max_concurrency : int, optional
-        Upper bound for concurrent scoring (default: 6).
-
-    Returns
-    -------
-    pd.DataFrame
-        Input columns plus metric columns. Stable-sorted by
-        ["url", "responsibility_key", "requirement_key"].
+    Compute pairwise similarity for prepared (responsibility_key, requirement_key, texts) pairs.
+    Uses asyncio + bounded semaphore; CPU-bound scoring dispatched to threads.
     """
     t0 = perf_counter()
 
@@ -528,12 +669,9 @@ async def _compute_reval_similarity_df_async(
     }
     if not required_cols.issubset(pairs_df.columns):
         missing = required_cols.difference(pairs_df.columns)
-        msg = f"REVAL: missing required columns: {missing}"
-        logger.error(msg)
-        raise ValueError(msg)
+        raise ValueError(f"Pairs missing required columns: {missing}")
 
     if pairs_df.empty:
-        logger.info("REVAL: no edited pairs to evaluate; returning empty DataFrame.")
         return pairs_df.copy()
 
     # Clean & dedupe
@@ -548,9 +686,7 @@ async def _compute_reval_similarity_df_async(
         )
         .reset_index(drop=True)
     )
-
     if cleaned.empty:
-        logger.info("REVAL: all pairs empty after cleaning; returning empty DataFrame.")
         return cleaned
 
     sem = asyncio.Semaphore(max_concurrency)
@@ -564,9 +700,8 @@ async def _compute_reval_similarity_df_async(
                     row["requirement_text"],
                 )
             except Exception:
-                # Minimal but actionable logging; avoid dumping long texts
                 logger.exception(
-                    "REVAL: scoring failed for row index=%s (resp_key=%s, req_key=%s).",
+                    "Scoring failed for index=%s (resp_key=%s, req_key=%s).",
                     idx,
                     row.get("responsibility_key"),
                     row.get("requirement_key"),
@@ -590,61 +725,9 @@ async def _compute_reval_similarity_df_async(
     )
 
     logger.info(
-        "REVAL: scored %d aligned pairs in %.2fs (max_concurrency=%d).",
+        "Scored %d pairs in %.2fs (max_concurrency=%d).",
         len(out),
         perf_counter() - t0,
         max_concurrency,
     )
     return out
-
-
-# =============================================================================
-# Internal orchestrator
-# =============================================================================
-async def _run_similarity_metrics(
-    *,
-    max_concurrent: int,
-    metrics_stage: PipelineStage,
-    filter_urls: list[str] | None = None,
-) -> None:
-    """
-    Orchestrate the similarity run (eval or re-eval) over a list of URLs.
-
-    - If `filter_urls` is not provided, pulls the worklist from pipeline_control at:
-        • EVAL: pull from SIM_METRICS_EVAL / NEW
-        • RE-EVAL: pull from SIM_METRICS_REVAL / NEW
-    - Spawns bounded-concurrency workers with the specified `metrics_stage`.
-
-    Args
-    ----
-    max_concurrent : int
-        Max concurrent URL workers.
-    metrics_stage : PipelineStage
-        SIM_METRICS_EVAL or SIM_METRICS_REVAL.
-    filter_urls : list[str] | None
-        Optional explicit allowlist of URLs to process (bypasses others).
-    """
-    urls = get_urls_ready_for_transition(stage=metrics_stage)
-
-    if filter_urls:
-        urls = [u for u in urls if u in filter_urls]
-
-    if not urls:
-        logger.info("📭 No URLs in metrics-stage worklist: %s.", metrics_stage)
-        return
-
-    sem = asyncio.Semaphore(max_concurrent)
-    fsm_manager = PipelineFSMManager()
-    tasks = [
-        asyncio.create_task(
-            evaluate_similarity_for_url(
-                u,
-                fsm_manager=fsm_manager,
-                semaphore=sem,
-                metrics_stage=metrics_stage,
-            )
-        )
-        for u in urls
-    ]
-    await asyncio.gather(*tasks)
-    logger.info("✅ Finished similarity FSM run (%s).", metrics_stage)

@@ -25,7 +25,7 @@ from job_bot.db_io.db_utils import (
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,
-    PipelineProcessStatus,
+    PipelineTaskState,
     TableName,
 )
 
@@ -41,7 +41,6 @@ def _default_stage_order() -> Sequence[PipelineStage]:
     return [
         PipelineStage.JOB_URLS,
         PipelineStage.JOB_POSTINGS,
-        PipelineStage.EXTRACTED_REQUIREMENTS,
         PipelineStage.FLATTENED_REQUIREMENTS,
         PipelineStage.FLATTENED_RESPONSIBILITIES,
         PipelineStage.SIM_METRICS_EVAL,
@@ -65,14 +64,9 @@ def _default_stage_prereqs() -> Mapping[PipelineStage, Iterable[TableName]]:
             TableName.JOB_URLS,
             TableName.JOB_POSTINGS,
         ],
-        PipelineStage.EXTRACTED_REQUIREMENTS: [
-            TableName.JOB_URLS,
-            TableName.JOB_POSTINGS,
-            TableName.EXTRACTED_REQUIREMENTS,
-        ],
         PipelineStage.FLATTENED_REQUIREMENTS: [
-            TableName.EXTRACTED_REQUIREMENTS,
-            TableName.FLATTENED_REQUIREMENTS,
+            TableName.JOB_POSTINGS,  # input
+            TableName.FLATTENED_REQUIREMENTS,  # output
         ],
         PipelineStage.FLATTENED_RESPONSIBILITIES: [
             TableName.FLATTENED_RESPONSIBILITIES,

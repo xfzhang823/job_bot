@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,
-    PipelineProcessStatus,
+    PipelineTaskState,
     Version,
     LLMProvider,
 )
@@ -73,25 +73,52 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     Fields:
         url (HttpUrl | str):
             Job posting URL (primary key component).
+
         iteration (int):
             Iteration index for reruns (default = 0).
+
         stage (PipelineStage):
             Current pipeline stage in the FSM.
+
         status (PipelineStatus):
-            Stage-local FSM status (e.g., NEW, IN_PROGRESS, DONE, ERROR).
-        process_status (PipelineProcessStatus):
-            High-level lifecycle status for the entire pipeline run
-            (NEW, RUNNING, COMPLETED, SKIPPED).
-        decision_flag: int | None = None
-            1 = go, 0 = no-go
-        transition_flag: int = 0
-            0=pending (have not applied), 1 = applied
+            Stage-local machine lifecycle (e.g., NEW, IN_PROGRESS, COMPLETED, ERROR).
+
+        task_state (PipelineTaskState):
+            Human gate controlling whether a task is eligible for automated
+            processing. Distinct from `status`, which reflects machine lifecycle.
+            Typical values:
+                - READY  → eligible for machine processing
+                - PAUSED → temporarily held by human
+                - SKIP   → excluded from future processing
+                - HOLD   → optional review/intermediate gate
+
+        is_claimed (bool):
+            Whether the row is currently leased by a worker process.
+            Defaults to False (unclaimed).
+
+        worker_id (str | None):
+            Identifier of the worker/process currently holding the lease.
+            None if unclaimed.
+
+        lease_until (datetime | None):
+            Lease expiration timestamp. When in the past, the row is reclaimable.
+            None if unclaimed.
+
+        decision_flag (int | None):
+            1 = go, 0 = no-go, or None if undecided.
+
+        transition_flag (int):
+            0 = pending (transition not yet applied),
+            1 = applied (transition completed).
+
         notes (str | None):
-            Optional free-text notes for FSM/debugging.
+            Optional free-text notes for FSM/debugging or human annotation.
+
         source_file (str | None):
-            Provenance marker for seeding/debug.
+            Provenance marker or source artifact for debugging/seeding.
+
         version (Version | None):
-            Optional editorial version marker.
+            Optional editorial/schema version marker for traceability.
 
     ✅ Naming convention:
         • Table = `pipeline_control` (plural/collection)
@@ -103,8 +130,17 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     iteration: int = 0
     stage: PipelineStage
     status: PipelineStatus = Field(default=PipelineStatus.NEW)
-    process_status: PipelineProcessStatus = Field(default=PipelineProcessStatus.NEW)
-    decision_flag: int | None = None  # 1=go, 0=no-go, NULL=undecided
+
+    # Human gate (eligibility for automation)
+    task_state: PipelineTaskState = Field(default=PipelineTaskState.READY)
+
+    # Machine lease tracking (concurrency control)
+    is_claimed: bool = False
+    worker_id: Optional[str] = None
+    lease_until: Optional[datetime] = None
+
+    # Misc flags / metadata
+    decision_flag: Optional[int] = None  # 1=go, 0=no-go, None=undecided
     transition_flag: int = 0  # 0=pending, 1=final/applied
     notes: Optional[str] = None
     source_file: Optional[str] = None
@@ -179,7 +215,7 @@ class ExtractedRequirementsRow(BaseStageRow, LLMStampedMixin):
     requirement_category_key: Optional[int] = None  # per-category order
 
 
-class FlattenedRequirementsRow(BaseStageRow):
+class FlattenedRequirementsRow(BaseStageRow, LLMStampedMixin):
     """
     Flattened (normalized) job requirements used for downstream matching.
     """

@@ -1,32 +1,44 @@
 """
 pipelines_with_fsm/resume_editing_pipeline_async_fsm.py
 
-DB-native Resume Editing Pipeline (FSM-driven; async; no filesystem I/O)
+DB-native Resume Editing Pipeline (FSM-driven; async; lease-aware claimables;
+no filesystem I/O)
+
+Worklist (from pipeline_control; human-gated + lease-aware):
+  • EDIT: stage = EDITED_RESPONSIBILITIES,
+    status ∈ {NEW[, ERROR if retry_errors=True]}
 
 Inputs (per URL):
-  - Worklist:  FLATTENED_RESPONSIBILITIES / NEW as default
-  - Tables:    flattened_requirements        (requirement_key, requirement, url, …)
-               flattened_responsibilities    (responsibility_key, responsibility, url, …)
+  • flattened_requirements        (requirement_key, requirement, url, …)
+  • flattened_responsibilities    (responsibility_key, responsibility, url, …)
 
 Output (per URL):
-    • edited_responsibilities / NEW
-        Columns: url, responsibility_key, requirement_key, responsibility,
-            iteration, version, llm_provider, stage, status, created_at, updated_at
+  • edited_responsibilities
+      Columns (typical): url, responsibility_key, requirement_key,
+        responsibility, iteration, version, llm_provider, stage, status,
+        created_at, updated_at
 
-Per-URL flow:
-  1) FSM: mark IN_PROGRESS for source stage (EDITED_RESPONSIBILITIES).
-  2) Load flattened responsibilities + flattened requirements (DuckDB).
-  3) Run async LLM editor (→ ResponsibilityMatches).
-  4) Flatten to row-per-(responsibility_key, requirement_key).
-  5) INSERT into edited_responsibilities with standard metadata.
-  6) FSM: mark COMPLETE on source; step() → SIM_METRICS_REVAL; mark NEW.
+Orchestration (claimables model):
+  1) Build claimable worklist for EDITED_RESPONSIBILITIES with status {NEW[, ERROR]}.
+  2) Generate a worker_id for this run.
+  3) For each (url, iteration):
+       a) try_claim_one(url, iteration, worker_id) → acquire lease
+        or skip if already claimed.
+       b) edit_and_persist_responsibilities_for_url(…) → pure compute/insert
+        (no lease/FSM mutation).
+       c) finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)
+          - Atomically sets final status (COMPLETED/ERROR)
+          + clears lease iff ownership matches.
+          - Returns True/False indicating whether finalize occurred
+            (i.e., we still owned the lease).
+       d) If ok and finalized → fsm.step() to advance to SIM_METRICS_REVAL
+        (marks NEW there).
 
 Notes:
-  • Strictly DB-native: no JSON/CSV file I/O.
-  • Uses your pydantic_model_loaders_from_db utilities for
-    rehydration & validation.
-  • Mirrors the structure of your similarity-metrics FSM pipeline
-    (semaphore, gather).
+  • Strictly DB-native: no JSON/CSV I/O.
+  • Reuses Pydantic-validated loaders for rehydration & validation.
+  • Mirrors the similarity-metrics FSM pipeline structure
+    (bounded concurrency; gather).
 """
 
 from __future__ import annotations
@@ -41,18 +53,24 @@ from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,
     TableName,
-    Version,
 )
 
 # FSM
 from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
 
 # Worklist + IO
-from job_bot.db_io.db_utils import get_urls_ready_for_transition
 from job_bot.db_io.db_inserters import insert_df_with_config
 from job_bot.db_io.db_loaders import load_table
 
-# The async editor that rewrites responsibilities against requirements
+# Worklist + IO (lease-aware claimables)
+from job_bot.db_io.db_utils import (
+    get_claimable_worklist,
+    try_claim_one,
+    finalize_one_row_in_pipeline_control,
+    generate_worker_id,
+)
+
+# async editor to rewrite responsibilities against requirements
 from job_bot.evaluation_optimization.resumes_editing_async import (
     modify_multi_resps_based_on_reqs_async,
 )
@@ -88,9 +106,8 @@ def get_reqs_dict_strict(obj) -> Dict[str, str]:
 async def edit_and_persist_responsibilities_for_url(
     url: str,
     *,
-    fsm_manager: PipelineFSMManager,
+    iteration: int,
     semaphore: asyncio.Semaphore,
-    # iteration: int | None = None,
     llm_provider: str,
     model_id: str,
     no_of_concurrent_workers_for_llm: int = 3,
@@ -99,20 +116,15 @@ async def edit_and_persist_responsibilities_for_url(
     Rewrite (edit) responsibilities for a single URL and persist them
     (DuckDB + FSM).
 
-    Overview
-    --------
-    This function performs the "editing" stage for one job posting:
-      - Guards on FSM stage: only runs if the URL is at
-        `EDITED_RESPONSIBILITIES`.
-      - Marks the control row as IN_PROGRESS.
-      - Loads the URL’s flattened responsibilities and flattened requirements
-        from DuckDB.
-      - Calls the async LLM editor (`modify_multi_resps_based_on_reqs`)
-        to produce edited responsibilities aligned to requirements.
-      - Stamps metadata (stage/table/version/iteration/llm_provider)
-        with `add_metadata`.
-      - Inserts rows into `edited_responsibilities` with de-duplication.
-      - Advances the FSM: `COMPLETED` → step() to `EDITED_RESPONSIBILITIES` → `NEW`.
+    Steps
+    -----
+    1) Load flattened responsibilities + flattened requirements (DuckDB).
+    2) Run async LLM editor:
+         modify_multi_resps_based_on_reqs_async(responsibilities, requirements, ...)
+    3) Flatten ResponsibilityMatches → row-per-(responsibility_key, requirement_key).
+    4) INSERT into edited_responsibilities with standard metadata stamping
+       (llm_provider/model_id via inserter args; iteration via param;
+       version handled by config).
 
     Concurrency
     -----------
@@ -127,27 +139,18 @@ async def edit_and_persist_responsibilities_for_url(
 
     Args:
         url: Canonical job posting URL.
-        fsm_manager: Shared FSM manager used to read and update pipeline state.
         semaphore: Async semaphore used to bound URL-level concurrency.
         iteration: Iteration stamp for auditing/reruns.
         llm_provider: LLM provider label (e.g., "openai", "anthropic").
         model_id: LLM model identifier for editing.
-        no_of_concurrent_workers_for_llm: Internal concurrency inside the editor.
+        no_of_concurrent_workers_for_llm: Internal concurrency inside
+            the editor.
 
     Returns:
         bool: True on success; False if skipped or failed.
     """
     async with semaphore:
-        fsm = fsm_manager.get_fsm(url)
-
-        # Guard: only operate when current stage is EDITED_RESPONSIBILITIES
-        if fsm.get_current_stage() != PipelineStage.EDITED_RESPONSIBILITIES.value:
-            logger.info("⏩ Skipping %s; current stage is %s", url, fsm.state)
-            return False
-
-        # IN_PROGRESS at current stage
-        fsm.mark_status(PipelineStatus.IN_PROGRESS, notes="Editing responsibilities…")
-
+        # Load inputs
         try:
             resps_model = load_table(TableName.FLATTENED_RESPONSIBILITIES, url=url)
             reqs_model = load_table(TableName.FLATTENED_REQUIREMENTS, url=url)
@@ -163,10 +166,9 @@ async def edit_and_persist_responsibilities_for_url(
 
         except Exception:
             logger.exception("❌ Failed to load/rehydrate inputs for %s", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="Load inputs failed")
             return False
 
-        # Editor call stays simple (dict[str,str], dict[str,str])
+        # Run editor
         try:
             matches: ResponsibilityMatches = (
                 await modify_multi_resps_based_on_reqs_async(
@@ -179,12 +181,10 @@ async def edit_and_persist_responsibilities_for_url(
             )
         except Exception:
             logger.exception("❌ Editor failed for %s", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="LLM editor failed")
             return False
 
-        # --- Flatten ResponsibilityMatches → rows
+        # Flatten → DataFrame → insert
         try:
-
             # Expected shape: { resp_key: { req_key: "edited text", ... }, ... }
             rows: List[Dict[str, Any]] = []
             for resp_key, by_req in matches.responsibilities.items():
@@ -202,32 +202,20 @@ async def edit_and_persist_responsibilities_for_url(
             if edited_df.empty:
                 raise ValueError("Editor produced no rows")
 
-            # Single call -> stamping (iteration/LLM), alignment, and dedup are handled by inserter/YAML
+            # Single call -> stamping (iteration/LLM), alignment, and
+            # dedup are handled by inserter/YAML
             insert_df_with_config(
                 edited_df,
                 TableName.EDITED_RESPONSIBILITIES,
                 url=url,
                 llm_provider=llm_provider,  # ensures the actual provider is recorded
                 model_id=model_id,  # ensures the actual provider is recorded
+                iteration=iteration,  # pass iteration
             )
+            return True
 
         except Exception:
             logger.exception("❌ Persist failed for %s", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="DB insert failed")
-            return False
-
-        # --- Advance FSM to EDITED_RESPONSIBILITIES → NEW
-        try:
-            fsm.mark_status(
-                PipelineStatus.COMPLETED, notes="Edited → DB"
-            )  # not needed but kept for notes
-            fsm.step()  # EDITED_RESPONSIBILITIES → SIM_METRICS_REVAL
-
-            logger.info("✅ Editing complete for %s", url)
-            return True
-        except Exception:
-            logger.exception("❌ FSM transition failed for %s", url)
-            fsm.mark_status(PipelineStatus.ERROR, notes="FSM transition failed")
             return False
 
 
@@ -235,32 +223,83 @@ async def edit_and_persist_responsibilities_for_url(
 # Batch runner (bounded concurrency)
 # =============================================================================
 async def process_resume_editing_batch_async_fsm(
-    urls: List[str],
+    url_iter_pairs: List[tuple[str, int]],
     *,
-    iteration: int = 0,
+    worker_id: str,
     llm_provider: str,
     model_id: str,
     max_concurrent_urls: int = 4,
     no_of_concurrent_workers_for_llm: int = 3,
 ) -> list[asyncio.Task]:
     """
-    Kick off bounded-concurrency editing tasks for a list of URLs.
+    Claim → run editing → finalize/step for a batch of (url, iteration) pairs.
+
+    - Attempts to claim each (url, iteration) with `worker_id`.
+    - If claimed, performs pure editing compute/insert.
+    - Finalizes row with ok status and steps FSM on success (if we still own lease).
     """
     semaphore = asyncio.Semaphore(max_concurrent_urls)
     fsm_manager = PipelineFSMManager()
 
-    async def _run_one(u: str) -> None:
-        await edit_and_persist_responsibilities_for_url(
-            u,
-            fsm_manager=fsm_manager,
-            semaphore=semaphore,
-            # iteration=iteration,
-            llm_provider=llm_provider,
-            model_id=model_id,
-            no_of_concurrent_workers_for_llm=no_of_concurrent_workers_for_llm,
-        )
+    async def _run_one(url: str, iteration: int) -> None:
+        # Acquire lease or skip
+        if not try_claim_one(url=url, iteration=iteration, worker_id=worker_id):
+            logger.info("⏭️ Skipping %s@%s — already claimed.", url, iteration)
+            return
 
-    return [asyncio.create_task(_run_one(u)) for u in urls]
+        try:
+            ok = await edit_and_persist_responsibilities_for_url(
+                url,
+                iteration=iteration,
+                semaphore=semaphore,
+                llm_provider=llm_provider,
+                model_id=model_id,
+                no_of_concurrent_workers_for_llm=no_of_concurrent_workers_for_llm,
+            )
+
+            finalized = finalize_one_row_in_pipeline_control(
+                url=url,
+                iteration=iteration,
+                worker_id=worker_id,
+                ok=ok,
+                notes="Edited responsibilities saved to DB" if ok else "Editing failed",
+            )
+
+            if not finalized:
+                logger.warning(
+                    "[finalize] Lost lease for %s@%s; not stepping.", url, iteration
+                )
+                return
+
+            if ok:
+                try:
+                    # EDITED_RESPONSIBILITIES → SIM_METRICS_REVAL
+                    expected_source_stage = PipelineStage.EDITED_RESPONSIBILITIES
+
+                    fsm = fsm_manager.get_fsm(url)
+                    if fsm.get_current_stage() == expected_source_stage.value:
+                        fsm.step()
+                except Exception:
+                    logger.exception("FSM step() failed for %s@%s", url, iteration)
+
+        except Exception as e:
+            logger.exception("❌ Failure in _run_one for %s@%s: %s", url, iteration, e)
+            # Best-effort error finalize (still lease-validated)
+            finalized = finalize_one_row_in_pipeline_control(
+                url=url,
+                iteration=iteration,
+                worker_id=worker_id,
+                ok=False,
+                notes=f"editing failed: {e}",
+            )
+            if not finalized:
+                logger.warning(
+                    "[finalize] Could not mark ERROR for %s@%s (lease mismatch).",
+                    url,
+                    iteration,
+                )
+
+    return [asyncio.create_task(_run_one(u, it)) for (u, it) in url_iter_pairs]
 
 
 # =============================================================================
@@ -268,33 +307,72 @@ async def process_resume_editing_batch_async_fsm(
 # =============================================================================
 async def run_resume_editing_pipeline_async_fsm(
     *,
-    iteration: int = 0,
     llm_provider: str = OPENAI,
     model_id: str = GPT_4_1_NANO,
     max_concurrent_urls: int = 4,
     no_of_concurrent_workers_for_llm: int = 3,
     filter_urls: Optional[Sequence[str]] = None,
     limit_urls: Optional[int] = None,
+    retry_errors: bool = False,
 ) -> None:
     """
     FSM-aware entrypoint for **editing** flattened responsibilities and persisting
     them into DuckDB.
 
-    What It Does
-    ------------
-    - Queries the `pipeline_control` table for all job URLs currently at
-      stage = `FLATTENED_RESPONSIBILITIES` with status = `NEW`.
-    - Optionally filters this list to a caller-provided subset (`filter_urls`) and
-      trims with `limit_urls`.
-    *- For each eligible URL:
-        * Loads flattened responsibilities + flattened requirements (DuckDB).
-        * Runs the async editor to produce LLM-edited responsibilities.
-        * Stamps standard metadata (stage, iteration, version='edited', llm_provider).
-        * Inserts deduplicated rows into `edited_responsibilities`.
-        * Advances the FSM: mark current stage `COMPLETED` →
-          step() to `EDITED_RESPONSIBILITIES` →
-          mark new stage `NEW`.
-    - Runs all URLs concurrently, bounded by `max_concurrent_urls`.
+    Workflow (lease-aware, human-gated, claimables pattern)
+    -------------------------------------------------------
+    1) Build worklist (DB): call
+         get_claimable_worklist(stage=EDITED_RESPONSIBILITIES, status={NEW[, ERROR]})
+       • Enforces human gate (task_state='READY') and lease rules
+        (unclaimed or lease expired).
+       • Returns a list of (url, iteration) pairs.
+    2) Optional filter: if `filter_urls` provided, restrict worklist to those URLs;
+        if `limit_urls` is provided, truncate the list.
+    3) Worker identity: generate a `worker_id` via generate_worker_id("resume_editing").
+    4) Process batch (bounded concurrency):
+         For each (url, iteration) in the worklist:
+           a) try_claim_one(url, iteration, worker_id) — acquire a lease or skip
+            if already claimed.
+           b) edit_and_persist_responsibilities_for_url(...) — pure compute & insert,
+            no lease/FSM mutation.
+           c) finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)
+            — atomically
+              writes final status and clears lease iff we still own it;
+                returns bool (finalized or not).
+           d) If ok and finalized → fsm.step() to advance to SIM_METRICS_REVAL.
+    5) Await all tasks and log completion.
+
+    Parameters
+    ----------
+        llm_provider : str
+            Provider label used for stamping (e.g., "openai" or "anthropic").
+        model_id : str
+            Model ID used by the editing function.
+        max_concurrent_urls : int
+            Maximum number of concurrent URL tasks (outer-level semaphore).
+        no_of_concurrent_workers_for_llm : int
+            Internal concurrency inside the editor per URL.
+        filter_urls : Optional[Sequence[str]]
+            Optional subset of URLs to process.
+        limit_urls : Optional[int]
+            Optional cap on how many URLs to pull from the worklist
+                (after filtering).
+        retry_errors : bool
+            If True, include ERROR rows in the claimable worklist in addition to NEW.
+
+    Returns
+    -------
+    None
+
+    Side effects:
+        include writing rows to DuckDB and updating the `pipeline_control`
+        FSM state.
+
+    Notes
+    -----
+    • Idempotent per (url, iteration): inserter config should deduplicate
+        on your chosen keys.
+    • Keep concurrency modest to avoid long lease holds during LLM calls.
 
     Concurrency
     -----------
@@ -308,41 +386,43 @@ async def run_resume_editing_pipeline_async_fsm(
         * Any load/LLM/insert/FSM error logs, marks status = `ERROR`,
           does not advance, and continues with other URLs.
     - The pipeline completes even if some URLs fail.
-
-    Args:
-        iteration: Iteration stamp to apply on output rows.
-        llm_provider: Provider label used for stamping (e.g., "openai").
-        model_id: Model ID used by the editing function.
-        max_concurrent_urls: Maximum number of concurrent URL tasks.
-        no_of_concurrent_workers_for_llm: Internal concurrency per URL
-            in the editor.
-        filter_urls: Optional subset of URLs to process.
-        limit_urls: Optional cap on how many URLs to pull.
-
-    Returns:
-        None. Side effects include writing rows to DuckDB and updating the
-        `pipeline_control` FSM state.
     """
-    # Select urls to process (stage / version)
-    urls = get_urls_ready_for_transition(
+    statuses = (
+        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        if retry_errors
+        else (PipelineStatus.NEW,)
+    )
+    worklist: List[tuple[str, int]] = get_claimable_worklist(
         stage=PipelineStage.EDITED_RESPONSIBILITIES,
+        status=statuses,
+        max_rows=max(1000, max_concurrent_urls * 4),
     )
 
     if filter_urls:
-        urls = [u for u in urls if u in filter_urls]
-    if not urls:
+        filt = set(filter_urls)
+        worklist = [(u, it) for (u, it) in worklist if u in filt]
+
+    if not worklist:
         logger.info(
-            f"📭 No URLs to edit at {PipelineStage.EDITED_RESPONSIBILITIES.value} stage."
+            f"📭 No claimable rows at {PipelineStage.EDITED_RESPONSIBILITIES.value}."
         )
         return
-    if limit_urls:
-        urls = urls[:limit_urls]
 
-    logger.info("✏️ Editing responsibilities for %d URL(s)…", len(urls))
+    if limit_urls:
+        worklist = worklist[:limit_urls]
+
+    worker_id = generate_worker_id("resume_editing")
+    logger.info(
+        "✏️ Starting resume editing | %d item(s) | worker_id=%s | provider=%s model=%s",
+        len(worklist),
+        worker_id,
+        llm_provider,
+        model_id,
+    )
 
     tasks = await process_resume_editing_batch_async_fsm(
-        urls=urls,
-        iteration=iteration,
+        url_iter_pairs=worklist,
+        worker_id=worker_id,
         llm_provider=llm_provider,
         model_id=model_id,
         max_concurrent_urls=max_concurrent_urls,

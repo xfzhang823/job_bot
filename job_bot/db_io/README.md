@@ -66,6 +66,8 @@ All tables use a shared base schema defined in `BaseDBModel`, with the following
 |-------|------|-------------|
 | `requirement_key` | `str` | Key for the job requirement. |
 | `requirement` | `str` | Requirement text. |
+| `llm_provider` | `str` | LLM provider (e.g. openai). |
+| `model_id` | `str` | Model id (e.g. gpt-4-nano). |
 
 ### `EditedResponsibilitiesRow`
 | Field | Type | Description |

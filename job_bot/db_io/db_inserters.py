@@ -23,12 +23,10 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------
 
 
-# todo: need to remove url param as safety net - drive everything w/t dataframe
 def insert_df_with_config(
     df: pd.DataFrame,
     table_name: str | TableName,
     *,
-    url: Optional[str] = None,
     llm_provider: Optional[str] = None,
     model_id: Optional[str] = None,
     mode: Literal["append", "replace"] = "append",
@@ -57,8 +55,6 @@ def insert_df_with_config(
         DataFrame to insert.
     table_name : str | TableName
         Target table (enum or string).
-    url : str, optional
-        Canonical job URL, required if iteration comes from pipeline_control.
     llm_provider : str, optional
         Provider name (used if YAML stamp policy requests it).
     model_id : str, optional
@@ -142,7 +138,6 @@ def insert_df_with_config(
     # Merge user-visible kwargs into a single map for stamping
     # Note: explicit params still win over llm_defaults
     provided_params: dict[str, Any] = {
-        "url": url,
         "llm_provider": llm_provider,
         "model_id": model_id,
         **stamps_kwargs,  # resp_llm_provider, resp_model_id, etc.
@@ -190,10 +185,58 @@ def insert_df_with_config(
         )
 
         # Dedup strategies
-        if dedup_policy == "pk_scoped" and pk_cols:
-            where = " AND ".join([f"t.{k} = df.{k}" for k in pk_cols])
-            con.execute(f"DELETE FROM {tbl.value} t USING df WHERE {where}")
-            logger.info(f"🧹 PK-scoped dedup on {pk_cols} for '{tbl.value}'")
+        has_created = "created_at" in cols
+        has_updated = "updated_at" in cols
+
+        did_insert_already = False  # guard for the final blind insert
+
+        if dedup_policy == "pk_scoped" and pk_cols and has_created:
+
+            # Generic UPSERT that preserves created_at and refreshes updated_at (if present)
+            join_on = " AND ".join([f"t.{k} = d.{k}" for k in pk_cols])
+            non_mutable = {"created_at"}
+            updatable_cols = [
+                c for c in cols if c not in non_mutable and c not in pk_cols
+            ]
+
+            # Build SET clause
+            set_parts = [f"{c} = d.{c}" for c in updatable_cols if c != "updated_at"]
+            if has_updated:
+                set_parts.append("updated_at = now()")
+            set_sql = ", ".join(set_parts) if set_parts else None
+
+            # 1) UPDATE existing (keep created_at)
+            if set_sql:
+                con.execute(
+                    f"""
+                    UPDATE {tbl.value} AS t
+                    SET {set_sql}
+                    FROM df AS d
+                    WHERE {join_on}
+                    """
+                )
+
+            # 2) INSERT only brand-new rows
+            select_list = []
+            for c in cols:
+                if c == "created_at":
+                    select_list.append("COALESCE(d.created_at, now()) AS created_at")
+                elif c == "updated_at":
+                    select_list.append("now() AS updated_at")
+                else:
+                    select_list.append(f"d.{c} AS {c}")
+            select_sql = ", ".join(select_list)
+
+            con.execute(
+                f"""
+                INSERT INTO {tbl.value} ({", ".join(cols)})
+                SELECT {select_sql}
+                FROM df d
+                LEFT JOIN {tbl.value} t ON {join_on}
+                WHERE { " AND ".join([f't.{k} IS NULL' for k in pk_cols]) }
+                """
+            )
+            did_insert_already = True
 
         elif dedup_policy == "full_replace":
             con.execute(f"DELETE FROM {tbl.value}")
@@ -208,11 +251,29 @@ def insert_df_with_config(
                 where = " AND ".join([f"t.{k} = df.{k}" for k in pk_cols])
                 con.execute(f"DELETE FROM {tbl.value} t USING df WHERE {where}")
 
-        # Position-neutral insert
-        con.execute(f"INSERT INTO {tbl.value} ({col_list}) SELECT {sel_list} FROM df")
+        # Final insert (only if we didn't already insert in a policy branch above)
+        if not did_insert_already:
+            if pk_cols:
+                # Ensure we only insert rows that don't exist yet
+                join_on_final = " AND ".join([f"d.{k} = t.{k}" for k in pk_cols])
+                sql = f"""
+                INSERT INTO {tbl.value} ({col_list})
+                SELECT {sel_list}
+                FROM df d
+                ANTI JOIN {tbl.value} t
+                ON {join_on_final}
+                """
+                con.execute(sql)
+            else:
+                # No PKs — fall back to blind append
+                con.execute(
+                    f"INSERT INTO {tbl.value} ({col_list}) SELECT {sel_list} FROM df"
+                )
+
         logger.info(
-            f"✅ Inserted {len(df)} row(s) into '{tbl.value}' (mode='{mode}', dedup='{dedup_policy}')"
+            f"✅ Inserted (or upserted) into '{tbl.value}' (mode='{mode}', dedup='{dedup_policy}')"
         )
+
     finally:
         try:
             con.unregister("df")
@@ -315,10 +376,10 @@ def _stamp_df_per_config(
     provided_params: dict[str, Any],
 ) -> pd.DataFrame:
     """
-    Generic stamping per YAML:
+    Generic stamping per YAML (URL-agnostic):
       • timestamps: now
-      • iteration: inherit strategy
-      • any other field: param | default | none
+      • iteration: param | constant | none     (no DB lookup by URL here)
+      • other fields: param | default | none
       • LLM defaults come from defaults.llm_defaults
     """
     defaults, tcfg = _get_tbl_cfg(table.value)
@@ -326,47 +387,63 @@ def _stamp_df_per_config(
     inherit_cfg = _merge(defaults.get("inherit"), tcfg.get("inherit"))
     constants = _merge(defaults.get("constants"), tcfg.get("constants"))
     llm_defaults = defaults.get("llm_defaults", {}) or {}
-    url = provided_params.get("url")
 
-    # Ensure schema cols exist (should use pd.NA inside)
+    # Ensure schema cols exist (use pd.NA for missing)
     out_df = _ensure_schema_columns(df, table)
 
-    # (optional strictness) Only stamp schema columns
+    # Optional strictness: stamp only schema columns
     schema_cols = set(DUCKDB_SCHEMA_REGISTRY[table].column_order)
 
-    # URL convenience (if part of PK)
-    pk = DUCKDB_SCHEMA_REGISTRY[table].primary_keys
-    if "url" in pk and ("url" in out_df.columns) and (url is not None):
-        # only fill nulls to avoid overwriting existing values
-        out_df["url"] = out_df["url"].fillna(url)
-
-    # Iteration inheritance
-    inherit_iter_mode = inherit_cfg.get("iteration")
+    # ---- Iteration (URL-agnostic) ----
+    # Effective mode: prefer explicit stamp.iteration override; else inherit.iteration
+    inherit_iter_mode = (inherit_cfg or {}).get("iteration")
     stamp_iter_mode = (stamp_cfg or {}).get("iteration")
     effective_iter_mode = (
         inherit_iter_mode if stamp_iter_mode is None else stamp_iter_mode
     )
+
     if ("iteration" in out_df.columns) and (effective_iter_mode not in (None, "none")):
-        out_df["iteration"] = _resolve_iteration_from_cfg(
-            url=url,
-            inherit_mode=effective_iter_mode,
-            explicit_param=provided_params.get("iteration"),
-            constant_map=constants,
-        )
+        if effective_iter_mode == "param":
+            it = provided_params.get("iteration")
+            if it is not None:
+                out_df["iteration"] = out_df["iteration"].fillna(it)
+            else:
+                # Be explicit: if YAML asks for param, caller must provide it.
+                raise ValueError(
+                    "iteration stamping set to 'param' but no 'iteration' provided"
+                )
+        elif effective_iter_mode == "constant":
+            const_it = (constants or {}).get("iteration")
+            if const_it is None:
+                raise ValueError(
+                    "iteration stamping set to 'constant' but no constants.iteration defined"
+                )
+            out_df["iteration"] = out_df["iteration"].fillna(const_it)
+        elif effective_iter_mode == "pipeline_control":
+            # URL-agnostic mode: this function no longer looks up DB by URL.
+            # Require caller to resolve and pass iteration explicitly.
+            it = provided_params.get("iteration")
+            if it is None:
+                raise ValueError(
+                    "iteration mode 'pipeline_control' requires caller to resolve and pass 'iteration'"
+                )
+            out_df["iteration"] = out_df["iteration"].fillna(it)
+        else:
+            # Unknown mode → treat as none
+            pass
 
     # One timestamp per batch
     now_ts = _now_naive_utc()
 
+    # ---- Generic column stamping ----
     for col, mode in (stamp_cfg or {}).items():
         if col not in schema_cols:
-            continue  # optional: ignore non-schema stamp targets
+            continue
 
         if mode == "now":
-            # create if missing (shouldn't happen post _ensure_schema_columns)
-            if col not in out_df.columns:
-                out_df[col] = now_ts
-            else:
-                out_df[col] = out_df[col].fillna(now_ts)
+            out_df[col] = (
+                out_df[col].fillna(now_ts) if col in out_df.columns else now_ts
+            )
 
         elif mode == "default":
             if col in ("llm_provider", "model_id"):

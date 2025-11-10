@@ -82,7 +82,7 @@ from job_bot.db_io.persist_pipeline_state import update_and_persist_pipeline_sta
 from job_bot.db_io.pipeline_enums import (
     PipelineStage,
     PipelineStatus,
-    PipelineProcessStatus,
+    PipelineTaskState,
     TableName,
 )
 from job_bot.models.db_table_models import PipelineState
@@ -262,15 +262,15 @@ class PipelineFSM:
     def step(self, table_name: TableName = TableName.PIPELINE_CONTROL) -> None:
         """
         Advance to the next stage (mutates both `stage` and `status` and may
-            set `process_status`).
+            set `task_state`).
         Contract:
-        - If already at the final stage, idempotently set `process_status=COMPLETED`
+        - If already at the final stage, idempotently set `task_state=COMPLETED`
             and return.
         - Otherwise:
             1) mark current stage as COMPLETED (in-memory),
             2) hop to next stage,
             3) set next stage status to NEW,
-            4) if we landed on final stage, set process_status=COMPLETED,
+            4) if we landed on final stage, set task_state=COMPLETED,
             5) persist all changes in a single UPDATE that targets the row by
                 (url, iteration) only.
         """
@@ -281,13 +281,15 @@ class PipelineFSM:
 
             # --- Already final? Just idempotently stamp lifecycle and return ---
             if self._state == final_stage:
-                if self.state_model.process_status != PipelineProcessStatus.COMPLETED:
-                    self.state_model.process_status = PipelineProcessStatus.COMPLETED
+                if self.state_model.task_state not in (
+                    PipelineTaskState.PAUSED,
+                    PipelineTaskState.HOLD,
+                    PipelineTaskState.SKIP,
+                ):
+                    # mark human gate as PAUSED to indicate no further machine actions
+                    self.state_model.task_state = PipelineTaskState.PAUSED
                     self.state_model.updated_at = datetime.now()
-                    update_and_persist_pipeline_state(
-                        self.state_model,
-                        table_name,
-                    )
+                    update_and_persist_pipeline_state(self.state_model, table_name)
                 self._log_info("✅ Already at final stage: %s", self._state.name)
                 return
 
@@ -308,7 +310,6 @@ class PipelineFSM:
             if idx >= len(ordered) - 1:
                 # defensive: shouldn't happen due to early return above
                 self._log_info("✅ Already at final stage (defensive branch).")
-                self.state_model.process_status = PipelineProcessStatus.COMPLETED
                 self.state_model.updated_at = datetime.now()
                 update_and_persist_pipeline_state(
                     self.state_model,
@@ -325,10 +326,10 @@ class PipelineFSM:
 
             # --- 4) If we just landed on final, close lifecycle ---
             if next_stage == final_stage:
-                self.state_model.process_status = PipelineProcessStatus.COMPLETED
+                self.state_model.task_state = PipelineTaskState.PAUSED
             else:
                 # Make the next stage pickable
-                self.state_model.process_status = PipelineProcessStatus.NEW
+                self.state_model.task_state = PipelineTaskState.READY
                 # Optional gating reset if you use it
                 if hasattr(self.state_model, "decision_flag"):
                     self.state_model.decision_flag = 1
@@ -362,9 +363,9 @@ class PipelineFSM:
         return {
             "stage": getattr(m.stage, "value", str(m.stage)),
             "status": getattr(m.status, "value", str(m.status)),
-            "process_status": (
-                getattr(m.process_status, "value", str(m.process_status))
-                if m.process_status is not None
+            "task_state": (
+                getattr(m.task_state, "value", str(m.task_state))
+                if m.task_state is not None
                 else None
             ),
             "updated_at": m.updated_at,

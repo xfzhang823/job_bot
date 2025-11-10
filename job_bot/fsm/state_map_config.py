@@ -12,7 +12,7 @@ This module defines:
 
 ⚠️ Note:
     This module only manages per-stage FSM statuses (PipelineStatus).
-    The higher-level lifecycle field `process_status`
+    The higher-level lifecycle field `task_state`
     (NEW, RUNNING, COMPLETED, SKIPPED) is tracked separately
     at the row level in `pipeline_control` and is intentionally
     out of scope here.

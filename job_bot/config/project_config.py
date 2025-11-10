@@ -279,7 +279,18 @@ PIPELINE_DATA_DIR = BASE_DIR / "pipeline_data"  # input/output data folder
 DB_DIR = PIPELINE_DATA_DIR / "db"
 DUCKDB_FILE = DB_DIR / "pipeline_data.duckdb"
 
-EXCEL_DIR = PIPELINE_DATA_DIR / "excel"
+# ===============================================================
+# 📊 Excel and Selection Directories
+# ===============================================================
+EXCEL_DIR = PIPELINE_DATA_DIR / "excel"  # alignment_review XLSX exports
+SEL_DIR = PIPELINE_DATA_DIR / "selections"  # human-underlined extracted CSV/JSON
+TEMP_DIR = PIPELINE_DATA_DIR / "temp" / "underline_extract"  # transient/debug files
+
+# (optional) ensure these dirs exist on import if desired
+for _dir in [PIPELINE_DATA_DIR, DB_DIR, EXCEL_DIR, SEL_DIR, TEMP_DIR]:
+    _dir.mkdir(parents=True, exist_ok=True)
+
+
 # *LLM Models
 
 # llm_providers

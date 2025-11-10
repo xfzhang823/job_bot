@@ -1,0 +1,121 @@
+
+
+# What to change (surgical)
+
+1. **Drop `process_status` everywhere**
+
+* It’s still in the schema registry’s metadata set and the pipeline_control column order. Remove it and add your four new fields.
+
+  * `STANDARD_METADATA_FIELDS` still lists `process_status` 
+  * `DUCKDB_COLUMN_ORDER[PIPELINE_CONTROL]` still includes `process_status` 
+* After edit, your `PIPELINE_CONTROL` order should include: `task_state, is_claimed, worker_id, lease_until` (plus existing fields).
+
+done!
+
+
+2. **PipelineControl Pydantic model**
+
+* Add `task_state`, `is_claimed`, `worker_id`, `lease_until` and remove any `process_status` field in your model class. (Model names live under “models.db_table_models” as referenced by the registry.) 
+
+done!
+
+3. **Registry**
+
+* Update `DUCKDB_SCHEMA_REGISTRY[TableName.PIPELINE_CONTROL]` to match the new column order (PK remains `["url","iteration"]`). 
+* Also delete `process_status` from the “standard metadata” list so summaries don’t expect it. 
+
+done!
+
+4. **Control-plane sync (seed “READY on INSERT”)**
+
+* In your control sync code, add the parameter and hard-set `task_state` on **insert only**, leaving it untouched on updates (so humans can pause/skip). Your file notes call this “state_orchestration_pipeline”; the pattern is consistent with how other stage runners build a worklist from `pipeline_control`. (See alignment review assembling its list from `pipeline_control` as a reference for “don’t stomp state”.) 
+
+done!
+
+5. **Runner worklists**
+
+* Current helpers build worklists by `stage`/`status`; they do not use `process_status`, which is good. You’ll add the lease gating in your **runner** query layer (wherever you currently pull “ready” rows).
+
+  * Example helpers today: `get_urls_by_stage_and_status` filters only `stage` and `status`. You’ll keep that but add a new helper (or inline SQL) for claimable rows that also checks `task_state` and lease expiration. 
+
+6. **Claim / release SQL (add new helpers)**
+
+* Add three tiny functions (or in-place SQL) in your DB utils/runners:
+
+  **Worklist (claimable)**
+
+  ```sql
+  SELECT url, iteration
+  FROM pipeline_control
+  WHERE task_state = 'READY'
+    AND (is_claimed = FALSE OR lease_until < now());
+  ```
+
+  **Atomic claim**
+
+  ```sql
+  UPDATE pipeline_control
+  SET is_claimed  = TRUE,
+      worker_id   = $worker_id,
+      lease_until = now() + INTERVAL '15 minutes',
+      status      = 'IN_PROGRESS',
+      updated_at  = now()
+  WHERE url = $url AND iteration = $iter
+    AND task_state = 'READY'
+    AND (is_claimed = FALSE OR lease_until < now())
+  RETURNING *;
+  ```
+
+  **Release (success / error)**
+
+  ```sql
+  UPDATE pipeline_control
+  SET is_claimed  = FALSE,
+      worker_id   = NULL,
+      lease_until = NULL,
+      status      = 'COMPLETED',  -- or 'ERROR'
+      updated_at  = now()
+  WHERE url = $url AND iteration = $iter AND worker_id = $worker_id;
+  ```
+
+  Place them next to your existing control helpers (same module that has `get_urls_by_stage_and_status`, i.e., `db_io/db_utils.py`).  
+
+7. **Human toggles**
+
+* Replace any old “pause/resume/skip” writes to `process_status` with updates to `task_state` (`READY`/`PAUSED`/`SKIP`) in whatever admin or CLI tool you use.
+
+8. **Watchdog**
+
+* Add a tiny cron/loop util to reclaim stale leases:
+
+  ```sql
+  UPDATE pipeline_control
+  SET is_claimed = FALSE, worker_id = NULL
+  WHERE is_claimed = TRUE AND lease_until < now();
+  ```
+
+# One-time DuckDB migration
+
+Run this once:
+
+```sql
+ALTER TABLE pipeline_control
+  ADD COLUMN task_state TEXT DEFAULT 'READY',
+  ADD COLUMN is_claimed BOOLEAN DEFAULT FALSE,
+  ADD COLUMN worker_id TEXT,
+  ADD COLUMN lease_until TIMESTAMP;
+
+UPDATE pipeline_control SET task_state='READY' WHERE task_state IS NULL;
+```
+
+Then, after you edit the registry/model, if you use your registry to bootstrap DDL or strict alignment checks, make sure `process_status` is gone from:
+
+* `STANDARD_METADATA_FIELDS` 
+* `DUCKDB_COLUMN_ORDER[PIPELINE_CONTROL]` 
+
+# Sanity notes (unchanged parts)
+
+* Your FSM still advances stages using `stage`/`status` (e.g., similarity pipes mark `IN_PROGRESS`/`COMPLETED` and step). Nothing about the lease model touches those flows.  
+* PK for `pipeline_control` remains `(url, iteration)` per registry. 
+
+

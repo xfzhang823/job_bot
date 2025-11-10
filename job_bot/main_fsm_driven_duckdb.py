@@ -7,7 +7,8 @@ This module coordinates the entire pipeline execution sequence:
 1. Ensure all DuckDB tables exist (schema bootstrap).
 2. Pre-flight updates:
    - Ingest `job_urls` from JSON and sync into `pipeline_control`.
-   - Optionally refresh `flattened_responsibilities` if the resume has been updated.
+   - Optionally refresh `flattened_responsibilities` if the resume has
+   been updated.
 3. Run stage pipelines in order (async for concurrent URL-level tasks).
 4. Optionally run reporting/analytics at the end (e.g., crosstab export).
 
@@ -44,7 +45,9 @@ import matplotlib
 
 # User defined
 from job_bot.db_io.create_db_tables import create_all_db_tables
+from job_bot.db_io.decision_flag import sync_all
 import job_bot.config.logging_config
+
 
 # 0) URL intake + control-plane seed
 from job_bot.pipelines_with_fsm.update_job_urls_pipeline_fsm import (
@@ -62,16 +65,10 @@ from job_bot.pipelines_with_fsm.pipe_control_auto_transition_pipeline_fsm import
 from job_bot.pipelines_with_fsm.job_postings_pipeline_async_fsm import (
     run_job_postings_pipeline_async_fsm,
 )
-from job_bot.pipelines_with_fsm.extract_requirements_pipeline_async_fsm import (
-    run_extract_job_requirements_pipeline_async_fsm,
+from job_bot.pipelines_with_fsm.job_urls_pipeline_fsm import run_job_urls_pipeline_fsm
+from job_bot.pipelines_with_fsm.extract_to_flattened_requirements_pipeline_async_fsm import (
+    run_extract_to_flattened_requirements_pipeline_async_fsm,
 )
-
-# from job_bot.pipelines_with_fsm.flattened_requirements_pipeline_async_fsm import (
-#     run_flattened_requirements_pipeline_async_fsm,
-# )
-from job_bot.pipelines_with_fsm.flattened_requirements_pipeline_async_fsm_temp_fix import (
-    run_flattened_requirements_pipeline_async_fsm,
-)  # temp fix to copy from the extracted req table
 from job_bot.pipelines_with_fsm.flattened_responsibilities_pipeline_fsm import (
     run_flattened_responsibilities_pipeline_fsm,
 )
@@ -79,10 +76,9 @@ from job_bot.pipelines_with_fsm.resume_editing_pipeline_async_fsm import (
     run_resume_editing_pipeline_async_fsm,
 )
 from job_bot.pipelines_with_fsm.similarity_metrics_pipeline_async_fsm import (
-    run_similarity_metrics_eval_async_fsm,
-    run_similarity_metrics_reval_async_fsm,
+    run_similarity_metrics_eval_pipeline_async_fsm,
+    run_similarity_metrics_reval_pipeline_async_fsm,
 )
-
 from job_bot.pipelines_with_fsm.alignment_review_pipeline_async_fsm import (
     run_alignment_review_pipeline_async_fsm,
 )
@@ -92,7 +88,9 @@ logger = logging.getLogger(__name__)
 matplotlib.use("Agg")  # Prevent interactive mode
 
 
-async def run_all_fsm(*, append_only_urls: bool = True) -> None:
+async def run_all_fsm(
+    *, append_only_urls: bool = True, update_responsibilities: bool = False
+) -> None:
     """
     Run the full FSM-driven DuckDB pipeline in sequence.
 
@@ -103,7 +101,7 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
        (initial run uses full=True to bootstrap).
     2. Execute the main pipelines in order:
        - Preprocessing
-        (job_postings → extracted_requirements → flattened_requirements)
+        (job_postings → extracted_requirements & flattened_requirements)
        - Metrics/evaluation stages
        - Resume editing stage
     3. Refresh `pipeline_control` with integrity checks enabled.
@@ -135,31 +133,37 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
         advanced,
     )
 
+    # sync decision_flag
+    updated_rows = sync_all()
+    logger.info(f"🔧 Decision flags synchronized ({updated_rows} rows updated).")
     # --- Pipelines in order (each pulls its own worklist from pipeline_control) ---
+
+    # Push JOB_URL stage to job_posting
+    run_job_urls_pipeline_fsm()
 
     # JOB_URLS → JOB_POSTINGS
     await run_job_postings_pipeline_async_fsm(max_concurrent_tasks=3, retry_errors=True)
 
-    # JOB_POSTINGS → EXTRACTED_REQUIREMENTS
-    await run_extract_job_requirements_pipeline_async_fsm()
+    # JOB_POSTINGS → FLATTENED_REQUIREMENTS
+    await run_extract_to_flattened_requirements_pipeline_async_fsm(retry_errors=True)
 
-    # EXTRACTED_REQUIREMENTS → FLATTENED_REQUIREMENTS
-    await run_flattened_requirements_pipeline_async_fsm()
+    # run on FLATTENED_RESPONSIBILITIES (conditional)
+    if update_responsibilities:
+        run_flattened_responsibilities_pipeline_fsm(retry_errors=True)
 
-    # Upsert flattened resps: resume json -> FLATTENED_RESPONSIBILITIES
-    run_flattened_responsibilities_pipeline_fsm()
-
-    # run on FLATTENED_RESPONSIBILITIES
-    await run_similarity_metrics_eval_async_fsm()
+    # run on SIM METRICS - EVAL
+    await run_similarity_metrics_eval_pipeline_async_fsm(retry_errors=True)
 
     # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
-    await run_resume_editing_pipeline_async_fsm()
+    await run_resume_editing_pipeline_async_fsm(retry_errors=True)
 
-    # run on EDITED_RESPONSIBILITIES
-    await run_similarity_metrics_reval_async_fsm()
+    # run on SIM METRICS - REVAL (based on edited resps)
+    await run_similarity_metrics_reval_pipeline_async_fsm(
+        max_concurrent_tasks=4, retry_errors=True
+    )
 
-    # run on EDITED_RESPONSIBILITIES
-    await run_alignment_review_pipeline_async_fsm()
+    # SIM METRICS -> Crosstab for human review
+    await run_alignment_review_pipeline_async_fsm(retry_errors=True)
 
 
 if __name__ == "__main__":

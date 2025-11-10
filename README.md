@@ -12,7 +12,8 @@ project_root/
 │   │   ├── db_utils.py
 │   │   ├── schema_definitions.py
 │   │   ├── db_transform.py
-│   │   └── db_insert.py
+│   │   ├── db_inserters.py
+│   │   └── db_loaders.py
 │   │
 │   ├── fsm/                          # Existing FSM management utilities
 │   │   ├── __init__.py
