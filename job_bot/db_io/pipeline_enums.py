@@ -50,43 +50,50 @@ class LLMProvider(str, Enum):
 
 class PipelineStage(str, Enum):
     """
-    * Class to define stages (redefined to use table names explicitly as stages)
+    Defines all pipeline stages in the FSM, using explicit table names as stages.
 
-    Example Usage:
-        df["stage"] = PipelineStage.PREPROCESSING.value
+    Conventions
+    -----------
+    - Enum member names:  UPPER_SNAKE_CASE
+    - Enum values (stored in DB):  UPPER_SNAKE_CASE (e.g., "JOB_URLS")
+      This ensures consistency with DuckDB and PipelineState model coercion.
+
+    Example
+    -------
+        df["stage"] = PipelineStage.JOB_URLS.value
         assert stage in PipelineStage.list()
     """
 
     # ✅ Preprocessing Stages
-    JOB_URLS = "job_urls"
-    JOB_POSTINGS = "job_postings"
-    # EXTRACTED_REQUIREMENTS = "extracted_requirements" # commented out:
-    # job posting should go straight to flattend requirements
+    JOB_URLS = "JOB_URLS"
+    JOB_POSTINGS = "JOB_POSTINGS"
+    # EXTRACTED_REQUIREMENTS = "EXTRACTED_REQUIREMENTS"  # commented out intentionally
 
     # ✅ Flattened Requirements
-    FLATTENED_REQUIREMENTS = "flattened_requirements"
-    FLATTENED_RESPONSIBILITIES = "flattened_responsibilities"
+    FLATTENED_REQUIREMENTS = "FLATTENED_REQUIREMENTS"
+    FLATTENED_RESPONSIBILITIES = "FLATTENED_RESPONSIBILITIES"
 
     # ✅ Evaluation
-    SIM_METRICS_EVAL = "similarity_metrics_eval"  # original responsibilities vs reqs
+    SIM_METRICS_EVAL = "SIMILARITY_METRICS_EVAL"  # original responsibilities vs reqs
 
     # ✅ Editing (LLM)
-    EDITED_RESPONSIBILITIES = "edited_responsibilities"
+    EDITED_RESPONSIBILITIES = "EDITED_RESPONSIBILITIES"
 
-    # todo: keep it out for now (may not include in final version)
-    # PRUNED_RESPONSIBILITIES = "pruned_responsibilities"
+    # Optional pruning stage (not used currently)
+    # PRUNED_RESPONSIBILITIES = "PRUNED_RESPONSIBILITIES"
 
     # ✅ Revaluation
-    SIM_METRICS_REVAL = "similarity_metrics_reval"  # edited responsibilities vs reqs
+    SIM_METRICS_REVAL = "SIMILARITY_METRICS_REVAL"  # edited responsibilities vs reqs
 
-    # ✅ Human Review (optional stages to be added)
-    ALIGNMENT_REVIEW = "alignment_review"  # cross-tab visualization + feedback
+    # ✅ Human Review (optional)
+    ALIGNMENT_REVIEW = "ALIGNMENT_REVIEW"  # cross-tab visualization + feedback
 
-    # ✅ Export
-    FINAL_RESPONSIBILITIES = "final_responsibilities"  # manually trimmed/pruned output
+    # ✅ Export / Finalization
+    FINAL_RESPONSIBILITIES = "FINAL_RESPONSIBILITIES"  # manually trimmed/pruned output
 
     @classmethod
     def list(cls) -> list["PipelineStage"]:
+        """Return all defined stages as a list."""
         return list(cls)
 
 

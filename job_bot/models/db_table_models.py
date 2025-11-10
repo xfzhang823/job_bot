@@ -15,9 +15,9 @@ Design principles:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Union
-
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from typing import Optional, Union, Any
+import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 # User defined
 from job_bot.db_io.pipeline_enums import (
@@ -64,87 +64,185 @@ class LLMStampedMixin:
 
 class PipelineState(AppBaseModel, TimestampedMixin):
     """
-    Represents a single **row** in the `pipeline_control` table.
+    One row in `pipeline_control`.
 
-    - DuckDB table: `pipeline_control` (collection of all states).
-    - Model name: `PipelineState` (one state per URL/iteration).
-    - FSM logic ensures at most one active row per (url, iteration).
+    Conventions
+    -----------
+    - stage:       UPPER-CASE enum value (e.g., "JOB_URLS", "JOB_POSTINGS")
+    - status:      UPPER-CASE enum value (e.g., "NEW", "IN_PROGRESS", "COMPLETED")
+    - task_state:  UPPER-CASE enum value (e.g., "READY", "PAUSED", "SKIP", "HOLD")
 
-    Fields:
-        url (HttpUrl | str):
-            Job posting URL (primary key component).
+    Purpose
+    -------
+    Tracks a URL's progress through atomic FSM stages with a *human gate*
+    (`task_state`) and *machine lease* fields (claim/lease).
 
-        iteration (int):
-            Iteration index for reruns (default = 0).
+    Cleanups & Coercions (automatic)
+    --------------------------------
+    - `iteration`      → int (handles float64/str/None)
+    - `stage`          → PipelineStage (forced UPPER)
+    - `status`         → PipelineStatus (forced UPPER)
+    - `task_state`     → PipelineTaskState (forced UPPER + legacy mapping):
+        DONE/COMPLETED → HOLD, SKIPPED → SKIP, RUNNING/RETRY/ABANDONED → READY
+    - `is_claimed`     → bool (accepts 0/1/"true"/"false")
+    - `decision_flag`  → Optional[int] in {None,0,1}
+    - `transition_flag`→ int in {0,1} (defaults to 0)
+    - `lease_until`    → datetime (accepts str/pandas.Timestamp/None)
+    - `worker_id`      → None if blank/whitespace
+    - `url`            → HttpUrl **or** str (Union), preserves non-standard job-board URLs
 
-        stage (PipelineStage):
-            Current pipeline stage in the FSM.
+    Invariants
+    ----------
+    - task_state ∈ {READY, PAUSED, SKIP, HOLD}
+    - status ∈ {NEW, IN_PROGRESS, COMPLETED, ERROR, SKIPPED}
 
-        status (PipelineStatus):
-            Stage-local machine lifecycle (e.g., NEW, IN_PROGRESS, COMPLETED, ERROR).
-
-        task_state (PipelineTaskState):
-            Human gate controlling whether a task is eligible for automated
-            processing. Distinct from `status`, which reflects machine lifecycle.
-            Typical values:
-                - READY  → eligible for machine processing
-                - PAUSED → temporarily held by human
-                - SKIP   → excluded from future processing
-                - HOLD   → optional review/intermediate gate
-
-        is_claimed (bool):
-            Whether the row is currently leased by a worker process.
-            Defaults to False (unclaimed).
-
-        worker_id (str | None):
-            Identifier of the worker/process currently holding the lease.
-            None if unclaimed.
-
-        lease_until (datetime | None):
-            Lease expiration timestamp. When in the past, the row is reclaimable.
-            None if unclaimed.
-
-        decision_flag (int | None):
-            1 = go, 0 = no-go, or None if undecided.
-
-        transition_flag (int):
-            0 = pending (transition not yet applied),
-            1 = applied (transition completed).
-
-        notes (str | None):
-            Optional free-text notes for FSM/debugging or human annotation.
-
-        source_file (str | None):
-            Provenance marker or source artifact for debugging/seeding.
-
-        version (Version | None):
-            Optional editorial/schema version marker for traceability.
-
-    ✅ Naming convention:
-        • Table = `pipeline_control` (plural/collection)
-        • Model = `PipelineState` (singular, one record)
-        • Intentional difference to emphasize row vs. table
+    Notes
+    -----
+    Prefer using this model to *load* from DuckDB/pandas and to *persist* back,
+    so normalization stays centralized here.
     """
 
+    # --- Keys & FSM state ---
     url: Union[HttpUrl, str]
     iteration: int = 0
     stage: PipelineStage
     status: PipelineStatus = Field(default=PipelineStatus.NEW)
 
-    # Human gate (eligibility for automation)
+    # --- Human gate (eligibility for automation) ---
     task_state: PipelineTaskState = Field(default=PipelineTaskState.READY)
 
-    # Machine lease tracking (concurrency control)
+    # --- Machine lease tracking (concurrency control) ---
     is_claimed: bool = False
     worker_id: Optional[str] = None
     lease_until: Optional[datetime] = None
 
-    # Misc flags / metadata
+    # --- Misc flags / metadata ---
     decision_flag: Optional[int] = None  # 1=go, 0=no-go, None=undecided
-    transition_flag: int = 0  # 0=pending, 1=final/applied
+    transition_flag: int = 0  # 0=pending, 1=applied
     notes: Optional[str] = None
     source_file: Optional[str] = None
-    version: Optional[Version] = None
+    version: Optional["Version"] = None  # type: ignore[name-defined]
+
+    # ======================
+    # Validators / Coercers
+    # ======================
+
+    @field_validator("iteration", mode="before")
+    @classmethod
+    def _coerce_iteration(cls, v: Any) -> int:
+        if v is None:
+            return 0
+        if isinstance(v, int):
+            return v
+        try:
+            return int(float(v))  # handles pandas/numpy floats & numeric strings
+        except Exception:
+            return 0
+
+    @field_validator("stage", mode="before")
+    @classmethod
+    def _coerce_stage(cls, v: Any) -> PipelineStage:
+        if isinstance(v, PipelineStage):
+            return v
+        if v is None:
+            raise ValueError("stage is required")
+        return PipelineStage(str(v).strip().upper())  # enforce UPPER
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _coerce_status(cls, v: Any) -> PipelineStatus:
+        if isinstance(v, PipelineStatus):
+            return v
+        if v is None:
+            return PipelineStatus.NEW
+        return PipelineStatus(str(v).strip().upper())  # enforce UPPER
+
+    @field_validator("task_state", mode="before")
+    @classmethod
+    def _coerce_task_state(cls, v: Any, info: ValidationInfo) -> PipelineTaskState:
+        """
+        Map legacy/custom values to the current gate set and enforce UPPER.
+        """
+        if v is None or str(v).strip() == "":
+            status = info.data.get("status")
+            if status in (
+                PipelineStatus.COMPLETED,
+                getattr(PipelineStatus, "SKIPPED", None),
+            ):
+                return PipelineTaskState.HOLD
+            return PipelineTaskState.READY
+
+        s = str(v).strip().upper()
+        legacy_map = {
+            "DONE": "HOLD",
+            "COMPLETED": "HOLD",
+            "SKIPPED": "SKIP",
+            "RUNNING": "READY",
+            "RETRY": "READY",
+            "ABANDONED": "READY",
+        }
+        s = legacy_map.get(s, s)
+        return PipelineTaskState(s)
+
+    @field_validator("is_claimed", mode="before")
+    @classmethod
+    def _coerce_is_claimed(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        if s in {"1", "true", "t", "yes", "y"}:
+            return True
+        if s in {"0", "false", "f", "no", "n"}:
+            return False
+        try:
+            return bool(int(v))
+        except Exception:
+            return False
+
+    @field_validator("decision_flag", "transition_flag", mode="before")
+    @classmethod
+    def _coerce_flags(cls, v: Any, info: ValidationInfo) -> Optional[int]:
+        """
+        Coerce flags to {0,1}; allow decision_flag=None, force transition_flag default to 0.
+        """
+        field = getattr(info, "field_name", "")
+        if v is None or v == "":
+            return None if field == "decision_flag" else 0
+        try:
+            return 1 if int(v) != 0 else 0
+        except Exception:
+            return 1 if str(v).strip().lower() in {"true", "t", "yes", "y"} else 0
+
+    @field_validator("lease_until", mode="before")
+    @classmethod
+    def _coerce_lease_until(cls, v: Any) -> Optional[datetime]:
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, pd.Timestamp):
+            return v.to_pydatetime()
+        try:
+            return pd.to_datetime(v).to_pydatetime()
+        except Exception:
+            return None
+
+    @field_validator("worker_id", mode="before")
+    @classmethod
+    def _normalize_worker_id(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _coerce_url(cls, v: Any) -> Union[HttpUrl, str]:
+        if v is None:
+            raise ValueError("url is required")
+        return str(v).strip()
 
 
 # ──────────────────────────────────────────────────────────────────────────────

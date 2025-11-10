@@ -22,6 +22,7 @@ Design:
 import logging
 from typing import (
     Any,
+    Dict,
     Iterable,
     Optional,
     List,
@@ -170,45 +171,64 @@ def get_claimable_worklist(
 
 def try_claim_one(
     *, url: str, iteration: int, worker_id: str, lease_minutes: int = 15
-) -> Optional[dict]:
+) -> Optional[Dict[str, Any]]:
     """
-    Atomically claim a single (url, iteration) row if it's READY and unleased
-    or expired. Also advances the machine lifecycle to IN_PROGRESS.
+    Atomically claim a single (url, iteration) row for processing.
 
-    Args:
-        url: Row URL key.
-        iteration: Iteration number for the row.
-        worker_id: Identifier for the claiming worker.
-        lease_minutes: Lease duration.
+    Marks the row as claimed (`is_claimed=TRUE`), assigns a `worker_id`,
+    sets a lease expiration (`lease_until = CURRENT_TIMESTAMP + N minutes`),
+    and updates `status` to `IN_PROGRESS`—but only if the row is currently
+    READY and not actively leased.
 
     Returns:
-        dict: The updated row on success, else None.
+        dict: The updated pipeline_control row on success.
+        None: If the row was not claimable (e.g., already claimed or not READY).
+
+    Notes:
+        - Used by FSM runners to enforce one-worker-per-row exclusivity.
+        - Lease duration is configurable via `lease_minutes`.
     """
     con = get_db_connection()
     try:
-        row = con.execute(
-            """
+        sql = """
             UPDATE pipeline_control
-            SET is_claimed = TRUE,
-                worker_id = ?,
-                lease_until = date_add('minute', ?, CURRENT_TIMESTAMP),
-                status = ?,
-                updated_at = CURRENT_TIMESTAMP
+            SET is_claimed  = TRUE,
+                worker_id   = ?,
+                lease_until = CURRENT_TIMESTAMP + (? * INTERVAL 1 MINUTE),
+                status      = ?,
+                updated_at  = CURRENT_TIMESTAMP
             WHERE url = ?
               AND iteration = ?
               AND task_state = 'READY'
-              AND (is_claimed = FALSE OR lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)
+              AND (decision_flag IS NULL OR decision_flag = 1)
+              AND (
+                    is_claimed = FALSE
+                 OR lease_until IS NULL
+                 OR lease_until < CURRENT_TIMESTAMP
+              )
             RETURNING *
-            """,
-            (
-                worker_id,
-                lease_minutes,
-                PipelineStatus.IN_PROGRESS.value,
-                url,
-                iteration,
-            ),
-        ).fetchone()
-        return dict(row) if row else None
+        """
+        params = (
+            worker_id,
+            lease_minutes,
+            PipelineStatus.IN_PROGRESS.value,
+            url,
+            iteration,
+        )
+        res = con.execute(sql, params)
+        if res is None:
+            logger.warning(
+                "⚠️ try_claim_one(): no result returned from DuckDB execute()"
+            )
+            return None
+
+        row = res.fetchone()
+        if not row:
+            return None
+
+        cols = [c[0] for c in res.description]  # type: ignore[reportOptionalIterable]
+
+        return dict(zip(cols, row))
     finally:
         con.close()
 
