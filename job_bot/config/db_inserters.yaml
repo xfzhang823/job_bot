@@ -2,8 +2,8 @@ defaults:
   mode: append
   dedup: pk_scoped
   stamp:
-    created_at: now
-    updated_at: now
+    created_at: "CAST(CURRENT_TIMESTAMP AS TIMESTAMPTZ)"
+    updated_at: "CAST(CURRENT_TIMESTAMP AS TIMESTAMPTZ)"
   inherit:
     iteration: pipeline_control
   llm_defaults:

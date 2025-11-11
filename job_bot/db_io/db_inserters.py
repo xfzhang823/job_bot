@@ -220,9 +220,22 @@ def insert_df_with_config(
             select_list = []
             for c in cols:
                 if c == "created_at":
-                    select_list.append("COALESCE(d.created_at, now()) AS created_at")
+                    select_list.append(
+                        "COALESCE(try_cast(d.created_at AS TIMESTAMPTZ), CURRENT_TIMESTAMP) AS created_at"
+                    )
                 elif c == "updated_at":
-                    select_list.append("now() AS updated_at")
+                    select_list.append(
+                        "CURRENT_TIMESTAMP AS updated_at"  # already TIMESTAMPTZ
+                    )
+                elif c == "posted_date":
+                    select_list.append(
+                        "COALESCE("
+                        "try_cast(d.posted_date AS DATE), "
+                        "CAST(strptime(CAST(d.posted_date AS VARCHAR), '%Y-%m-%d') AS DATE), "
+                        "CAST(strptime(CAST(d.posted_date AS VARCHAR), '%b %d, %Y') AS DATE), "
+                        "CAST(strptime(CAST(d.posted_date AS VARCHAR), '%B %d, %Y') AS DATE)"
+                        ") AS posted_date"
+                    )
                 else:
                     select_list.append(f"d.{c} AS {c}")
             select_sql = ", ".join(select_list)
