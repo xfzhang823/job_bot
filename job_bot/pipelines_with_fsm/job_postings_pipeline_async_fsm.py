@@ -261,7 +261,7 @@ async def process_job_postings_batch_async_fsm(
         # Stage gate (human gate is enforced upstream in the claimable query)
         fsm_manager = PipelineFSMManager()
         fsm = fsm_manager.get_fsm(url)
-        if fsm.state != PipelineStage.JOB_URLS.value:
+        if fsm.state != PipelineStage.JOB_POSTINGS.value:
             logger.info("⏩ Skip (stage=%s): %s", fsm.state, url)
             return
 
@@ -475,7 +475,7 @@ async def run_job_postings_pipeline_async_fsm(
 
     # 2) Get claimable worklist (respects human gate + lease expiration)
     worklist: list[tuple[str, int]] = get_claimable_worklist(
-        stage=PipelineStage.JOB_URLS,
+        stage=PipelineStage.JOB_POSTINGS,
         status=statuses,
         max_rows=max_concurrent_tasks * 4 or 1000,
     )
@@ -486,14 +486,14 @@ async def run_job_postings_pipeline_async_fsm(
         worklist = [(u, it) for (u, it) in worklist if u in filter_set]
 
     if not worklist:
-        logger.info("📭 No claimable (url, iteration) at stage 'job_urls'.")
+        logger.info("📭 No claimable (url, iteration) at stage 'job_postings'.")
         return
 
     # 4) Create a stable worker identity for this run
     worker_id = generate_worker_id(prefix="job_postings")
 
     logger.info(
-        "🚀 Starting job_postings pipeline | %d items | worker_id=%s | stage=job_urls",
+        "🚀 Starting job_postings pipeline | %d items | worker_id=%s | stage=job_postings",
         len(worklist),
         worker_id,
     )

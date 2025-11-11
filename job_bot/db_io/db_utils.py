@@ -53,7 +53,6 @@ from job_bot.db_io.pipeline_enums import (
     PipelineTaskState,
     TableName,
 )
-from job_bot.db_io import decision_flag  # (import retained if used elsewhere)
 
 logger = logging.getLogger(__name__)
 E = TypeVar("E")  # enum type
@@ -88,7 +87,6 @@ def get_claimable_worklist(
     Conditions:
       - Matches stage & status (supports one or many statuses)
       - Human gate allows it: task_state = 'READY'
-      - Decision gate allows it: decision_flag IS NULL (undecided) OR = 1 (approved)
       - Not claimed OR lease expired
 
     Args:
@@ -139,7 +137,6 @@ def get_claimable_worklist(
         WHERE stage = ?
           AND status IN ({in_placeholders})
           AND task_state = 'READY'
-          AND (decision_flag IS NULL OR decision_flag = 1)
           AND (
                 is_claimed = FALSE
              OR lease_until IS NULL
@@ -200,7 +197,6 @@ def try_claim_one(
             WHERE url = ?
               AND iteration = ?
               AND task_state = 'READY'
-              AND (decision_flag IS NULL OR decision_flag = 1)
               AND (
                     is_claimed = FALSE
                  OR lease_until IS NULL
@@ -515,6 +511,7 @@ def get_urls_by_stage(
         con.close()
 
 
+# todo: to be deprecated entirely; delete later
 def get_urls_ready_for_transition(
     stage: PipelineStage, limit: Optional[int] = None
 ) -> List[str]:

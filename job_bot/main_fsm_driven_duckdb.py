@@ -124,14 +124,14 @@ async def run_all_fsm(
     sync_job_urls_to_pipeline_control()  # seeds JOB_URLS/NEW in pipeline_control
     logger.info(f"✅ Sync job urls to pipeline control table completed.")
 
-    # sync pipeline control table: auto transition, etc. (idempotent)
-    retried, advanced = run_pipe_control_auto_transition_pipeline_fsm(dry_run=False)
+    # # sync pipeline control table: auto transition, etc. (idempotent)
+    # retried, advanced = run_pipe_control_auto_transition_pipeline_fsm(dry_run=False)
 
-    logger.info(
-        "🔄 Pipeline control auto-transition completed (retried=%s, advanced=%s)",
-        retried,
-        advanced,
-    )
+    # logger.info(
+    #     "🔄 Pipeline control auto-transition completed (retried=%s, advanced=%s)",
+    #     retried,
+    #     advanced,
+    # )
 
     # sync decision_flag
     updated_rows = sync_all()

@@ -112,7 +112,12 @@ class PipelineFSMManager:
             SELECT *
             FROM {self.table_name}
             WHERE {' AND '.join(clauses)}
-            ORDER BY COALESCE(updated_at, created_at) DESC NULLS LAST, iteration DESC
+            ORDER BY COALESCE(
+                    try_cast(updated_at AS TIMESTAMP),
+                    try_cast(created_at AS TIMESTAMP),
+                    TIMESTAMP '1970-01-01'
+                ) DESC NULLS LAST,
+                iteration DESC
             LIMIT 1
         """.strip()
 

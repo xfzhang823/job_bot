@@ -14,10 +14,18 @@ Design principles:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Union, Any
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    field_validator,
+    ValidationInfo,
+)
+import math
 
 # User defined
 from job_bot.db_io.pipeline_enums import (
@@ -46,8 +54,8 @@ class AppBaseModel(BaseModel):
 class TimestampedMixin(BaseModel):
     """Opt-in audit timestamps. Use ONLY where you truly need them."""
 
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: Optional[datetime] | None = None
 
 
 class LLMStampedMixin:
@@ -85,7 +93,6 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     - `task_state`     → PipelineTaskState (forced UPPER + legacy mapping):
         DONE/COMPLETED → HOLD, SKIPPED → SKIP, RUNNING/RETRY/ABANDONED → READY
     - `is_claimed`     → bool (accepts 0/1/"true"/"false")
-    - `decision_flag`  → Optional[int] in {None,0,1}
     - `transition_flag`→ int in {0,1} (defaults to 0)
     - `lease_until`    → datetime (accepts str/pandas.Timestamp/None)
     - `worker_id`      → None if blank/whitespace
@@ -117,6 +124,7 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     lease_until: Optional[datetime] = None
 
     # --- Misc flags / metadata ---
+    # todo: to be deprecated; delete later
     decision_flag: Optional[int] = None  # 1=go, 0=no-go, None=undecided
     transition_flag: int = 0  # 0=pending, 1=applied
     notes: Optional[str] = None
@@ -201,19 +209,20 @@ class PipelineState(AppBaseModel, TimestampedMixin):
         except Exception:
             return False
 
-    @field_validator("decision_flag", "transition_flag", mode="before")
-    @classmethod
-    def _coerce_flags(cls, v: Any, info: ValidationInfo) -> Optional[int]:
-        """
-        Coerce flags to {0,1}; allow decision_flag=None, force transition_flag default to 0.
-        """
-        field = getattr(info, "field_name", "")
-        if v is None or v == "":
-            return None if field == "decision_flag" else 0
-        try:
-            return 1 if int(v) != 0 else 0
-        except Exception:
-            return 1 if str(v).strip().lower() in {"true", "t", "yes", "y"} else 0
+    # todo: commented out; deprecate decision_flag; delete later
+    # @field_validator("decision_flag", "transition_flag", mode="before")
+    # @classmethod
+    # def _coerce_flags(cls, v: Any, info: ValidationInfo) -> Optional[int]:
+    #     """
+    #     Coerce flags to {0,1}; allow decision_flag=None, force transition_flag default to 0.
+    #     """
+    #     field = getattr(info, "field_name", "")
+    #     if v is None or v == "":
+    #         return None if field == "decision_flag" else 0
+    #     try:
+    #         return 1 if int(v) != 0 else 0
+    #     except Exception:
+    #         return 1 if str(v).strip().lower() in {"true", "t", "yes", "y"} else 0
 
     @field_validator("lease_until", mode="before")
     @classmethod
@@ -243,6 +252,26 @@ class PipelineState(AppBaseModel, TimestampedMixin):
         if v is None:
             raise ValueError("url is required")
         return str(v).strip()
+
+    @field_validator("iteration", "transition_flag", mode="before")
+    @classmethod
+    def coerce_ints(cls, v):
+        """
+        Force float to int for int fields.
+        Treat pd.NA/NaN as None for Optional[int]
+        """
+        if v is None:
+            return v
+        # Handle pandas/NumPy float NaNs
+        try:
+            if isinstance(v, float) and math.isnan(v):
+                return None
+        except Exception:
+            pass
+        # Coerce float-like to int
+        if isinstance(v, (float, str)) and str(v).strip() != "":
+            return int(float(v))
+        return v
 
 
 # ──────────────────────────────────────────────────────────────────────────────
