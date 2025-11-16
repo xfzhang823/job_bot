@@ -61,7 +61,7 @@ def insert_df_with_config(
         Model identifier (used if YAML stamp policy requests it).
     mode : {"append", "replace"}, default="append"
         Intent marker; actual dedup policy is determined by YAML.
-    **stamps_kwargs : Any
+    stamps_kwargs : Any
         Extra per-row values for stamp:param fields (e.g., resp_llm_provider, resp_model_id).
 
     Raises
@@ -93,37 +93,11 @@ def insert_df_with_config(
     4. Stamp DataFrame columns according to YAML policies.
     5. Align columns strictly to schema order.
     6. Apply dedup policy:
-       - pk_scoped → DELETE rows with matching PKs before insert
+       - pk_scoped → DELETE/UPDATE rows with matching PKs before insert
        - full_replace → DELETE all rows before insert
        - none → blind append
     7. Insert rows using explicit column lists, ensuring position-neutral
         behavior.
-
-    Examples
-    --------
-    # Insert new job URLs (dedup by URL, no iteration or LLM fields stamped)
-    df = pd.DataFrame([{"url": "https://example.com/job123"}])
-    insert_df_with_config(df, TableName.JOB_URLS)
-
-    # Insert extracted requirements (dedup by url+iteration, stamp iteration + LLM fields)
-    reqs_df = pd.DataFrame([{"requirement_key": "req1", "requirement": "Python"}])
-    insert_df_with_config(
-        reqs_df,
-        TableName.EXTRACTED_REQUIREMENTS,
-        url="https://example.com/job123",
-        llm_provider="OPENAI",
-        model_id="gpt-4-1-nano",
-    )
-
-    # Insert similarity metrics (requires resp_* passed explicitly)
-    metrics_df = pd.DataFrame([{"responsibility_key": "r1", "requirement_key": "q1"}])
-    insert_df_with_config(
-        metrics_df,
-        TableName.SIMILARITY_METRICS,
-        url="https://example.com/job123",
-        resp_llm_provider="OPENAI",
-        resp_model_id="gpt-4-1-nano",
-    )
     """
 
     if df.empty:
@@ -191,16 +165,15 @@ def insert_df_with_config(
         did_insert_already = False  # guard for the final blind insert
 
         if dedup_policy == "pk_scoped" and pk_cols and has_created:
-
             # Generic UPSERT that preserves created_at and refreshes updated_at (if present)
-            join_on = " AND ".join([f"t.{k} = d.{k}" for k in pk_cols])
+            join_on = " AND ".join([f"t.{k} = df.{k}" for k in pk_cols])
             non_mutable = {"created_at"}
             updatable_cols = [
                 c for c in cols if c not in non_mutable and c not in pk_cols
             ]
 
             # Build SET clause
-            set_parts = [f"{c} = d.{c}" for c in updatable_cols if c != "updated_at"]
+            set_parts = [f"{c} = df.{c}" for c in updatable_cols if c != "updated_at"]
             if has_updated:
                 set_parts.append("updated_at = now()")
             set_sql = ", ".join(set_parts) if set_parts else None
@@ -211,7 +184,7 @@ def insert_df_with_config(
                     f"""
                     UPDATE {tbl.value} AS t
                     SET {set_sql}
-                    FROM df AS d
+                    FROM df
                     WHERE {join_on}
                     """
                 )
@@ -221,7 +194,7 @@ def insert_df_with_config(
             for c in cols:
                 if c == "created_at":
                     select_list.append(
-                        "COALESCE(try_cast(d.created_at AS TIMESTAMPTZ), CURRENT_TIMESTAMP) AS created_at"
+                        "COALESCE(try_cast(df.created_at AS TIMESTAMPTZ), CURRENT_TIMESTAMP) AS created_at"
                     )
                 elif c == "updated_at":
                     select_list.append(
@@ -230,23 +203,23 @@ def insert_df_with_config(
                 elif c == "posted_date":
                     select_list.append(
                         "COALESCE("
-                        "try_cast(d.posted_date AS DATE), "
-                        "CAST(strptime(CAST(d.posted_date AS VARCHAR), '%Y-%m-%d') AS DATE), "
-                        "CAST(strptime(CAST(d.posted_date AS VARCHAR), '%b %d, %Y') AS DATE), "
-                        "CAST(strptime(CAST(d.posted_date AS VARCHAR), '%B %d, %Y') AS DATE)"
+                        "try_cast(df.posted_date AS DATE), "
+                        "CAST(strptime(CAST(df.posted_date AS VARCHAR), '%Y-%m-%d') AS DATE), "
+                        "CAST(strptime(CAST(df.posted_date AS VARCHAR), '%b %d, %Y') AS DATE), "
+                        "CAST(strptime(CAST(df.posted_date AS VARCHAR), '%B %d, %Y') AS DATE)"
                         ") AS posted_date"
                     )
                 else:
-                    select_list.append(f"d.{c} AS {c}")
+                    select_list.append(f"df.{c} AS {c}")
             select_sql = ", ".join(select_list)
 
             con.execute(
                 f"""
                 INSERT INTO {tbl.value} ({", ".join(cols)})
                 SELECT {select_sql}
-                FROM df d
+                FROM df
                 LEFT JOIN {tbl.value} t ON {join_on}
-                WHERE { " AND ".join([f't.{k} IS NULL' for k in pk_cols]) }
+                WHERE {" AND ".join([f"t.{k} IS NULL" for k in pk_cols])}
                 """
             )
             did_insert_already = True
@@ -268,11 +241,11 @@ def insert_df_with_config(
         if not did_insert_already:
             if pk_cols:
                 # Ensure we only insert rows that don't exist yet
-                join_on_final = " AND ".join([f"d.{k} = t.{k}" for k in pk_cols])
+                join_on_final = " AND ".join([f"df.{k} = t.{k}" for k in pk_cols])
                 sql = f"""
                 INSERT INTO {tbl.value} ({col_list})
                 SELECT {sel_list}
-                FROM df d
+                FROM df
                 ANTI JOIN {tbl.value} t
                 ON {join_on_final}
                 """

@@ -168,7 +168,7 @@ def run_flattened_responsibilities_pipeline_fsm(
     None
     """
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )

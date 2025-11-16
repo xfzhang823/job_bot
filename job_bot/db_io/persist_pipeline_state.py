@@ -98,9 +98,32 @@ def update_and_persist_pipeline_state(
         # Ensure correct project status
         state_model.task_state = _normalize_task_state_for_stage(state_model)
 
-        # 2) Dump the ENTIRE model in JSON mode so Enums → values, HttpUrl → str
-        #    exclude_none=False ensures optional columns (e.g., decision_flag) are included
-        payload = state_model.model_dump(mode="json", exclude_none=False)
+        # todo: debug; delete later after debugging
+        for name, field in state_model.model_fields.items():
+            val = getattr(state_model, name, None)
+            # Avoid calling model_dump to not trigger the error
+            try:
+                t = type(val).__name__
+            except Exception:
+                t = "<unrepr>"
+            logger.debug("state_model.%s -> %r (%s)", name, val, t)
+            # 2) Dump the ENTIRE model in JSON mode so Enums → values, HttpUrl → str
+            #    exclude_none=False ensures optional columns (e.g., decision_flag) are included
+
+        for name, field in state_model.model_fields.items():  # Pydantic v2
+            value = getattr(state_model, name)
+            logger.debug(
+                "state_model.%s -> %r (%s)",
+                name,
+                value,
+                type(value).__name__,
+            )
+            # todo: delete later
+
+        # payload = state_model.model_dump(mode="json", exclude_none=False)
+        payload = state_model.model_dump(
+            exclude_none=False
+        )  # not using mode=json b/c it was causing timestamp related errors
 
         # 3) (belt-and-suspenders) Ensure url is a plain string
         if "url" in payload:

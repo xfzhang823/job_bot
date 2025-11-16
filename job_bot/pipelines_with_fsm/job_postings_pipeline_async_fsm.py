@@ -468,7 +468,7 @@ async def run_job_postings_pipeline_async_fsm(
     """
     # 1) Determine which statuses to include
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )

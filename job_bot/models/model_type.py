@@ -6,7 +6,7 @@ from job_bot.models.resume_job_description_io_models import (
     Responsibilities,
     JobPostingUrlsBatch,
     JobPostingsBatch,
-    ExtractedRequirementsBatch,
+    NestedRequirementsBatch,
     SimilarityMetrics,
 )
 from job_bot.models.llm_response_models import RequirementsResponse
@@ -18,6 +18,6 @@ ModelType = Union[
     NestedResponsibilities,
     JobPostingUrlsBatch,
     JobPostingsBatch,
-    ExtractedRequirementsBatch,
+    NestedRequirementsBatch,
     SimilarityMetrics,
 ]

@@ -6,15 +6,15 @@ pydantic models for validate LLM responses
 """
 
 import logging
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Union
 from pydantic import (
     BaseModel,
-    ValidationError,
-    constr,
     Field,
     HttpUrl,
     field_serializer,
     ConfigDict,
+    field_validator,
 )
 import pandas as pd
 
@@ -190,6 +190,30 @@ class JobSiteData(BaseModel):
     def serialize_url(self, v: str | HttpUrl) -> str:
         """Into str when exporting data out"""
         return str(v)
+
+    @field_validator("posted_date", mode="before")
+    @classmethod
+    def _normalize_posted_date(cls, v):
+        if v is None:
+            return None
+        # Coerce to string
+        s = str(v).strip()
+        if s == "" or s.lower() in {"null", "none", "n/a", "na"}:
+            return None
+
+        # Already a date/datetime object
+        if isinstance(v, (date, datetime)):
+            return (v.date() if isinstance(v, datetime) else v).isoformat()
+
+        # Try a few common formats; fall back to None if unparseable
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y"):
+            try:
+                return datetime.strptime(s, fmt).date().isoformat()
+            except ValueError:
+                pass
+
+        # (Optional) handle relative phrases like "30+ days ago" → None
+        return None
 
 
 class JobSiteResponse(BaseResponseModel):

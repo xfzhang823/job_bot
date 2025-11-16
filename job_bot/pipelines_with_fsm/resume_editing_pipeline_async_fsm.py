@@ -191,6 +191,7 @@ async def edit_and_persist_responsibilities_for_url(
                 for req_key, optimized_text in by_req.optimized_by_requirements.items():
                     rows.append(
                         {
+                            "url": url,  # 👈 add url here b/c the computation does not include url
                             "responsibility_key": resp_key,
                             "requirement_key": req_key,
                             "responsibility": optimized_text.optimized_text,  # real string, not a dict repr
@@ -388,7 +389,7 @@ async def run_resume_editing_pipeline_async_fsm(
     - The pipeline completes even if some URLs fail.
     """
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )

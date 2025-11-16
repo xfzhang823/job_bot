@@ -15,28 +15,42 @@ using methods from models including:
 """
 
 # Dependencies
+from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Tuple
+import threading
 import numpy as np
 import torch
 import torch.nn.functional as F
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
 from bert_score import score
-from transformers import (
-    BertTokenizer,
-    BertModel,
-    AutoModelForSequenceClassification,  # NLI model
-    AutoTokenizer,
-)
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics import pairwise_distances
 
 # User defined
-from utils.ml_model_loader import get_hf_model, get_spacy_model
+from job_bot.utils.ml_model_loader import get_hf_model, get_spacy_model
 
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+# Set singleton (prevent loading the class mutliple times)
+_text_sim_singleton: AsymmetricTextSimilarity | None = None
+_text_sim_lock = threading.Lock()
+
+
+def get_text_similarity() -> AsymmetricTextSimilarity:
+    """
+    Thread-safe singleton accessor for AsymmetricTextSimilarity.
+
+    Ensures we only:
+      - load HF/spaCy models once
+      - move them to device once
+    """
+    global _text_sim_singleton
+    if _text_sim_singleton is None:
+        with _text_sim_lock:
+            if _text_sim_singleton is None:
+                _text_sim_singleton = AsymmetricTextSimilarity()
+    return _text_sim_singleton
 
 
 def convert_dict_to_array(similarity_dict: Dict[str, float]) -> List[float]:

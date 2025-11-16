@@ -48,10 +48,10 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 from time import perf_counter
+from time import perf_counter
 from collections.abc import Hashable
 import numpy as np
 from pydantic import TypeAdapter
-from time import perf_counter
 import pandas as pd
 
 # --- Project imports ---
@@ -271,7 +271,7 @@ async def process_similarity_batch_async_fsm(
     semaphore = asyncio.Semaphore(no_of_concurrent_workers)
     fsm_manager = PipelineFSMManager()
 
-    async def run_one(url: str, iteration: int) -> None:
+    async def run_one(url: str, iteration: int, semaphore: asyncio.Semaphore) -> None:
         # Optional: pre-flight existence check
         if load_pipeline_state(url) is None:
             logger.warning("⚠️ No pipeline_state row for %s", url)
@@ -281,61 +281,67 @@ async def process_similarity_batch_async_fsm(
             logger.info("⏭️ Skipping %s@%s — already claimed.", url, iteration)
             return
 
-        try:
-            ok = await evaluate_similarity_for_url_async(
-                url,
-                iteration=iteration,
-                semaphore=semaphore,
-                metrics_stage=metrics_stage,
-            )
-
-            finalized = finalize_one_row_in_pipeline_control(
-                url=url,
-                iteration=iteration,
-                worker_id=worker_id,
-                ok=ok,
-                notes="Similarity saved to DB" if ok else "Similarity compute failed",
-            )
-            if not finalized:
-                logger.warning(
-                    "[finalize] Lost lease for %s@%s; not stepping.", url, iteration
-                )
-                return
-
-            if ok:
-                try:
-                    expected_source_stage = metrics_stage
-                    fsm = fsm_manager.get_fsm(url)
-                    if fsm.get_current_stage() == expected_source_stage.value:
-                        fsm.step()
-                    else:
-                        logger.info(
-                            "Not stepping %s@%s: stage moved from %s → %s elsewhere.",
-                            url,
-                            iteration,
-                            expected_source_stage.value,
-                            fsm.state,
-                        )
-                except Exception:
-                    logger.exception("FSM step() failed for %s@%s", url, iteration)
-        except Exception as e:
-            logger.exception("❌ Failure in run_one for %s@%s: %s", url, iteration, e)
-            # Best-effort error finalize (still lease-validated)
-            finalized = finalize_one_row_in_pipeline_control(
-                url=url,
-                iteration=iteration,
-                worker_id=worker_id,
-                ok=False,
-                notes=f"similarity failed: {e}",
-            )
-            if not finalized:
-                logger.warning(
-                    "[finalize] Could not mark ERROR for %s@%s (lease mismatch).",
+        async with semaphore:
+            try:
+                ok = await evaluate_similarity_for_url_async(
                     url,
-                    iteration,
+                    iteration=iteration,
+                    metrics_stage=metrics_stage,
                 )
 
-    return [asyncio.create_task(run_one(u, it)) for (u, it) in url_iter_pairs]
+                finalized = finalize_one_row_in_pipeline_control(
+                    url=url,
+                    iteration=iteration,
+                    worker_id=worker_id,
+                    ok=ok,
+                    notes=(
+                        "Similarity saved to DB" if ok else "Similarity compute failed"
+                    ),
+                )
+                if not finalized:
+                    logger.warning(
+                        "[finalize] Lost lease for %s@%s; not stepping.", url, iteration
+                    )
+                    return
+
+                if ok:
+                    try:
+                        expected_source_stage = metrics_stage
+                        fsm = fsm_manager.get_fsm(url)
+                        if fsm.get_current_stage() == expected_source_stage.value:
+                            fsm.step()
+                        else:
+                            logger.info(
+                                "Not stepping %s@%s: stage moved from %s → %s elsewhere.",
+                                url,
+                                iteration,
+                                expected_source_stage.value,
+                                fsm.state,
+                            )
+                    except Exception:
+                        logger.exception("FSM step() failed for %s@%s", url, iteration)
+            except Exception as e:
+                logger.exception(
+                    "❌ Failure in run_one for %s@%s: %s", url, iteration, e
+                )
+                # Best-effort error finalize (still lease-validated)
+                finalized = finalize_one_row_in_pipeline_control(
+                    url=url,
+                    iteration=iteration,
+                    worker_id=worker_id,
+                    ok=False,
+                    notes=f"similarity failed: {e}",
+                )
+                if not finalized:
+                    logger.warning(
+                        "[finalize] Could not mark ERROR for %s@%s (lease mismatch).",
+                        url,
+                        iteration,
+                    )
+
+    return [
+        asyncio.create_task(run_one(u, it, semaphore)) for (u, it) in url_iter_pairs
+    ]
 
 
 # =============================================================================
@@ -359,11 +365,14 @@ async def run_similarity_metrics_eval_pipeline_async_fsm(
        • Enforces human gate (`task_state='READY'`) and lease rules (not claimed or lease expired)
        • Returns a list of (url, iteration) pairs
     2) Optional filter: if `filter_keys` provided, restrict worklist to those URLs.
-    3) Worker identity: generate a `worker_id` (stable per run) via `generate_worker_id("sim_metrics_eval")`.
+    3) Worker identity: generate a `worker_id` (stable per run) via
+        `generate_worker_id("sim_metrics_eval")`.
     4) Process batch (bounded concurrency):
        For each (url, iteration) in the worklist:
-         a) `try_claim_one(url, iteration, worker_id)` — acquire a lease or skip if already claimed
-         b) `evaluate_similarity_for_url_async(...)` — pure compute & insert (no lease/FSM mutation):
+         a) `try_claim_one(url, iteration, worker_id)`
+             — acquire a lease or skip if already claimed
+         b) `evaluate_similarity_for_url_async(...)` — pure compute & insert
+            (no lease/FSM mutation):
               - Load inputs: flattened responsibilities + flattened requirements
               - Build pairs: full m×n cartesian product (per URL)
               - Score: concurrent CPU-bound similarity metrics (thread offloaded)
@@ -371,7 +380,8 @@ async def run_similarity_metrics_eval_pipeline_async_fsm(
               - Insert rows into `similarity_metrics` (via `insert_df_with_config`)
          c) Finalize:
               `finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)`
-              - Atomically sets final status (COMPLETED/ERROR) and clears lease **iff** `worker_id` still owns it
+              - Atomically sets final status (COMPLETED/ERROR) and clears lease
+                **iff** `worker_id` still owns it
               - Returns True/False (finalized or not)
          d) Step on success:
               If `ok` and `finalized` → `fsm.step()` to advance the control-plane stage
@@ -393,11 +403,13 @@ async def run_similarity_metrics_eval_pipeline_async_fsm(
     Notes
     -----
     • This entrypoint does not mutate leases directly; claim/finalize/step is handled per item.
-    • The EVAL path stamps Version.ORIGINAL and uses `resp_llm_provider="N/A"`, `resp_model_id="N/A"`.
-    • Idempotent per URL/iteration: repeated runs safely dedupe at insert according to your table config.
+    • The EVAL path stamps Version.ORIGINAL and uses `resp_llm_provider="N/A"`,
+        `resp_model_id="N/A"`.
+    • Idempotent per URL/iteration: repeated runs safely dedupe at insert according to
+        the table config.
     """
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )
@@ -499,7 +511,7 @@ async def run_similarity_metrics_reval_pipeline_async_fsm(
     • Keep concurrency modest if edited sets are large to avoid long leases.
     """
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )
@@ -581,20 +593,28 @@ def build_pairs_df(
         if missing:
             raise ValueError(f"EVAL: flattened_responsibilities missing {missing}")
 
+        # Normalize text column names
         resps = resps.rename(columns={"responsibility": "optimized_text"})
         reqs = reqs.rename(columns={"requirement": "requirement_text"})
 
+        # Work per URL to avoid huge cross-joins and keep url single-valued
         urls = sorted(set(resps["url"]).intersection(set(reqs["url"])))
-        chunks = []
+        chunks: list[pd.DataFrame] = []
+
         for u in urls:
+            # Left side keeps 'url'
             r_u = resps.loc[resps["url"] == u].assign(_k=1)
-            q_u = reqs.loc[reqs["url"] == u].assign(_k=1)
+
+            # Right side drops 'url' so merge doesn't create url_x/url_y
+            q_u = reqs.loc[reqs["url"] == u].drop(columns=["url"]).assign(_k=1)
+
             chunk = (
                 r_u.merge(q_u, on="_k", how="inner")
                 .drop(columns="_k")
                 .reset_index(drop=True)
             )
-            chunks.append(chunk)
+            if not chunk.empty:
+                chunks.append(chunk)
 
         pairs = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 

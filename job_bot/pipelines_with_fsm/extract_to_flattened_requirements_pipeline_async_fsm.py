@@ -44,8 +44,9 @@ from job_bot.fsm.pipeline_fsm_manager import PipelineFSMManager
 
 from job_bot.models.llm_response_models import JobSiteResponse  # data: JobSiteData
 from job_bot.models.resume_job_description_io_models import (
-    ExtractedRequirementsBatch,
+    # NestedRequirementsBatch,
     RequirementsResponse,
+    Requirements,
 )
 from job_bot.preprocessing.extract_requirements_with_llms_async import (
     extract_job_requirements_with_openai_async,
@@ -125,16 +126,31 @@ async def extract_and_persist_requirements_for_url(
 
         # LLM (bounded)
         async with semaphore:
-            requirements_model = await _extract_job_requirements(
+            requirements_response_model = await _extract_job_requirements(
                 job_description_json=job_description_json,
                 llm_provider=llm_provider,
                 model_id=model_id,
             )
 
+        # Step 1: normalized nested dict
+        nested_requirements = requirements_response_model.ensure_requirements_dict()
+        # nested: Dict[str, List[str]]
+
+        # flatten -> Requirements
+        flat_req: dict[str, str] = {}
+        for cat_idx, (category, items) in enumerate(
+            sorted(nested_requirements.items())
+        ):
+            cat_norm = str(category).strip().lower().replace(" ", "_")
+            for item_idx, text in enumerate(items, start=1):
+                key = f"{cat_idx}.{cat_norm}.{item_idx}"
+                flat_req[key] = text.strip()
+
+        requirements_model = Requirements(url=url, requirements=flat_req)
+
         # Flatten → insert (blocking DB write → thread)
-        batch = ExtractedRequirementsBatch({url: requirements_model})
         df = flatten_model_to_df(
-            model=batch,
+            model=requirements_model,
             table_name=TableName.FLATTENED_REQUIREMENTS,
             llm_provider=llm_provider,
             model_id=model_id,
@@ -154,7 +170,7 @@ async def extract_and_persist_requirements_for_url(
         )
 
         logger.info(f"✅ Completed extraction for {url}")
-        return requirements_model
+        return requirements_response_model
 
     except Exception:
         logger.exception(f"❌ extract_and_persist failed for {url}")
@@ -243,7 +259,7 @@ async def run_extract_to_flattened_requirements_pipeline_async_fsm(
     stage_enum = PipelineStage.FLATTENED_REQUIREMENTS
 
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )

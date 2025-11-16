@@ -88,9 +88,7 @@ logger = logging.getLogger(__name__)
 matplotlib.use("Agg")  # Prevent interactive mode
 
 
-async def run_all_fsm(
-    *, append_only_urls: bool = True, update_responsibilities: bool = False
-) -> None:
+async def run_all_fsm(*, append_only_urls: bool = True) -> None:
     """
     Run the full FSM-driven DuckDB pipeline in sequence.
 
@@ -148,11 +146,12 @@ async def run_all_fsm(
     await run_extract_to_flattened_requirements_pipeline_async_fsm(retry_errors=True)
 
     # run on FLATTENED_RESPONSIBILITIES (conditional)
-    if update_responsibilities:
-        run_flattened_responsibilities_pipeline_fsm(retry_errors=True)
+    run_flattened_responsibilities_pipeline_fsm(retry_errors=True)
 
     # run on SIM METRICS - EVAL
-    await run_similarity_metrics_eval_pipeline_async_fsm(retry_errors=True)
+    await run_similarity_metrics_eval_pipeline_async_fsm(
+        max_concurrent_tasks=3, retry_errors=True
+    )
 
     # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
     await run_resume_editing_pipeline_async_fsm(retry_errors=True)

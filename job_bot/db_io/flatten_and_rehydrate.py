@@ -6,7 +6,7 @@ relational tables (pandas → DuckDB) used in a resume–job alignment pipeline.
 
 Supported data:
 - Job posting URLs and postings
-- Extracted & flattened requirements
+- Nested & flattened requirements
 - Flattened, pruned, and edited responsibilities (incl. nested alignments)
 
 Highlights:
@@ -48,7 +48,7 @@ from job_bot.models.resume_job_description_io_models import (
     JobPostingUrlMetadata,
     JobPostingUrlsBatch,
     JobPostingsBatch,
-    ExtractedRequirementsBatch,
+    NestedRequirementsBatch,
 )
 from job_bot.models.llm_response_models import (
     JobSiteResponse,
@@ -58,7 +58,7 @@ from job_bot.models.llm_response_models import (
 )
 from job_bot.models.model_type import ModelType
 
-# from job_bot.models.resume_job_description_io_models import ExtractedRequirementsBatch
+# from job_bot.models.resume_job_description_io_models import NestedRequirementsBatch
 # from job_bot.models.llm_response_models import
 # Set up logger for this module
 logger = logging.getLogger(__name__)
@@ -90,11 +90,15 @@ def get_flatten_dispatch() -> FlattenDispatch:
             flatten_job_postings_to_table,
         ),
         TableName.EXTRACTED_REQUIREMENTS: (
-            (ExtractedRequirementsBatch, RequirementsResponse),
-            flatten_extracted_requirements_to_table,
+            (NestedRequirementsBatch, RequirementsResponse),
+            flatten_requirements_to_table,
         ),
+        # TableName.FLATTENED_REQUIREMENTS: (
+        #     (NestedRequirementsBatch, RequirementsResponse),
+        #     flatten_nested_requirements_to_table,
+        # ),
         TableName.FLATTENED_REQUIREMENTS: (
-            Requirements,
+            (Requirements),
             flatten_requirements_to_table,
         ),
         TableName.FLATTENED_RESPONSIBILITIES: (
@@ -503,87 +507,74 @@ def rehydrate_requirements_from_table(df: pd.DataFrame) -> Requirements:
         raise
 
 
-def flatten_extracted_requirements_to_table(
+def flatten_nested_requirements_to_table(
     model: Union[
-        "ExtractedRequirementsBatch",
-        "RequirementsResponse",
+        "NestedRequirementsBatch",
         Dict[str, "RequirementsResponse"],
     ],
 ) -> pd.DataFrame:
     """
-    Flatten extracted (tiered) requirements into a long table.
+    Flatten nested (tiered) requirements into a long table.
 
-    Input
-    -----
-    - RootModel[dict[url, RequirementsResponse]] OR
-    - dict[url, RequirementsResponse]           OR
-    - RequirementsResponse
+    Accepts:
+      - RootModel[dict[url, RequirementsResponse]]
+      - dict[url, RequirementsResponse]
+      - (Not recommended) single item: wrap it yourself as {url: resp}
 
-    Output columns
-    --------------
-    url, status, message, requirement_category, requirement_category_key,
-    requirement, requirement_key
-
-    Returns
-    -------
-    pd.DataFrame
+    Output columns:
+      url, status, message, requirement_category, requirement_category_key,
+      requirement, requirement_key
     """
     rows: List[Dict[str, Any]] = []
 
-    # Normalize to dict[url -> item], inline (no helper)
-    mapping = getattr(model, "root", model)  # handle RootModel
+    # Require a mapping keyed by URL (RootModel .root or plain dict)
+    mapping = getattr(model, "root", model)
     if not isinstance(mapping, dict):
-        single = mapping
-        url = getattr(single, "url", None)
-        if url is None:
-            data = getattr(single, "data", None)
-            url = getattr(data, "url", None)
-        if not url:
-            raise ValueError(
-                f"Cannot derive URL from single item of type {type(single).__name__}"
-            )
-        mapping = {url: single}
+        raise ValueError(
+            "flatten_nested_requirements_to_table expects a mapping "
+            "{url: RequirementsResponse} or a RootModel with .root"
+        )
 
-    for url_key, validated in mapping.items():
+    for url_key, resp in mapping.items():
         try:
-            data_obj = getattr(validated, "data", None)
+            data_obj = getattr(resp, "data", None)
             if not data_obj:
-                logger.warning(f"No 'data' found for {url_key}; skipping.")
                 continue
 
-            # categories -> list[str]; allow dict or Pydantic model
+            # Pydantic model -> dict; or accept a plain dict
             reqs_dict = (
-                data_obj
-                if isinstance(data_obj, dict)
-                else data_obj.model_dump(exclude_none=True)
+                data_obj.model_dump(exclude_none=True)
+                if hasattr(data_obj, "model_dump")
+                else data_obj
             )
             if not isinstance(reqs_dict, dict):
-                logger.warning(f"'data' not dict-like for {url_key}; skipping.")
-                continue
+                raise TypeError(f"'data' is not dict-like for url='{url_key}'")
 
-            for cat_idx, (category, items) in enumerate(reqs_dict.items()):
+            # Deterministic category order
+            for cat_idx, category in enumerate(sorted(reqs_dict.keys())):
+                items = reqs_dict[category]
                 if not isinstance(items, list):
-                    logger.warning(
-                        f"Skipping non-list category '{category}' at {url_key}"
-                    )
                     continue
 
-                for item_idx, requirement in enumerate(items):
+                # Deterministic, clean items; 1-based index (or set start=0 if you prefer)
+                for item_idx, requirement in enumerate(items, start=1):
                     if not isinstance(requirement, str):
-                        logger.warning(
-                            f"Skipping non-string {category}[{item_idx}] at {url_key}"
-                        )
+                        continue
+                    req = requirement.strip()
+                    if not req:
                         continue
 
-                    # Need to generate unique keys for db tbl (PK rule)
-                    category_ = str(category).strip().lower().replace(" ", "_")
-                    composite_key = f"{cat_idx}.{category_}.{item_idx}"  # unique key
+                    cat_norm = str(category).strip().lower().replace(" ", "_")
+                    composite_key = f"{cat_idx}.{cat_norm}.{item_idx}"
+
                     rows.append(
                         {
-                            "url": url_key,
+                            "url": str(url_key),
+                            "status": getattr(resp, "status", "success"),
+                            "message": getattr(resp, "message", None),
                             "requirement_category": category,
                             "requirement_category_key": cat_idx,
-                            "requirement": requirement,
+                            "requirement": req,
                             "requirement_key": composite_key,
                         }
                     )
@@ -593,15 +584,15 @@ def flatten_extracted_requirements_to_table(
         except Exception as e:
             logger.error(f"Unexpected error flattening {url_key}: {e}", exc_info=True)
 
-    logger.info(f"✅ Flattened {len(rows)} extracted requirements.")
+    logger.info(f"✅ Flattened {len(rows)} nested requirements.")
     return pd.DataFrame(rows)
 
 
-def rehydrate_extracted_requirements_from_table(
+def rehydrate_nested_requirements_from_table(
     df: pd.DataFrame,
-) -> ExtractedRequirementsBatch:
+) -> NestedRequirementsBatch:
     """
-    Rehydrate a long extracted-requirements table into `ExtractedRequirementsBatch`.
+    Rehydrate a long nested-requirements table into `NestedRequirementsBatch`.
 
     Grouping & Ordering
     -------------------
@@ -618,7 +609,7 @@ def rehydrate_extracted_requirements_from_table(
 
     Returns
     -------
-    ExtractedRequirementsBatch
+    NestedRequirementsBatch
         A validated batch model containing URL → RequirementsResponse.
     """
     result = {}
@@ -666,13 +657,13 @@ def rehydrate_extracted_requirements_from_table(
             logger.warning(f"Validation failed during rehydration for {url}: {e}")
         except Exception as e:
             logger.error(
-                f"Error rehydrating extracted requirements for {url}: {e}",
+                f"Error rehydrating nested requirements for {url}: {e}",
                 exc_info=True,
             )
 
-    logger.info(f"✅ Rehydrated {len(result)} extracted requirements.")
+    logger.info(f"✅ Rehydrated {len(result)} nested requirements.")
 
-    return ExtractedRequirementsBatch(
+    return NestedRequirementsBatch(
         cast(Dict[Union[str, HttpUrl], RequirementsResponse], result)
     )
 

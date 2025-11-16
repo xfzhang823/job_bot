@@ -11,7 +11,7 @@ from job_bot.models.resume_job_description_io_models import (
     JobPostingsBatch,
     JobPostingUrlMetadata,
     JobPostingUrlsBatch,
-    ExtractedRequirementsBatch,
+    NestedRequirementsBatch,
     Requirements,
     Responsibilities,
     NestedResponsibilities,
@@ -147,7 +147,7 @@ def load_requirements_model(file_path: Union[str, Path]) -> Optional[Requirement
 
 def load_extracted_requirements_model(
     file_path: Union[str, Path],
-) -> Optional[ExtractedRequirementsBatch]:
+) -> Optional[NestedRequirementsBatch]:
     """
     Load a validated ExtractedRequirementsFile model from a JSON file.
 
@@ -169,7 +169,7 @@ def load_extracted_requirements_model(
             for k, v in raw.items()
         }
 
-        return ExtractedRequirementsBatch(validated)
+        return NestedRequirementsBatch(validated)
 
     except ValidationError as e:
         logger.error(

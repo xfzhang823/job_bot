@@ -26,7 +26,7 @@ from job_bot.preprocessing.preprocessing_utils import find_new_urls
 from job_bot.models.llm_response_models import JobSiteResponse
 from job_bot.models.resume_job_description_io_models import (
     JobPostingsBatch,
-    ExtractedRequirementsBatch,
+    NestedRequirementsBatch,
 )
 
 from job_bot.config.project_config import (
@@ -175,7 +175,7 @@ async def process_single_url_async(
                 existing_job_descriptions_dict
             )
 
-            job_reqs_batch = ExtractedRequirementsBatch.model_validate(
+            job_reqs_batch = NestedRequirementsBatch.model_validate(
                 existing_job_requirements_dict
             )  # type: ignore[attr-defined]
 

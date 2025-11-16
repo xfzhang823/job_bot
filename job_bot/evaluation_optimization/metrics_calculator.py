@@ -1,16 +1,14 @@
 """metrics_evaluator.py"""
 
 # Standard & 3rd party
-import pandas as pd
 import logging
 from typing import Dict
+import pandas as pd
 
 # User defined
 from job_bot.evaluation_optimization.text_similarity_finder import (
-    compute_bertscore_precision,
-    AsymmetricTextSimilarity,
+    get_text_similarity,
 )
-from job_bot.llm_providers.llm_api_utils import get_openai_api_key
 from job_bot.utils.field_mapping_utils import (
     rename_df_columns,
     COLUMN_NAMES_TO_VARS_MAPPING,
@@ -227,8 +225,8 @@ def calculate_text_similarity_metrics(
     Returns:
         dict: A dictionary containing all calculated similarity scores.
     """
-    # Instantiate the similarity calculator
-    text_similarity = AsymmetricTextSimilarity()
+    # Use the shared singleton instance instead of constructing a new one per call
+    text_similarity = get_text_similarity()
 
     # Calculate the similarity metrics
     logger.debug(
@@ -261,7 +259,7 @@ def calculate_one_to_many_similarity_metrices(resps_flat, job_reqs_str):
     Returns:
         pd.DataFrame: DataFrame containing similarity metrics.
     """
-    text_similarity = AsymmetricTextSimilarity()
+    text_similarity = get_text_similarity()
     simiarity_results = []
 
     # Calcualter simiarity for each responsibility against the job requirments
@@ -302,7 +300,7 @@ def calculate_many_to_many_similarity_metrices(
     Returns:
         pd.DataFrame: DataFrame containing similarity metrics.
     """
-    text_similarity = AsymmetricTextSimilarity()
+    text_similarity = get_text_similarity()
 
     similarity_results = []
 
@@ -379,7 +377,7 @@ class SimilarityScoreCalculator:
         """
         Initialize the comparator class. The similarity engine can be initialized here.
         """
-        self.text_similarity = AsymmetricTextSimilarity()
+        self.text_similarity = get_text_similarity()
 
     def calculate_similarity(self, responsibility, requirement):
         """

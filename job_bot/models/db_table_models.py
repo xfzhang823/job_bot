@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional, Union, Any
+import math
 import pandas as pd
 from pydantic import (
     BaseModel,
@@ -25,7 +26,7 @@ from pydantic import (
     field_validator,
     ValidationInfo,
 )
-import math
+
 
 # User defined
 from job_bot.db_io.pipeline_enums import (
@@ -109,32 +110,31 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     so normalization stays centralized here.
     """
 
-    # --- Keys & FSM state ---
-    url: Union[HttpUrl, str]
+    # If you want enums to serialize as their .value automatically:
+    # model_config = ConfigDict(use_enum_values=True)
+
+    url: Union[HttpUrl, str]  # or just str, if you don't want strict URL checks
     iteration: int = 0
     stage: PipelineStage
     status: PipelineStatus = Field(default=PipelineStatus.NEW)
 
-    # --- Human gate (eligibility for automation) ---
     task_state: PipelineTaskState = Field(default=PipelineTaskState.READY)
 
-    # --- Machine lease tracking (concurrency control) ---
     is_claimed: bool = False
     worker_id: Optional[str] = None
     lease_until: Optional[datetime] = None
 
-    # --- Misc flags / metadata ---
-    # todo: to be deprecated; delete later
-    decision_flag: Optional[int] = None  # 1=go, 0=no-go, None=undecided
-    transition_flag: int = 0  # 0=pending, 1=applied
+    decision_flag: Optional[int] = None  # legacy
+    transition_flag: int = 0  # 0|1
     notes: Optional[str] = None
     source_file: Optional[str] = None
-    version: Optional["Version"] = None  # type: ignore[name-defined]
+    version: Optional["Version"] = None  # keep Enum in-code
 
-    # ======================
-    # Validators / Coercers
-    # ======================
+    @property
+    def version_str(self) -> Optional[str]:
+        return self.version.value if self.version else None
 
+    # ---------- SINGLE iteration validator (keep only this) ----------
     @field_validator("iteration", mode="before")
     @classmethod
     def _coerce_iteration(cls, v: Any) -> int:
@@ -143,7 +143,8 @@ class PipelineState(AppBaseModel, TimestampedMixin):
         if isinstance(v, int):
             return v
         try:
-            return int(float(v))  # handles pandas/numpy floats & numeric strings
+            # handles "0", "0.0", numpy/pandas floats
+            return int(float(v))
         except Exception:
             return 0
 
@@ -154,7 +155,7 @@ class PipelineState(AppBaseModel, TimestampedMixin):
             return v
         if v is None:
             raise ValueError("stage is required")
-        return PipelineStage(str(v).strip().upper())  # enforce UPPER
+        return PipelineStage(str(v).strip().upper())
 
     @field_validator("status", mode="before")
     @classmethod
@@ -163,14 +164,11 @@ class PipelineState(AppBaseModel, TimestampedMixin):
             return v
         if v is None:
             return PipelineStatus.NEW
-        return PipelineStatus(str(v).strip().upper())  # enforce UPPER
+        return PipelineStatus(str(v).strip().upper())
 
     @field_validator("task_state", mode="before")
     @classmethod
     def _coerce_task_state(cls, v: Any, info: ValidationInfo) -> PipelineTaskState:
-        """
-        Map legacy/custom values to the current gate set and enforce UPPER.
-        """
         if v is None or str(v).strip() == "":
             status = info.data.get("status")
             if status in (
@@ -209,21 +207,6 @@ class PipelineState(AppBaseModel, TimestampedMixin):
         except Exception:
             return False
 
-    # todo: commented out; deprecate decision_flag; delete later
-    # @field_validator("decision_flag", "transition_flag", mode="before")
-    # @classmethod
-    # def _coerce_flags(cls, v: Any, info: ValidationInfo) -> Optional[int]:
-    #     """
-    #     Coerce flags to {0,1}; allow decision_flag=None, force transition_flag default to 0.
-    #     """
-    #     field = getattr(info, "field_name", "")
-    #     if v is None or v == "":
-    #         return None if field == "decision_flag" else 0
-    #     try:
-    #         return 1 if int(v) != 0 else 0
-    #     except Exception:
-    #         return 1 if str(v).strip().lower() in {"true", "t", "yes", "y"} else 0
-
     @field_validator("lease_until", mode="before")
     @classmethod
     def _coerce_lease_until(cls, v: Any) -> Optional[datetime]:
@@ -251,27 +234,68 @@ class PipelineState(AppBaseModel, TimestampedMixin):
     def _coerce_url(cls, v: Any) -> Union[HttpUrl, str]:
         if v is None:
             raise ValueError("url is required")
+        # If you want strict HttpUrl validation, return v and let pydantic check.
+        # If you want to allow non-standard URLs, keep returning str:
         return str(v).strip()
 
-    @field_validator("iteration", "transition_flag", mode="before")
+    # ---------- FLAGS: clamp to {0,1} and never return None ----------
+    @field_validator("transition_flag", mode="before")
     @classmethod
-    def coerce_ints(cls, v):
-        """
-        Force float to int for int fields.
-        Treat pd.NA/NaN as None for Optional[int]
-        """
-        if v is None:
-            return v
-        # Handle pandas/NumPy float NaNs
+    def _coerce_transition_flag(cls, v: Any) -> int:
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            return 0
         try:
-            if isinstance(v, float) and math.isnan(v):
-                return None
+            return 1 if int(float(v)) != 0 else 0
         except Exception:
-            pass
-        # Coerce float-like to int
-        if isinstance(v, (float, str)) and str(v).strip() != "":
-            return int(float(v))
-        return v
+            s = str(v).strip().lower()
+            return 1 if s in {"true", "t", "yes", "y"} else 0
+
+    # ---------- VERSION: accept Enum, int/float, or strings ----------
+    @field_validator("version", mode="before")
+    @classmethod
+    def _coerce_version(cls, v: Any):
+        if v is None:
+            return None
+        # Already an Enum instance
+        from job_bot.db_io.pipeline_enums import Version  # adjust import path if needed
+
+        if isinstance(v, Version):
+            return v
+        # float/nan -> None or int
+        if isinstance(v, float):
+            if math.isnan(v):
+                return None
+            v = int(v)
+        # ints -> try IntEnum mapping
+        if isinstance(v, int):
+            try:
+                return Version(v)
+            except Exception:
+                # If your Version is StrEnum ('v1'), map int -> f"v{int}"
+                try:
+                    return Version(f"v{v}")
+                except Exception:
+                    return None
+        # strings -> try by name/value
+        if isinstance(v, str):
+            s = v.strip()
+            if s == "" or s.lower() in {"null", "none", "n/a"}:
+                return None
+            # allow "1" -> Version(1), or "v1" -> Version("v1"), or "V1" name
+            if s.lstrip("-").isdigit():
+                try:
+                    return Version(int(s))
+                except Exception:
+                    pass
+            try:
+                return Version(s)  # value
+            except Exception:
+                try:
+                    return Version[s.upper()]  # name
+                except Exception:
+                    return None
+        # Anything else -> give up
+        return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────

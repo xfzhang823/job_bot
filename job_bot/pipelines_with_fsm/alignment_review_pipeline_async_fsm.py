@@ -638,7 +638,7 @@ async def run_alignment_review_pipeline_async_fsm(
     worker_id = generate_worker_id("align")
 
     statuses = (
-        (PipelineStatus.NEW, PipelineStatus.ERROR)
+        (PipelineStatus.NEW, PipelineStatus.ERROR, PipelineStatus.IN_PROGRESS)
         if retry_errors
         else (PipelineStatus.NEW,)
     )

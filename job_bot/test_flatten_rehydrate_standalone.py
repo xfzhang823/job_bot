@@ -12,8 +12,8 @@ from pathlib import Path
 from db_io.flatten_and_rehydrate import (
     flatten_job_postings_to_table,
     rehydrate_job_postings_from_table,
-    flatten_extracted_requirements_to_table,
-    rehydrate_extracted_requirements_from_table,
+    flatten_nested_requirements_to_table,
+    rehydrate_nested_requirements_from_table,
 )
 
 # === INPUT FILES (adjust if needed) ===
@@ -55,11 +55,11 @@ def test_job_postings():
 def test_extracted_requirements():
     print("\n🧪 Testing extracted requirements...")
     original = load_json(requirements_path)
-    df = flatten_extracted_requirements_to_table(original)
+    df = flatten_nested_requirements_to_table(original)
     print(f"✅ Flattened requirements: {len(df)} rows")
     df.to_csv("flattened_extracted_requirements.csv", index=False)
 
-    roundtrip = rehydrate_extracted_requirements_from_table(df)
+    roundtrip = rehydrate_nested_requirements_from_table(df)
     print(f"🔁 Rehydrated requirements: {len(roundtrip)} entries")
 
     missing_keys = set(original.keys()) - set(roundtrip.keys())
