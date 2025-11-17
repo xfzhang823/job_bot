@@ -288,6 +288,10 @@ class PipelineFSM:
                 ):
                     # mark human gate as PAUSED to indicate no further machine actions
                     self.state_model.task_state = PipelineTaskState.PAUSED
+
+                    #! 🔓 release any stale lease as we are final
+                    self._release_lease()
+
                     self.state_model.updated_at = datetime.now()
                     update_and_persist_pipeline_state(self.state_model, table_name)
                 self._log_info("✅ Already at final stage: %s", self._state.name)
@@ -336,6 +340,9 @@ class PipelineFSM:
                 if hasattr(self.state_model, "transition_flag"):
                     self.state_model.transition_flag = 0
 
+            #! 🔓 always release lease when we hop to a new stage
+            self._release_lease()
+
             # --- 5) Persist once, by PK only (NOT filtering by old stage!) ---
             self.state_model.updated_at = datetime.now()
 
@@ -377,3 +384,13 @@ class PipelineFSM:
 
     def _log_error(self, msg, *args, **kwargs):
         logger.error(msg, *args, **kwargs)
+
+    def _release_lease(self) -> None:
+        """Clear worker lease fields so the row becomes claimable again."""
+        # Only set these if the model actually has them (future-proofing)
+        if hasattr(self.state_model, "is_claimed"):
+            self.state_model.is_claimed = False
+        if hasattr(self.state_model, "worker_id"):
+            self.state_model.worker_id = None
+        if hasattr(self.state_model, "lease_until"):
+            self.state_model.lease_until = None

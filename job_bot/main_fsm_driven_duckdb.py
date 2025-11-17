@@ -38,7 +38,6 @@ from job_bot.pipelines.hf_cache_refresh_and_lock_pipeline import (
 run_hf_cache_refresh_and_lock_pipeline(refresh_cache=False)
 
 # from standard/third-party
-import os
 import asyncio
 import logging
 import matplotlib

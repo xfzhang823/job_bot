@@ -1,6 +1,6 @@
 # job_bot/tools/underlines_to_selection.py
 """
-underlines_to_selection (openpyxl-only)
+pipelines_with_fsm/underlines_to_selection_pipeline_fsm (openpyxl-only)
 =======================================
 
 Extract the *human-selected* (underlined) requirement match from an
@@ -23,14 +23,22 @@ Configured directories come from `pipeline_config.py`:
 
 Usage
 -----
-Run from repo root:
-
+CLI:
     python -m job_bot.tools.underlines_to_selection \
       "mediabrands_director-intelligence-solutions_4800265007__alignment_review.xlsx" \
       --sheet-name review_grid \
       --log-level INFO
 
-If the given path doesn’t exist as provided, the tool also checks inside EXCEL_DIR.
+Pipeline (from main.py or another orchestrator):
+    from job_bot.tools.underlines_to_selection import run_underlines_selection_pipeline
+
+    run_underlines_selection_pipeline(
+        xlsx_paths=[
+            "mediabrands_director-intelligence-solutions_4800265007__alignment_review.xlsx"
+        ],
+        sheet_name="review_grid",
+        log_level="INFO",
+    )
 
 Outputs
 -------
@@ -56,7 +64,16 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import (
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -65,15 +82,16 @@ from openpyxl import load_workbook
 from job_bot.config.project_config import (
     EXCEL_DIR,
     SEL_DIR,
-    TEMP_DIR,
-)  # noqa: F401  (TEMP_DIR reserved)
+    TEMP_DIR,  # noqa: F401  (TEMP_DIR reserved)
+)
 
 # -----------------------------------------------------------------------------
 # Logging
 # -----------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
-# openpyxl underline values can be: True, "single", "double", "singleAccounting", "doubleAccounting", or None
+# openpyxl underline values can be: True, "single", "double",
+# "singleAccounting", "doubleAccounting", or None
 VALID_UNDERLINES = {True, "single", "double", "singleAccounting", "doubleAccounting"}
 
 
@@ -216,20 +234,6 @@ def extract_underlined_from_xlsx(
         Path to the CSV file written.
     json_path : Path
         Path to the JSON file written (mapping responsibility_key → selected_text).
-
-    Warnings
-    --------
-    - Rows with multiple underlines are logged individually.
-    - Rows with no underlines are summarized at the end (with sample keys).
-
-    Example
-    -------
-    >>> df, csv_path, json_path = extract_underlined_from_xlsx(
-    ...     "mediabrands_director-intelligence-solutions_4800265007__alignment_review.xlsx"
-    ... )
-    >>> df.head()
-      responsibility_key                                       selected_text                                     column_header
-    0         10003.2.1  Ability to leverage advanced analytics, data science...  Ability to leverage advanced analytics, data science...
     """
     xlsx = _resolve_input_path(xlsx_path)
     slug = _slug_from_xlsx(xlsx)
@@ -362,6 +366,92 @@ def extract_underlined_from_xlsx(
 
 
 # -----------------------------------------------------------------------------
+# NEW: “Pipeline” wrapper for use from main.py
+# -----------------------------------------------------------------------------
+def run_underlines_selection_pipeline(
+    xlsx_paths: Optional[Sequence[str | Path]] = None,
+    *,
+    glob_pattern: str = "*__alignment_review*.xlsx",
+    excel_dir: str | Path = EXCEL_DIR,
+    sheet_name: str = "review_grid",
+    out_dir: str | Path | None = None,
+    log_level: str = "INFO",
+    stop_on_error: bool = False,
+) -> dict[Path, tuple[pd.DataFrame, Path, Path]]:
+    """
+    Simple pipeline wrapper around `extract_underlined_from_xlsx`.
+
+    This is intended to be called from a higher-level orchestrator (e.g. main.py)
+    instead of using the CLI directly.
+
+    You can either:
+      • pass `xlsx_paths` explicitly, OR
+      • let the function glob inside `excel_dir` using `glob_pattern`.
+
+    Parameters
+    ----------
+    xlsx_paths : Sequence[str | Path] | None
+        Explicit list of workbooks to process. If None, a list is built by
+        globbing `glob_pattern` under `excel_dir`.
+    glob_pattern : str, default '*__alignment_review*.xlsx'
+        File pattern used when `xlsx_paths` is None.
+    excel_dir : str | Path, default EXCEL_DIR
+        Directory to search for workbooks when `xlsx_paths` is None.
+    sheet_name : str, default 'review_grid'
+        Worksheet name hint (auto-detection still applies).
+    out_dir : str | Path | None
+        Optional single output root. If provided, all selections will be written
+        under this directory (subfolders are still derived from the XLSX slug).
+        If None, defaults to SEL_DIR/<slug>/ per workbook.
+    log_level : str, default 'INFO'
+        Logging level for the run ('DEBUG', 'INFO', 'WARNING', 'ERROR').
+    stop_on_error : bool, default False
+        If True, the first error aborts the pipeline (exception raised).
+        If False, errors are logged and processing continues for remaining files.
+
+    Returns
+    -------
+    results : dict[Path, tuple[pd.DataFrame, Path, Path]]
+        Mapping of resolved XLSX path → (df_out, csv_path, json_path).
+    """
+    _configure_root_logger(log_level)
+
+    # Build worklist
+    if xlsx_paths is None:
+        base = Path(excel_dir)
+        worklist = sorted(base.glob(glob_pattern))
+        logger.info(
+            "Discovered %d workbook(s) under %s using pattern '%s'",
+            len(worklist),
+            base,
+            glob_pattern,
+        )
+    else:
+        worklist = [Path(p) for p in xlsx_paths]
+        logger.info("Using explicit workbook list (%d item(s)).", len(worklist))
+
+    results: dict[Path, tuple[pd.DataFrame, Path, Path]] = {}
+
+    for p in worklist:
+        try:
+            df, csv_p, json_p = extract_underlined_from_xlsx(
+                p,
+                sheet_name=sheet_name,
+                out_dir=out_dir,
+            )
+            results[p] = (df, csv_p, json_p)
+        except Exception:
+            logger.exception("❌ Underline extraction failed for %s", p)
+            if stop_on_error:
+                raise
+
+    logger.info(
+        "✅ Underlines selection pipeline completed. Files processed: %d", len(results)
+    )
+    return results
+
+
+# -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -383,7 +473,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "xlsx",
-        help="Path to crosstab workbook, or filename inside EXCEL_DIR.",
+        nargs="?",
+        help=(
+            "Path to crosstab workbook, or filename inside EXCEL_DIR. "
+            "If omitted, the tool will glob inside EXCEL_DIR using glob-pattern."
+        ),
     )
     p.add_argument(
         "--sheet-name",
@@ -396,10 +490,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Optional explicit output directory. If omitted, writes to SEL_DIR/<slug>/.",
     )
     p.add_argument(
+        "--glob-pattern",
+        default="*__alignment_review*.xlsx",
+        help="When no xlsx is provided, glob for workbooks in EXCEL_DIR using this pattern.",
+    )
+    p.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging verbosity.",
+    )
+    p.add_argument(
+        "--stop-on-error",
+        action="store_true",
+        help="Abort on first error instead of continuing.",
     )
     return p
 
@@ -431,16 +535,40 @@ def main() -> int:
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    _configure_root_logger(args.log_level)
-
+    # If the user passed a single xlsx, we run the pipeline on that specific file.
+    # If not, we fall back to directory globbing.
     try:
-        df, csv_p, json_p = extract_underlined_from_xlsx(
-            args.xlsx, sheet_name=args.sheet_name, out_dir=args.out_dir
-        )
-        print(f"Wrote:\n  CSV : {csv_p}\n  JSON: {json_p}\nRows: {len(df)}")
+        if args.xlsx:
+            results = run_underlines_selection_pipeline(
+                xlsx_paths=[args.xlsx],
+                sheet_name=args.sheet_name,
+                out_dir=args.out_dir,
+                log_level=args.log_level,
+                stop_on_error=args.stop_on_error,
+            )
+        else:
+            results = run_underlines_selection_pipeline(
+                xlsx_paths=None,
+                glob_pattern=args.glob_pattern,
+                excel_dir=EXCEL_DIR,
+                sheet_name=args.sheet_name,
+                out_dir=args.out_dir,
+                log_level=args.log_level,
+                stop_on_error=args.stop_on_error,
+            )
+
+        # Human-friendly summary for CLI
+        total_rows = sum(len(df) for (df, _, _) in results.values())
+        print(f"Processed {len(results)} workbook(s); total rows: {total_rows}")
+        for xlsx_path, (df, csv_p, json_p) in results.items():
+            print(f"\n[{xlsx_path}]")
+            print(f"  rows : {len(df)}")
+            print(f"  CSV  : {csv_p}")
+            print(f"  JSON : {json_p}")
         return 0
+
     except Exception as e:
-        logger.exception("Extraction failed: %s", e)
+        logger.exception("Extraction pipeline failed: %s", e)
         return 2
 
 
