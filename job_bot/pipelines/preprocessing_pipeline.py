@@ -20,8 +20,6 @@ from utils.generic_utils import (
     save_to_json_file,
 )
 from llm_providers.llm_api_utils_async import call_openai_api_async
-
-# from utils.webpage_reader import process_webpages_to_json
 from utils.webpage_reader import process_webpages_to_json
 
 from prompts.prompt_templates import EXTRACT_JOB_REQUIREMENTS_PROMPT

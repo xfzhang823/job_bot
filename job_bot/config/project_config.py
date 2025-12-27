@@ -69,6 +69,7 @@ RESUME_JSON_FILE = (
     INPUT_DIR / "Resume_Xiaofei_Zhang_2025_template_for_LLM.json"
 )  # * Resume file in JSON format
 
+
 JOB_POSTING_URLS_FILE = (
     INPUT_DIR / "job_posting_urls.json"
 )  # * Job posting urls in JSON format
@@ -89,7 +90,7 @@ resume_json_file_temp = (
 
 # * Preprocessing Input/Output
 PREPROCESSING_INPUT_OUTPUT_DIR = INPUT_OUTPUT_DIR / "preprocessing"
-JOB_DESCRIPTIONS_JSON_FILE = PREPROCESSING_INPUT_OUTPUT_DIR / "jobpostings.json"
+JOB_POSTINGS_JSON_FILE = PREPROCESSING_INPUT_OUTPUT_DIR / "jobpostings.json"
 JOB_REQUIREMENTS_JSON_FILE = (
     PREPROCESSING_INPUT_OUTPUT_DIR / "extracted_job_requirements.json"
 )
@@ -244,7 +245,7 @@ company names and positions.",
         },
     },
     "job_descriptions_json_file": {
-        "path": JOB_DESCRIPTIONS_JSON_FILE,
+        "path": JOB_POSTINGS_JSON_FILE,
         "description": "Contains raw content of job postings scraped from URLs. \
 Each entry contains the job title, company, and a full description.",
         "format": "JSON",
@@ -285,6 +286,10 @@ DUCKDB_FILE = DB_DIR / "pipeline_data.duckdb"
 EXCEL_DIR = PIPELINE_DATA_DIR / "excel"  # alignment_review XLSX exports
 SEL_DIR = PIPELINE_DATA_DIR / "selections"  # human-underlined extracted CSV/JSON
 TEMP_DIR = PIPELINE_DATA_DIR / "temp" / "underline_extract"  # transient/debug files
+JSON_DIR = PIPELINE_DATA_DIR / "json"  # json files for project data pipeline
+
+RESUME_MI_STRATEGY_JSON_FILE = JSON_DIR / "resume_for_mi_strategy.json"
+RESUME_AI_ARCHITECT_JSON_FILE = JSON_DIR / "resume_for_ai_architect.json"
 
 # (optional) ensure these dirs exist on import if desired
 for _dir in [PIPELINE_DATA_DIR, DB_DIR, EXCEL_DIR, SEL_DIR, TEMP_DIR]:

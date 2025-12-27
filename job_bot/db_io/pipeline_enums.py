@@ -182,6 +182,10 @@ class TableName(str, Enum):
     FLATTENED_REQUIREMENTS = "flattened_requirements"
     """Flattened job requirements in key-value format, used for alignment."""
 
+    URL_RESUME_VARIANT = "url_resume_variant"
+    """Mapping table to be used internally to map job urls to which which version of resume \
+to use."""
+
     FLATTENED_RESPONSIBILITIES = "flattened_responsibilities"
     """Original resume responsibilities, flattened for semantic evaluation."""
 

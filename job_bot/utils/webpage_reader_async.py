@@ -22,7 +22,10 @@ import logging
 import time
 import json
 from typing import Any, Dict, List, Literal, Tuple, Union
-from playwright.async_api import async_playwright
+from playwright.async_api import (
+    async_playwright,
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 # User defined
 from job_bot.llm_providers.llm_api_utils_async import (
@@ -83,31 +86,37 @@ def clean_webpage_text(content):
 
 async def handle_cookie_banner(page):
     """Func to handle cookie acceptance banner dynamically."""
+    domain = None
     try:
-        # Get the domain from the current URL
         url = page.url
-        domain = url.split("/")[
-            2
-        ]  # Extracts "example.com" from "https://example.com/page"
+        domain = url.split("/")[2]  # "example.com"
 
-        # Attempt to accept cookies first
+        # Try to find buttons quickly (no long blocking waits)
         accept_button = await page.query_selector("button:has-text('Accept')")
         reject_button = await page.query_selector("button:has-text('Reject')")
         close_button = await page.query_selector("button:has-text('×')")
 
-        if accept_button:
-            await accept_button.click()
-            logger.info(f"Accepted cookies on {domain}")
-        elif reject_button:
-            await reject_button.click()
-            logger.info(f"Rejected cookies on {domain}")
+        # Wrap clicks in short, best-effort tries
+        async def safe_click(btn, label: str):
+            if not btn:
+                return
+            try:
+                # Short timeout so we don't hang for 30s
+                await btn.click(timeout=2000)
+                logger.info(f"{label}ed cookie banner on {domain}")
+            except Exception as e:
+                logger.warning(f"Failed to click {label} button on {domain}: {e}")
+
+        if reject_button:
+            await safe_click(reject_button, "Reject")
+        elif accept_button:
+            await safe_click(accept_button, "Accept")
         elif close_button:
-            await close_button.click()
-            logger.info(f"Closed cookie banner on {domain}")
+            await safe_click(close_button, "Closed")
         else:
             logger.info(f"No cookie banner found on {domain}")
 
-        # ✅ Properly set the cookie using the extracted domain
+        # Best-effort cookie
         await page.context.add_cookies(
             [
                 {
@@ -121,7 +130,9 @@ async def handle_cookie_banner(page):
         logger.info(f"Manually set cookie consent for {domain}")
 
     except Exception as e:
-        logger.error(f"Error handling cookie banner on {domain}: {e}", exc_info=True)
+        logger.error(
+            f"Error handling cookie banner on {domain or 'unknown'}: {e}", exc_info=True
+        )
 
 
 # Function to load webpage content using Playwright
@@ -180,12 +191,20 @@ async def load_webpages_with_playwright_async(
 
                 # * Wait for network to be idle
                 # * "networkidle" waits for all page resources to finish loading,
-                # * while "domcontentloaded" waits only for the initial HTML document to be loaded and parsed.
+                # * while "domcontentloaded" waits only for the initial HTML document to be
+                # * loaded and parsed.
 
                 # await page.wait_for_load_state("networkidle")
-                await page.wait_for_load_state("domcontentloaded")
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=10_000)
+                except PlaywrightTimeoutError as e:
+                    logger.warning(
+                        f"wait_for_load_state('domcontentloaded') timed out for {url}: {e}. "
+                        "Continuing with whatever content is available."
+                    )
 
-                # *page.text_content() vs page.evaluate (page.text_content is used in most tutorials)
+                # *page.text_content() vs page.evaluate (page.text_content is used in
+                # * most tutorials)
                 # *The page.text_content("body") extracts everything, including all the HTML
                 # *and CSS stuff
                 # *page.evaluate() directly access the text content via JavaScript.

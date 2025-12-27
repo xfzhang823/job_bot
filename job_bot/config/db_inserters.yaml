@@ -60,3 +60,12 @@ tables:
     dedup: pk_scoped
     stamp:
       iteration: none
+
+  url_resume_variant:
+    dedup: pk_scoped
+    inherit:
+      iteration: none
+    stamp:
+      iteration: none
+
+

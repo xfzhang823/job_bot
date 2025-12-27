@@ -93,7 +93,7 @@ from job_bot.config.project_config import (
     RESUME_JSON_FILE,
     JOB_POSTING_URLS_FILE,
     JOB_POSTING_URLS_FILTERED_FILE,
-    JOB_DESCRIPTIONS_JSON_FILE,
+    JOB_POSTINGS_JSON_FILE,
     JOB_REQUIREMENTS_JSON_FILE,
     mapping_file_name,
     # OpenAI directories for each iteration
@@ -125,10 +125,10 @@ from job_bot.config.project_config import (
     ANTHROPIC,
     OPENAI,
     GPT_35_TURBO,
-    GPT_35_TURBO_16K,
+    # GPT_35_TURBO_16K,
     GPT_4_1,
     GPT_4_1_NANO,
-    GPT_4_TURBO_32K,
+    # GPT_4_TURBO_32K,
     GPT_4O,
     CLAUDE_HAIKU,
     CLAUDE_SONNET_3_5,
@@ -158,12 +158,12 @@ PIPELINE_CONFIG = {
         "io": {  # Input/Output files for OpenAI and Anthropic providers
             "openai": {
                 "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
-                "job_descriptions_json_file": JOB_DESCRIPTIONS_JSON_FILE,  # * scraped/cleaned descriptions
+                "job_descriptions_json_file": JOB_POSTINGS_JSON_FILE,  # * scraped/cleaned descriptions
                 "job_requirements_json_file": JOB_REQUIREMENTS_JSON_FILE,  # * extract requirements
             },
             "anthropic": {
                 "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
-                "job_descriptions_json_file": JOB_DESCRIPTIONS_JSON_FILE,  # * scraped/cleaned descriptions
+                "job_descriptions_json_file": JOB_POSTINGS_JSON_FILE,  # * scraped/cleaned descriptions
                 "job_requirements_json_file": JOB_REQUIREMENTS_JSON_FILE,  # * extract requirements
             },
         },
@@ -178,13 +178,13 @@ PIPELINE_CONFIG = {
             "openai": {
                 # "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
                 "job_posting_urls_file": JOB_POSTING_URLS_FILTERED_FILE,  # todo: use filtered urls file for now (temp) / change back later
-                "job_descriptions_json_file": JOB_DESCRIPTIONS_JSON_FILE,  # * scraped/cleaned descriptions
+                "job_descriptions_json_file": JOB_POSTINGS_JSON_FILE,  # * scraped/cleaned descriptions
                 "job_requirements_json_file": JOB_REQUIREMENTS_JSON_FILE,  # * extract requirements
             },
             "anthropic": {
                 # "job_posting_urls_file": JOB_POSTING_URLS_FILE,  # * ALL posting URLs
                 "job_posting_urls_file": JOB_POSTING_URLS_FILTERED_FILE,  # todo: use filtered urls file for now (temp) / change back later
-                "job_descriptions_json_file": JOB_DESCRIPTIONS_JSON_FILE,  # * scraped/cleaned descriptions
+                "job_descriptions_json_file": JOB_POSTINGS_JSON_FILE,  # * scraped/cleaned descriptions
                 "job_requirements_json_file": JOB_REQUIREMENTS_JSON_FILE,  # * extract requirements
             },
         },
@@ -196,13 +196,13 @@ PIPELINE_CONFIG = {
         # * Function to create/update mapping file
         "io": {
             "openai": {
-                "job_descriptions_file": JOB_DESCRIPTIONS_JSON_FILE,
+                "job_descriptions_file": JOB_POSTINGS_JSON_FILE,
                 "iteration_dir": ITERATE_0_OPENAI_DIR,  # Directory for OpenAI iteration 0
                 "iteration": 0,
                 "mapping_file_name": mapping_file_name,  # Reference file w/t file paths in the dir
             },
             "anthropic": {
-                "job_descriptions_file": JOB_DESCRIPTIONS_JSON_FILE,
+                "job_descriptions_file": JOB_POSTINGS_JSON_FILE,
                 "iteration_dir": ITERATE_0_ANTHROPIC_DIR,  # Directory for Anthropic iteration 0
                 "iteration": 0,
                 "mapping_file_name": mapping_file_name,  # Reference file w/t file paths in the dir
@@ -339,14 +339,14 @@ metrics files based on similarity metrics",
         # function to check, create, or update the reference file of the dir
         "io": {
             "openai": {
-                "job_descriptions_file": JOB_DESCRIPTIONS_JSON_FILE,
+                "job_descriptions_file": JOB_POSTINGS_JSON_FILE,
                 # JSON file with ALL job descriptions (inc. urls)
                 "iteration_dir": ITERATE_1_OPENAI_DIR,  # Directory of iternation 1
                 "iteration": 1,  # Iteration number
                 "mapping_file_name": mapping_file_name,  # Reference file w/t all file paths in the dir
             },
             "anthropic": {
-                "job_descriptions_file": JOB_DESCRIPTIONS_JSON_FILE,
+                "job_descriptions_file": JOB_POSTINGS_JSON_FILE,
                 # JSON file with ALL job descriptions (inc. urls)
                 "iteration_dir": ITERATE_1_ANTHROPIC_DIR,  # Directory of iternation 1
                 "iteration": 1,  # Iternation nubmer

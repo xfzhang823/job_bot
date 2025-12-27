@@ -48,7 +48,6 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 from time import perf_counter
-from time import perf_counter
 from collections.abc import Hashable
 import numpy as np
 from pydantic import TypeAdapter
@@ -89,7 +88,6 @@ from job_bot.evaluation_optimization.evaluation_optimization_utils import (
 # Pyd models for row-level schema validation of similarity metrics
 from job_bot.models.resume_job_description_io_models import SimilarityMetrics
 
-
 logger = logging.getLogger(__name__)
 
 # Toggle to enforce row-level Pydantic validation before DB insert.
@@ -123,6 +121,7 @@ async def evaluate_similarity_for_url_async(
     reqs = await asyncio.to_thread(fetch_flattened_requirements, url)
     if metrics_stage == PipelineStage.SIM_METRICS_EVAL:
         resps = fetch_flattened_responsibilities(url)
+
         version = Version.ORIGINAL
         resp_prov: tuple[str | None, str | None] = (None, None)
     elif metrics_stage == PipelineStage.SIM_METRICS_REVAL:

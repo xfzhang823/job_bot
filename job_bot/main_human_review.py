@@ -40,10 +40,14 @@ def build_worklist() -> list[Path]:
 
     # EXAMPLE HARDCODED LIST — EDIT AS NEEDED
     return [
-        # EXCEL_DIR
-        # / "mediabrands_director-intelligence-solutions_4800265007__alignment_review.xlsx",
-        EXCEL_DIR / "aws_sr-am-genai-startups-genai-startup-team_3052771.xlsx",
-        # EXCEL_DIR / "google_genai-partnerships-lead_918273__alignment_review.xlsx",
+        EXCEL_DIR / "brown-brown_director-of-business-intelligence_0000003602.xlsx",
+        # EXCEL_DIR / "coreweave_sr-manager-market-research-intelligence_4613475006.xlsx",
+        # EXCEL_DIR / "mediabrands_director-intelligence-solutions_4800265007.xlsx",
+        # EXCEL_DIR / "offerfit_senior-ai-success-manager_4472546005.xlsx",
+        # EXCEL_DIR / "research-partnership_director-market-research_7306002.xlsx",
+        # EXCEL_DIR / "wattswater_manager-strategic-marketing-research-bus_10015633.xlsx",
+        # EXCEL_DIR / "aws_principal-product-manager-technical-agi-_3017572.xlsx",
+        # EXCEL_DIR / "aws_sr-am-genai-startups-genai-startup-team_3052771.xlsx",
     ]
 
 

@@ -46,7 +46,7 @@ from job_bot.utils.pydantic_model_loaders_for_files import (
 )
 from job_bot.config.project_config import (
     JOB_POSTING_URLS_FILE,
-    JOB_DESCRIPTIONS_JSON_FILE,
+    JOB_POSTINGS_JSON_FILE,
     JOB_REQUIREMENTS_JSON_FILE,
     RESPS_FILES_ITERATE_0_OPENAI_DIR,
     REQS_FILES_ITERATE_0_OPENAI_DIR,
@@ -80,7 +80,7 @@ preprocessing_sources = [
         JOB_POSTING_URLS_FILE,
         load_job_posting_urls_file_model,
     ),
-    (TableName.JOB_POSTINGS, JOB_DESCRIPTIONS_JSON_FILE, load_job_postings_file_model),
+    (TableName.JOB_POSTINGS, JOB_POSTINGS_JSON_FILE, load_job_postings_file_model),
     (
         TableName.EXTRACTED_REQUIREMENTS,
         JOB_REQUIREMENTS_JSON_FILE,
@@ -286,7 +286,7 @@ def ingest_job_urls_file(
 # Very unlikely need to do this but keep as an option!
 # Current file ETL pipeline does not have separate job_postings files.
 def ingest_job_postings_file(
-    source_file: Path | str = JOB_DESCRIPTIONS_JSON_FILE,
+    source_file: Path | str = JOB_POSTINGS_JSON_FILE,
     *,
     llm_provider: LLMProvider | str,
     model_id: str,

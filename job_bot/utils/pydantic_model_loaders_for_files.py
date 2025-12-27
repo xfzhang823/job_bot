@@ -74,11 +74,14 @@ def load_job_postings_file_model(
         file_path (Union[str, Path]): Path to the job postings JSON file.
 
     Returns:
-        Optional[JobPostingsFile]: Loaded and validated model or None on failure.
+        Optional[JobPostingsBatch]: Loaded and validated model or None on failure.
     """
     file_path = Path(file_path) if isinstance(file_path, str) else file_path
 
     try:
+        # todo: debug; delete later
+        logger.debug(f"job postings file path: {file_path}")
+
         raw_data = read_from_json_file(file_path)
         validated = {}
 
@@ -86,6 +89,12 @@ def load_job_postings_file_model(
             if not isinstance(v, dict):
                 logger.warning(f"⚠️ Skipping {k} — value is not a dict: {v}")
                 continue
+
+            # todo: debug; delete later
+            if "data" not in v:
+                logger.warning("🚫 %s has no top-level 'data' key: %r", k, v)
+                continue
+
             try:
                 validated[k] = JobSiteResponse(**v)
             except ValidationError as e:

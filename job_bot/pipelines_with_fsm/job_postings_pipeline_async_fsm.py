@@ -149,13 +149,21 @@ async def scrape_parse_persist_job_posting_async(
     # 1) Scrape + LLM parse (I/O under semaphore)
     try:
         async with semaphore:
-            job_postings_batch_model = await process_webpages_to_json_async(
-                urls=url,
-                llm_provider=llm_provider,
-                model_id=model_id,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            try:
+                job_postings_batch_model = await asyncio.wait_for(
+                    process_webpages_to_json_async(
+                        urls=url,
+                        llm_provider=llm_provider,
+                        model_id=model_id,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    ),
+                    timeout=60,
+                )
+
+            except asyncio.TimeoutError:
+                logger.error("⏰ Timeout while scraping or LLM parsing: %s", url)
+                return None
     except Exception:
         logger.exception("❌ Scraping or LLM failed: %s", url)
         return None
@@ -231,7 +239,7 @@ async def process_job_postings_batch_async_fsm(
     lease + human-gate FSM model.
 
     Each `item` is a (url, iteration) pair. For each item:
-      1) Verify it's at stage = JOB_URLS (FSM).
+      1) Verify it's at stage = JOB_POSTINGS (FSM).
       2) Try to claim (machine lease) scoped to (url, iteration).
       3) Do the work (scrape → parse → persist).
       4) Release the lease with final_status = COMPLETED or ERROR.
@@ -240,20 +248,19 @@ async def process_job_postings_batch_async_fsm(
     Args:
         items: List of (url, iteration) pairs considered claimable upstream.
         worker_id: Stable ID for this runner (generate once per process).
-        lease_seconds: Lease duration per claim (auto-expire if worker dies).
+        lease_minutes: Lease duration per claim (auto-expire if worker dies).
         llm_provider, model_id, max_tokens, temperature: LLM config for downstream.
-        no_of_concurrent_workers: Concurrency cap via a semaphore.
+        no_of_concurrent_workers: Concurrency cap via a shared semaphore.
 
     Returns:
         List[asyncio.Task] — schedule with asyncio.gather().
     """
+    # Single shared semaphore controlling scrape+LLM concurrency
     semaphore = asyncio.Semaphore(no_of_concurrent_workers)
 
     async def run_one(url: str, iteration: int):
         # Optional: ensure we have a control row; if not, skip
-        state = load_pipeline_state(
-            url
-        )  # if your loader also needs iteration, adjust here
+        state = load_pipeline_state(url)  # if your loader also needs iteration, adjust
         if state is None:
             logger.warning("⚠️ No pipeline state for URL: %s", url)
             return
@@ -279,17 +286,17 @@ async def process_job_postings_batch_async_fsm(
 
         released = False
         try:
-            # Do the work under concurrency control
-            async with semaphore:
-                result = await scrape_parse_persist_job_posting_async(
-                    url=url,
-                    iteration=iteration,
-                    semaphore=semaphore,  # you may remove if the callee doesn't need it
-                    llm_provider=llm_provider,
-                    model_id=model_id,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
+            # Do the work; scrape_parse_persist_job_posting_async will
+            # handle concurrency via the shared semaphore.
+            result = await scrape_parse_persist_job_posting_async(
+                url=url,
+                iteration=iteration,
+                semaphore=semaphore,
+                llm_provider=llm_provider,
+                model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
 
             # Decide finalization
             if result is not None:
@@ -411,9 +418,11 @@ async def run_job_postings_pipeline_async_fsm(
        - `asyncio.gather()` waits for all tasks to finish before exiting.
 
     6. **Iteration tracking**
-       - `iteration` comes from the control table (part of primary key `(url, iteration)`).
+       - `iteration` comes from the control table (part of primary key
+        `(url, iteration)`).
        - It enables multiple processing passes over the same URL across different runs.
-       - For now, iteration may be 0 globally — future-safe for versioned reprocessing.
+       - For now, iteration may be 0 globally — future-safe for versioned
+        reprocessing.
 
     -------------------------------------------------------------------------
     ⚙️  Parameters

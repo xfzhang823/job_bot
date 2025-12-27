@@ -163,16 +163,6 @@ class EditingResponse(BaseResponseModel):
 class JobSiteData(BaseModel):
     """
     Inner model containing detailed job site information.
-
-    Attributes:
-        - url (str): The URL of the job posting (required).
-        - job_title (str): Title of the job position (required).
-        - company (str): Name of the company posting the job (required).
-        - location (Optional[str]): Job location.
-        - salary_info (Optional[str]): Salary information, if available.
-        - posted_date (Optional[str]): Date when the job was posted.
-        - content (Optional[Dict[str, Any]]): Contains the job description, responsibilities,
-        and qualifications as a dictionary.
     """
 
     url: str | HttpUrl = Field(..., description="Job posting URL")
@@ -183,20 +173,56 @@ class JobSiteData(BaseModel):
     posted_date: Optional[str] = Field(None, description="Job posting date")
     content: Optional[Dict[str, Any]] = Field(
         None,
-        description="Dictionary containing job description, responsibilities, and qualifications",
+        description=(
+            "Dictionary containing job description, responsibilities, "
+            "and qualifications"
+        ),
     )
 
+    # -------------------------
+    # URL serializer
+    # -------------------------
     @field_serializer("url")
     def serialize_url(self, v: str | HttpUrl) -> str:
-        """Into str when exporting data out"""
         return str(v)
 
+    # -------------------------
+    # LOCATION normalizer
+    # -------------------------
+    @field_validator("location", mode="before")
+    @classmethod
+    def _normalize_location(cls, v):
+        """
+        Accept:
+            • str → keep as-is
+            • list[str] → join into comma-separated string
+            • None → None
+        """
+        if v is None:
+            return None
+
+        # If LLM returns e.g. ["Remote - Michigan", "Remote - Arizona"]
+        if isinstance(v, list):
+            return ", ".join(s for s in v if isinstance(s, str) and s.strip())
+
+        # Anything else → convert to string and strip
+        v = str(v).strip()
+        return v or None
+
+    # -------------------------
+    # POSTED DATE normalizer
+    # -------------------------
     @field_validator("posted_date", mode="before")
     @classmethod
     def _normalize_posted_date(cls, v):
         if v is None:
             return None
-        # Coerce to string
+
+        # Coerce list to string
+        if isinstance(v, list):
+            return ", ".join(s for s in v if isinstance(s, str) and s.strip())
+
+        # Convert to string
         s = str(v).strip()
         if s == "" or s.lower() in {"null", "none", "n/a", "na"}:
             return None
@@ -205,14 +231,14 @@ class JobSiteData(BaseModel):
         if isinstance(v, (date, datetime)):
             return (v.date() if isinstance(v, datetime) else v).isoformat()
 
-        # Try a few common formats; fall back to None if unparseable
+        # Try common date formats
         for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y"):
             try:
                 return datetime.strptime(s, fmt).date().isoformat()
             except ValueError:
                 pass
 
-        # (Optional) handle relative phrases like "30+ days ago" → None
+        # Unparseable → treat as unknown
         return None
 
 

@@ -328,14 +328,27 @@ def export_alignment_review_excel(xtab: pd.DataFrame, out_path: str | Path) -> P
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # --- sort rows by responsibility key, but keep the requirement_key row on top ---
+    # Excel:
+    #   row 1 = column headers
+    #   row 2 = xtab.iloc[0]  (requirement_key header row)
+    #   row 3+ = xtab.iloc[1:] (responsibility rows)
+    header = xtab.iloc[:1]
+    body = xtab.iloc[1:].sort_values("Resp Key / Req Key")
+    xtab = pd.concat([header, body], ignore_index=True)
+
     with pd.ExcelWriter(out_path, engine="xlsxwriter") as xw:
         xtab.to_excel(xw, index=False, sheet_name="Alignment Review")
         ws = xw.sheets["Alignment Review"]
+
         has_ref_col = any(
             c.startswith(("Original Responsibility", "Edited Responsibility"))
             for c in xtab.columns
         )
+
+        # freeze only the Excel header row (row 1)
         ws.freeze_panes(1, 2 if has_ref_col else 1)
+
         for i, col in enumerate(xtab.columns):
             try:
                 width = min(60, max(12, int(xtab[col].astype(str).str.len().max()) + 2))

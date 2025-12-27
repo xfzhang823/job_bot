@@ -37,6 +37,8 @@ from job_bot.db_io.pipeline_enums import (
     LLMProvider,
 )
 
+from job_bot.config.resume_variant import ResumeVariant
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Base & PURE mixins (no BaseModel inheritance in mixins)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -67,7 +69,9 @@ class LLMStampedMixin:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Control-plane (FSM snapshot ONLY — no history here)
+# Control-plane (FSM snapshot + configuration locks)
+#   • FSM snapshot tables: one row per (url, iteration) — no history here
+#   • Config lock tables: small, stable mappings that enforce invariants
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -296,6 +300,27 @@ class PipelineState(AppBaseModel, TimestampedMixin):
                     return None
         # Anything else -> give up
         return None
+
+
+# URL → resume_variant hard lock
+#   • Enforces one URL → one resume variant across all runs
+#   • Not a pipeline stage table (no iteration/stage/status/leases)
+#   • Used to fail fast if a URL is accidentally processed with a different resume
+
+
+class UrlResumeVariantRow(AppBaseModel, TimestampedMixin):
+    """
+    Control-plane mapping: hard-enforce one URL → one resume variant.
+
+    This table is intentionally NOT a pipeline stage table. It exists solely to
+    bind each job posting URL to a single resume variant permanently, so that
+    later runs cannot accidentally process the same URL with a different resume.
+    """
+
+    url: str = Field(..., description="Canonical job posting URL (primary key).")
+    resume_variant: ResumeVariant = Field(
+        ..., description="Locked resume variant for this URL."
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -271,7 +271,8 @@ Your task is to **trim, consolidate, and optimize** the provided JSON resume dat
 2. **Merge Related Content:** Combine overlapping or redundant bullets to enhance readability and conciseness.
 3. **Enhance ATS Compliance:** Ensure the use of **strong action verbs**, **industry-specific keywords**, and **quantifiable achievements** \
 (e.g., "% improvements," "increased revenue by X%," "cut processing time by Y%").
-4. **Ensure Consistency & Clarity:** Maintain a **structured, professional format**, ensuring smooth readability while preserving key impact points.
+4. **Ensure Consistency & Clarity:** Maintain a **structured, professional format**, ensuring smooth readability while preserving \
+key impact points.
 5. **Strict JSON Output:** Format the output **identically to the input JSON structure**, preserving the original schema.
 
 ---
@@ -296,6 +297,30 @@ Your task is to **trim, consolidate, and optimize** the provided JSON resume dat
 
 Return only the JSON block without any additional text, explanations, or markdown syntax.
 """
+
+TRIM_CONDENSE_FINAL_RESUME_JSON_TO_TEXT_PROMPT = """
+You are a text-cleaning assistant. I will give you a JSON object.
+
+TASK:
+1. Read all keys and values.
+2. Rewrite or condense values for clarity, professionalism, and impact.
+3. Merge or simplify overlapping bullets; use strong action verbs and relevant industry keywords.
+4. Trim the total wording to a concise, readable form (approx. 500–600 words if long).
+5. Convert lists into clean bullet lists.
+6. Do NOT modify or remove keys—only rewrite the values.
+7. Improve flow, readability, and parallel structure.
+
+RETURN FORMAT:
+- Return **plain text only**, not JSON.
+- Each key on its own line followed by a colon.
+- Cleaned value on the next line.
+- Double-space between entries.
+- No quotes, no backticks, no markdown.
+
+INPUT JSON:
+{{INSERT_JSON_HERE}}
+"""
+
 
 TRIM_CONDENSE_FINAL_RESUME_WITH_JOB_DESC_PROMPT = """
 You are an expert resume optimizer for senior-level tech and consulting roles.
@@ -338,7 +363,6 @@ with the job description provided.
 
 Return only the JSON block without any additional text, explanations, or markdown syntax. 
 """
-
 
 # Todo: for later; do not use it now!
 MODIFYING_FINAL_RESUME_PROMPT = """

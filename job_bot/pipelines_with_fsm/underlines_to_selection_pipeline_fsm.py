@@ -281,6 +281,7 @@ def extract_underlined_from_xlsx(
     rows_no_underline = 0
     rows_multi_underline = 0
     no_sel_keys: List[str] = []  # Track missing selections for summary warning
+    multi_sel_keys: List[str] = []  # <-- Add this
 
     # Iterate data rows (start at row 2)
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ncols):
@@ -310,6 +311,10 @@ def extract_underlined_from_xlsx(
 
         if len(underlined_cells) > 1:
             rows_multi_underline += 1
+            multi_sel_keys.append(
+                resp_key
+            )  # <-- Track which key has multiple selections
+
             # By design: take the FIRST underlined cell as the chosen match
             logger.warning(
                 "Multiple underlines on row (resp_key=%s); taking the first.",
@@ -355,7 +360,14 @@ def extract_underlined_from_xlsx(
             " ..." if len(no_sel_keys) > 10 else "",
         )
     if rows_multi_underline > 0:
-        logger.warning("⚠️  Rows with multiple underlines: %d", rows_multi_underline)
+        sample = ", ".join(multi_sel_keys[:10])
+        logger.warning(
+            "⚠️  %d rows(s) with multiple underlined selections. "
+            "Sample responsibility_keys: %s%s",
+            rows_multi_underline,
+            sample,
+            " ..." if len(multi_sel_keys) > 10 else "",
+        )
 
     logger.info("Extraction complete")
     logger.info("  Rows extracted : %s", len(df_out))

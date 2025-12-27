@@ -1,8 +1,9 @@
 """
 pipelines_with_fsm/update_flattened_responsibilities_pipeline_fsm.py
 
-DB-native mini-pipeline (sync): materialize `flattened_responsibilities` from the
-current resume JSON for a worklist of (url, iteration) items.
+DB-native mini-pipeline (sync): materialize `flattened_responsibilities`
+from a selected resume variant (e.g., MI strategy, AI architect) for a
+claimable worklist of (url, iteration) items.
 
 Worklist (from pipeline_control; human-gated + lease-aware):
   • stage = FLATTENED_RESPONSIBILITIES
@@ -11,17 +12,21 @@ Worklist (from pipeline_control; human-gated + lease-aware):
 What it does (per (url, iteration)):
   1) try_claim_one(url, iteration, worker_id) → acquire lease or skip
   2) process_responsibilities_from_resume(...) → Responsibilities (validated)
+     using the resume JSON resolved from `resume_variant`
   3) flatten_model_to_df(...) → aligned DataFrame
+     • stamps `resume_variant` as a metadata column
   4) insert_df_with_config(..., iteration=iteration)
      - mode="append": PK-scoped dedup (default)
-     - mode="replace": wipe-by-URL before insert (key_cols=["url"])
+     - mode="replace": wipe-by-(url, resume_variant) before insert
   5) finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)
   6) if ok and finalized and still at FLATTENED_RESPONSIBILITIES → fsm.step()
      (typically to SIM_METRICS_EVAL)
 
 Notes:
   • Sync & simple on purpose (no network LLM calls here).
-  • Idempotent per (url, iteration) via table PK + YAML dedup.
+  • Idempotent per (url, iteration, resume_variant) via table PK + dedup rules.
+  • Control-plane claiming and FSM stepping are still keyed by (url, iteration);
+    this pipeline supports one resume variant per run.
   • Optional control-plane sync is kept for back-compat.
 """
 
@@ -57,8 +62,20 @@ from job_bot.fsm.pipeline_control_sync import (
     sync_flattened_responsibilities_to_pipeline_control,
 )
 
+from job_bot.utils.responsibility_filters import drop_responsibility_keys
+
+# Resume variant (ai architect, mi strategy, etc.)
+from job_bot.utils.enforce_resume_variant_lock import (
+    enforce_resume_variant_lock,
+)
+
+# Resume variant (ai architect, mi strategy, etc.)
+from job_bot.config.resume_variant import ResumeVariant
+from job_bot.config.io_configs import get_resume_json_path
+
 # Default nested resume JSON
-from job_bot.config.project_config import RESUME_JSON_FILE as DEFAULT_RESUME_JSON_FILE
+# from job_bot.config.project_config import RESUME_JSON_FILE as DEFAULT_RESUME_JSON_FILE
+
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +84,7 @@ def _process_one_url(
     *,
     url: str,
     iteration: int,
+    resume_variant: ResumeVariant,
     resume_json_path: Path,
     mode: Literal["append", "replace"],
 ) -> bool:
@@ -94,7 +112,25 @@ def _process_one_url(
             logger.error("❌ Empty responsibilities DataFrame for %s", url)
             return False
 
-        # 3) Insert with configured semantics
+        # Add resume variant for stamping
+        df["resume_variant"] = resume_variant.value
+
+        # 3) delete special responsibility keys
+        #! Exclude this resp. key b/c promoted to xxx is a factual statement
+        #! - not to compared or edited
+        KEYS_TO_SKIP = ["4.responsibilities.5"]
+
+        before = len(df)
+        df = drop_responsibility_keys(df, KEYS_TO_SKIP)
+        after = len(df)
+        if before != after:
+            logger.info(
+                "🔍 Removed %d responsibility rows (skip keys: %s)",
+                before - after,
+                KEYS_TO_SKIP,
+            )
+
+        # 4) Insert with configured semantics
         kwargs: dict[str, Any] = dict(
             url=url,
             iteration=iteration,  # propagate iteration explicitly
@@ -102,7 +138,7 @@ def _process_one_url(
         )
         # For "replace", wipe-by-URL first (broad reset for snapshot refresh)
         if mode == "replace":
-            kwargs["key_cols"] = ["url"]
+            kwargs["key_cols"] = ["url", "resume_variant"]
 
         insert_df_with_config(
             df,
@@ -121,7 +157,7 @@ def _process_one_url(
 
 def run_flattened_responsibilities_pipeline_fsm(
     *,
-    resume_json_file: str | Path = DEFAULT_RESUME_JSON_FILE,
+    resume_variant: ResumeVariant = ResumeVariant.MI_STRATEGY,  # Set default to MI/strategy
     mode: Literal["append", "replace"] = "append",
     do_control_sync: bool = True,
     retry_errors: bool = False,
@@ -129,32 +165,39 @@ def run_flattened_responsibilities_pipeline_fsm(
     limit_urls: Optional[int] = None,
 ) -> None:
     """
-    Refresh `flattened_responsibilities` for a claimable worklist at FLATTENED_RESPONSIBILITIES.
+    Refresh `flattened_responsibilities` for a claimable worklist at
+    FLATTENED_RESPONSIBILITIES.
 
     Workflow (lease-aware, human-gated, claimables pattern)
     -------------------------------------------------------
     1) Build worklist:
-         get_claimable_worklist(stage=FLATTENED_RESPONSIBILITIES, status={NEW[, ERROR]})
+         get_claimable_worklist(
+             stage=FLATTENED_RESPONSIBILITIES,
+             status={NEW[, ERROR if retry_errors=True]}
+         )
        • Enforces human gate (task_state='READY') and lease rules
-        (unclaimed or lease-expired)
+         (unclaimed or lease-expired)
        • Returns list[(url, iteration)]
-    2) Optional filters: `filter_urls`, `limit_urls`
-    3) Generate worker_id for this run.
-    4) For each (url, iteration):
+    2) Resolve resume JSON path from `resume_variant`
+    3) Optional filters: `filter_urls`, `limit_urls`
+    4) Generate worker_id for this run
+    5) For each (url, iteration):
          a) try_claim_one(url, iteration, worker_id) — acquire lease or skip
-         b) _process_one_url(...) — pure operation (validate, flatten, insert)
+         b) _process_one_url(...) — validate, flatten, stamp variant, insert
          c) finalize_one_row_in_pipeline_control(url, iteration, worker_id, ok, notes)
          d) if ok and finalized and still at FLATTENED_RESPONSIBILITIES → fsm.step()
-    5) Optional control-plane sync (non-fatal)
+    6) Optional control-plane sync (non-fatal)
 
     Parameters
     ----------
-    resume_json_file : str | Path
-        Path to the nested resume JSON (single-resume source of truth).
+    resume_variant : ResumeVariant
+        Which resume version to use (e.g., MI_STRATEGY, AI_ARCHITECT).
+        Exactly one variant is processed per run.
     mode : {"append","replace"}
-        Insert behavior. See module docstring.
+        Insert behavior. In "replace" mode, rows are wiped by
+        (url, resume_variant) before insertion.
     do_control_sync : bool
-        If True, run 'sync_flattened_responsibilities_to_pipeline_control()'
+        If True, run `sync_flattened_responsibilities_to_pipeline_control()`
         at the end.
     retry_errors : bool
         If True, include ERROR rows in the claimable worklist.
@@ -191,7 +234,7 @@ def run_flattened_responsibilities_pipeline_fsm(
         )
         return
 
-    resume_json_path = Path(resume_json_file)
+    resume_json_path: Path = get_resume_json_path(resume_variant)
     worker_id = generate_worker_id("flattened_responsibilities")
     fsm_manager = PipelineFSMManager()
 
@@ -208,9 +251,27 @@ def run_flattened_responsibilities_pipeline_fsm(
             logger.info("⏭️ Skipping %s@%s — already claimed.", url, iteration)
             continue
 
+        # 🔒 Enforce variant lock (fail fast; no writes yet)
+        try:
+            enforce_resume_variant_lock(url=url, resume_variant=resume_variant)
+        except Exception as e:
+            logger.exception(
+                "❌ Resume variant lock violation for %s@%s", url, iteration
+            )
+            finalize_one_row_in_pipeline_control(
+                url=url,
+                iteration=iteration,
+                worker_id=worker_id,
+                ok=False,
+                notes=f"Resume variant lock violation: {e}",
+            )
+            continue
+
+        # Flatten resp for each url
         ok = _process_one_url(
             url=url,
             iteration=iteration,
+            resume_variant=resume_variant,
             resume_json_path=resume_json_path,
             mode=mode,
         )

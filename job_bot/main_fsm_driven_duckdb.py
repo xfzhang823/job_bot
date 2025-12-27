@@ -46,6 +46,7 @@ import matplotlib
 from job_bot.db_io.create_db_tables import create_all_db_tables
 from job_bot.db_io.decision_flag import sync_all
 import job_bot.config.logging_config
+from job_bot.config.project_config import JOB_POSTING_URLS_FILE
 
 
 # 0) URL intake + control-plane seed
@@ -64,6 +65,9 @@ from job_bot.pipelines_with_fsm.pipe_control_auto_transition_pipeline_fsm import
 from job_bot.pipelines_with_fsm.job_postings_pipeline_async_fsm import (
     run_job_postings_pipeline_async_fsm,
 )
+from job_bot.pipelines_with_fsm.job_postings_manual_import_pipeline_async_fsm import (
+    run_job_postings_manual_import_async_fsm,
+)
 from job_bot.pipelines_with_fsm.job_urls_pipeline_fsm import run_job_urls_pipeline_fsm
 from job_bot.pipelines_with_fsm.extract_to_flattened_requirements_pipeline_async_fsm import (
     run_extract_to_flattened_requirements_pipeline_async_fsm,
@@ -81,6 +85,8 @@ from job_bot.pipelines_with_fsm.similarity_metrics_pipeline_async_fsm import (
 from job_bot.pipelines_with_fsm.alignment_review_pipeline_async_fsm import (
     run_alignment_review_pipeline_async_fsm,
 )
+from job_bot.config.resume_variant import ResumeVariant
+
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +145,18 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
     run_job_urls_pipeline_fsm()
 
     # JOB_URLS → JOB_POSTINGS
-    await run_job_postings_pipeline_async_fsm(max_concurrent_tasks=3, retry_errors=True)
+    # await run_job_postings_pipeline_async_fsm(max_concurrent_tasks=3, retry_errors=True)
+
+    # Fallback to import manually
+    await run_job_postings_manual_import_async_fsm(max_concurrent_tasks=3)
 
     # JOB_POSTINGS → FLATTENED_REQUIREMENTS
     await run_extract_to_flattened_requirements_pipeline_async_fsm(retry_errors=True)
 
     # run on FLATTENED_RESPONSIBILITIES (conditional)
-    run_flattened_responsibilities_pipeline_fsm(retry_errors=True)
+    run_flattened_responsibilities_pipeline_fsm(
+        retry_errors=True, resume_variant=ResumeVariant.MI_STRATEGY
+    )
 
     # run on SIM METRICS - EVAL
     await run_similarity_metrics_eval_pipeline_async_fsm(

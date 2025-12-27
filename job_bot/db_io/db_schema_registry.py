@@ -57,6 +57,7 @@ from job_bot.models.db_table_models import (
     JobUrlsRow,
     JobPostingsRow,
     FlattenedRequirementsRow,
+    UrlResumeVariantRow,
     FlattenedResponsibilitiesRow,
     EditedResponsibilitiesRow,
     SimilarityMetricsRow,
@@ -98,6 +99,12 @@ DUCKDB_COLUMN_ORDER = {
         "version",
         "source_file",
         "notes",
+        "created_at",
+        "updated_at",
+    ],
+    TableName.URL_RESUME_VARIANT.value: [
+        "url",
+        "resume_variant",
         "created_at",
         "updated_at",
     ],
@@ -368,6 +375,13 @@ DUCKDB_SCHEMA_REGISTRY = {
         table_name=TableName.PIPELINE_CONTROL.value,
         primary_keys=["url", "iteration"],
         column_order=DUCKDB_COLUMN_ORDER[TableName.PIPELINE_CONTROL.value],
+    ),
+    # URL → resume_variant hard lock (control-plane mapping)
+    TableName.URL_RESUME_VARIANT: TableSchema(
+        model=UrlResumeVariantRow,
+        table_name=TableName.URL_RESUME_VARIANT.value,
+        primary_keys=["url"],
+        column_order=DUCKDB_COLUMN_ORDER[TableName.URL_RESUME_VARIANT.value],
     ),
     # Seed list: NO iteration
     TableName.JOB_URLS: TableSchema(
