@@ -277,6 +277,11 @@ This file lists the key qualifications and responsibilities.",
 
 # * Pipeline Data directory, sub-directories, and file paths (contains duckdb database)
 PIPELINE_DATA_DIR = BASE_DIR / "pipeline_data"  # input/output data folder
+
+
+# ===============================================================
+# Database Directory
+# ===============================================================
 DB_DIR = PIPELINE_DATA_DIR / "db"
 DUCKDB_FILE = DB_DIR / "pipeline_data.duckdb"
 
@@ -294,6 +299,11 @@ RESUME_AI_ARCHITECT_JSON_FILE = JSON_DIR / "resume_for_ai_architect.json"
 # (optional) ensure these dirs exist on import if desired
 for _dir in [PIPELINE_DATA_DIR, DB_DIR, EXCEL_DIR, SEL_DIR, TEMP_DIR]:
     _dir.mkdir(parents=True, exist_ok=True)
+
+# ===============================================================
+# Gap Report Directory
+# ===============================================================
+GAP_REPORTS_DIR = PIPELINE_DATA_DIR / "gap_reports"
 
 
 # *LLM Models

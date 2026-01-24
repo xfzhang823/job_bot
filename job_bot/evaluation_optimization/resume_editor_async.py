@@ -16,7 +16,6 @@ from anthropic import Anthropic, AsyncAnthropic
 from job_bot.prompts.prompt_templates import (
     SEMANTIC_ALIGNMENT_PROMPT,
     ENTAILMENT_ALIGNMENT_PROMPT,
-    SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
 from job_bot.llm_providers.llm_api_utils import get_openai_api_key
@@ -267,8 +266,10 @@ class TextEditorAsync:
 
         Args:
             - premise_text (str): The text to be transformed (e.g., a claim).
-            - hypothesis_text (str): The source text to "compare to" (not transformed, e.g., a follow-up statement).
-            - llm_provider (str, optional): The model to use for the API call ('openai', 'claude', or 'llama3').
+            - hypothesis_text (str): The source text to "compare to"
+                (not transformed, e.g., a follow-up statement).
+            - llm_provider (str, optional): The model to use for the API call
+                ('openai', 'claude', or 'llama3').
             - temperature (float, optional): Defaults to 0.8 for flexibility.
 
         Returns:
@@ -342,47 +343,3 @@ class TextEditorAsync:
         # Log and return the response model
         logger.info(f"Semantic Alignment Result (text_id={text_id}): {response_model}")
         return response_model
-
-        # async def edit_for_semantics_and_entailment_async(
-        #     self,
-        #     candidate_text: str,
-        #     reference_text: str,
-        #     text_id: str = "",
-        #     llm_provider: str = "",
-        #     temperature: Optional[float] = None,
-        # ) -> Dict:
-        #     """
-        #     *Async version of the method.
-
-        #     Re-edit the target text to better align w/t source text's semantics and strengthen
-        #     the entailment relationships between the two texts, leveraging LLMs.
-
-        #     Args:
-        #         - candidate_text (str): Original text to be transformed by the model
-        #         (i.e., the riginal responsibility text to be revised.)
-        #         - reference_text (str): Text that the candidate text is being compared to
-        #         (i.e., requirement text to optimize against.)
-        #         - text_id (int): (Optional) Identifier for the responsibility text.
-        #         Default to None (unique ids to be generated with UUID function)
-        #         - llm_provider (str, optional): The model to use for the API call ('openai' or 'llama3').
-        #         - temperature (float, optional): Temperature setting for this specific call.
-
-        #     Returns:
-        #         dict: Contains 'text_id' and 'optimized_text' after revision.
-        #     """
-        #     text_id = self.generate_text_id(text_id)
-        #     prompt = self.format_prompt(
-        #         SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT, candidate_text, reference_text
-        #     )
-        #     response_model = await self.call_llm_async(
-        #         prompt,
-        #         llm_provider=llm_provider if llm_provider else self.llm_provider,
-        #         temperature=temperature,
-        #     )
-
-        #     # Extract the actual optimized content
-        #     data = cast(EditingResponseModel, response_model)
-        #     optimized_text = data.data.optimized_text
-        #     result = {"text_id": text_id, "optimized_text": optimized_text}
-        #     logger.info(f"Results updated: \n{result}")
-        #     return result

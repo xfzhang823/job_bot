@@ -40,7 +40,9 @@ def build_worklist() -> list[Path]:
 
     # EXAMPLE HARDCODED LIST — EDIT AS NEEDED
     return [
-        EXCEL_DIR / "brown-brown_director-of-business-intelligence_0000003602.xlsx",
+        EXCEL_DIR / "lenovo_ai-strategy-manager_6a1e7e.xlsx",
+        # EXCEL_DIR / "openai_market-research-lead_c37cf4.xlsx",
+        # EXCEL_DIR / "brown-brown_director-of-business-intelligence_0000003602.xlsx",
         # EXCEL_DIR / "coreweave_sr-manager-market-research-intelligence_4613475006.xlsx",
         # EXCEL_DIR / "mediabrands_director-intelligence-solutions_4800265007.xlsx",
         # EXCEL_DIR / "offerfit_senior-ai-success-manager_4472546005.xlsx",

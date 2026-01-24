@@ -70,6 +70,9 @@ from job_bot.db_io.db_utils import (
     generate_worker_id,
 )
 
+# enum fields
+from job_bot.db_io.pipeline_enums import Version
+
 # async editor to rewrite responsibilities against requirements
 from job_bot.evaluation_optimization.resumes_editing_async import (
     modify_multi_resps_based_on_reqs_async,
@@ -80,6 +83,16 @@ from job_bot.models.resume_job_description_io_models import (
     ResponsibilityMatches,
     Responsibilities,
     Requirements,
+)
+
+# Pipeline tools
+from job_bot.pipelines_with_fsm.resume_editing.pair_filtering import (
+    pick_pairs_to_edit_with_config,
+    group_pairs_by_responsibility,
+    PairFilterConfig,
+)
+from job_bot.pipelines_with_fsm.resume_editing.fill_with_original import (
+    materialize_edited_responsibilities_rows,
 )
 
 # Configs
@@ -113,49 +126,97 @@ async def edit_and_persist_responsibilities_for_url(
     no_of_concurrent_workers_for_llm: int = 3,
 ) -> bool:
     """
-    Rewrite (edit) responsibilities for a single URL and persist them
-    (DuckDB + FSM).
+    Edit (rewrite) resume responsibilities for a single URL using a
+    similarity-metrics–guided, drift-safe workflow, and persist the
+    results to DuckDB.
 
-    Steps
-    -----
-    1) Load flattened responsibilities + flattened requirements (DuckDB).
-    2) Run async LLM editor:
-         modify_multi_resps_based_on_reqs_async(responsibilities, requirements, ...)
-    3) Flatten ResponsibilityMatches → row-per-(responsibility_key, requirement_key).
-    4) INSERT into edited_responsibilities with standard metadata stamping
-       (llm_provider/model_id via inserter args; iteration via param;
-       version handled by config).
+    High-level behavior
+    -------------------
+    This function performs **pair-gated responsibility editing**:
+
+    - Only responsibility–requirement pairs deemed *eligible* by the
+      ORIGINAL similarity_metrics pass are allowed to influence edits.
+    - Responsibilities and requirements outside the eligible set are never
+      shown to the LLM.
+    - Missing or skipped eligible pairs are filled with the ORIGINAL
+      responsibility text to preserve table completeness.
+
+    The function is **DB-native**, **FSM-compatible**, and **idempotent per
+    (url, iteration)**.
+
+    Detailed steps
+    --------------
+    1) Load inputs from DuckDB:
+       - flattened_responsibilities
+       - flattened_requirements
+
+    2) Load similarity_metrics (version='original') and select eligible
+       (responsibility_key, requirement_key) pairs using score-based,
+       per-responsibility filtering.
+
+    3) Build filtered dictionaries:
+       - responsibilities: only those with ≥1 eligible requirement
+       - requirements: only those appearing in eligible pairs
+
+    4) Run the async LLM editor **once** on the filtered dictionaries
+       (no changes to the editor’s interface).
+
+    5) Post-filter the editor output back to the *exact* eligible pairs.
+
+    6) Materialize the final row set:
+       - Use edited text where available
+       - Fall back to ORIGINAL responsibility text for missing eligible pairs
+
+    7) Insert rows into `edited_responsibilities` via `insert_df_with_config`,
+       which stamps standard metadata (url, iteration, llm_provider, model_id)
+       and handles deduplication according to table config.
 
     Concurrency
     -----------
-    LLM calls are bounded by the provided `semaphore` and an internal
-    `no_of_concurrent_workers_for_llm` inside the editor.
+    - URL-level concurrency is bounded by the provided semaphore.
+    - LLM-level concurrency inside the editor is controlled by
+      `no_of_concurrent_workers_for_llm`.
 
-    Error Handling
-    --------------
-    - Any failure (load/validate/insert/FSM/LLM) logs, marks the URL `ERROR`,
-      does **not** advance the FSM, and returns False.
-    - On success, the FSM advances, and the function returns True.
+    Error handling and control flow
+    -------------------------------
+    - Any failure during load, filtering, editing, or insert:
+        → logs the error
+        → returns False
+        → does NOT advance the FSM
+    - If no eligible pairs exist:
+        → no LLM call is made
+        → no rows are inserted
+        → returns True (treated as a successful no-op)
 
-    Args:
-        url: Canonical job posting URL.
-        semaphore: Async semaphore used to bound URL-level concurrency.
-        iteration: Iteration stamp for auditing/reruns.
-        llm_provider: LLM provider label (e.g., "openai", "anthropic").
-        model_id: LLM model identifier for editing.
-        no_of_concurrent_workers_for_llm: Internal concurrency inside
-            the editor.
+    Parameters
+    ----------
+    url:
+        Canonical job posting URL.
+    iteration:
+        Iteration stamp for auditing and controlled reruns.
+    semaphore:
+        Async semaphore bounding concurrent URL processing.
+    llm_provider:
+        LLM provider label (e.g., "openai", "anthropic").
+    model_id:
+        LLM model identifier used for responsibility editing.
+    no_of_concurrent_workers_for_llm:
+        Internal concurrency limit used by the editor per URL.
 
-    Returns:
-        bool: True on success; False if skipped or failed.
+    Returns
+    -------
+    bool
+        True if the operation succeeded or was a safe no-op;
+        False if a failure occurred and the URL should be marked ERROR.
     """
     async with semaphore:
-        # Load inputs
+        # -------------------------
+        # 1) Load inputs (resps/reqs)
+        # -------------------------
         try:
             resps_model = load_table(TableName.FLATTENED_RESPONSIBILITIES, url=url)
             reqs_model = load_table(TableName.FLATTENED_REQUIREMENTS, url=url)
 
-            # Validate loader return types up front (great errors when config drifts)
             resps_dict = get_resps_dict_strict(resps_model)
             reqs_dict = get_reqs_dict_strict(reqs_model)
 
@@ -164,54 +225,240 @@ async def edit_and_persist_responsibilities_for_url(
                     "Empty responsibilities or requirements after rehydration"
                 )
 
+            # todo: debug - delete later
+            logger.debug(
+                "Loaded inputs for %s | responsibilities=%d | requirements=%d",
+                url,
+                len(resps_dict),
+                len(reqs_dict),
+            )
+
         except Exception:
             logger.exception("❌ Failed to load/rehydrate inputs for %s", url)
             return False
 
-        # Run editor
+        # ----------------------------------------
+        # 2) Load metrics + pick eligible pairs
+        # ----------------------------------------
+        try:
+            df_metrics = load_table(
+                TableName.SIMILARITY_METRICS,
+                url=url,
+                version=Version.ORIGINAL.value,
+            )
+            if not isinstance(df_metrics, pd.DataFrame) or df_metrics.empty:
+                raise ValueError(
+                    "No similarity_metrics found for url (version='original')."
+                )
+
+            # todo: debug; delete later
+            logger.debug(
+                "Loaded similarity_metrics for %s | rows=%d | version=%s",
+                url,
+                len(df_metrics),
+                Version.ORIGINAL.value,
+            )
+
+            pair_cfg = PairFilterConfig(
+                min_score=0.45,
+                top_k=2,
+                min_keep_per_resp=0,  # recommend while debugging
+                min_keep_score_floor=None,  # disable floor logic if min_keep=0 anyway
+            )
+
+            # todo: debug; delete later
+            logger.info(
+                "Pair filter params for %s | min_score=%.2f top_k=%d min_keep=%d floor=%s",
+                url,
+                pair_cfg.min_score,
+                pair_cfg.top_k,
+                pair_cfg.min_keep_per_resp,
+                str(pair_cfg.min_keep_score_floor),
+            )
+
+            eligible_pairs = pick_pairs_to_edit_with_config(df_metrics, pair_cfg)
+
+        except Exception:
+            logger.exception("❌ Failed to load/filter similarity_metrics for %s", url)
+            return False
+
+        if not eligible_pairs:
+            # No safe edits to make -> return True (nothing to do) or False?
+            # I strongly recommend True so pipeline can progress without ERROR.
+            logger.info("🟨 No eligible pairs to edit for %s (skipping insert).", url)
+            return True
+
+        eligible_map = group_pairs_by_responsibility(eligible_pairs)
+        eligible_set = {(str(r), str(q)) for (r, q) in eligible_pairs}
+
+        # todo: debug; delete later
+        logger.info(
+            "Pair filtering for %s | eligible_pairs=%d | responsibilities_affected=%d",
+            url,
+            len(eligible_pairs),
+            len(eligible_map),
+        )
+
+        if logger.isEnabledFor(logging.DEBUG):
+            # show a small sample to confirm sanity
+            sample = list(eligible_pairs)[:5]
+            logger.debug("Eligible pair sample for %s: %s", url, sample)
+        # todo: delete later
+
+        # ----------------------------------------
+        # 3) Build filtered dicts for editor call
+        # ----------------------------------------
+        resps_sub_dict = {
+            rk: resps_dict[rk] for rk in eligible_map.keys() if rk in resps_dict
+        }
+
+        eligible_req_keys = {qk for _, qk in eligible_pairs}
+        reqs_sub_dict = {
+            qk: reqs_dict[qk] for qk in eligible_req_keys if qk in reqs_dict
+        }
+
+        if not resps_sub_dict or not reqs_sub_dict:
+            logger.warning(
+                "🟨 Eligible pairs exist but filtered dicts are empty for %s "
+                "(resps_sub=%d reqs_sub=%d). Skipping.",
+                url,
+                len(resps_sub_dict),
+                len(reqs_sub_dict),
+            )
+            return True
+
+        # -------------------------
+        # 4) Run editor (unchanged)
+        # -------------------------
+        # todo: debug; delete later
+        logger.debug(
+            "Editor input for %s | resps_sub=%d | reqs_sub=%d",
+            url,
+            len(resps_sub_dict),
+            len(reqs_sub_dict),
+        )
+
         try:
             matches: ResponsibilityMatches = (
                 await modify_multi_resps_based_on_reqs_async(
-                    responsibilities=resps_dict,
-                    requirements=reqs_dict,
+                    responsibilities=resps_sub_dict,
+                    requirements=reqs_sub_dict,
                     llm_provider=llm_provider,
                     model_id=model_id,
                     no_of_concurrent_workers=no_of_concurrent_workers_for_llm,
+                    eligible_map=eligible_map,
                 )
             )
         except Exception:
             logger.exception("❌ Editor failed for %s", url)
             return False
 
-        # Flatten → DataFrame → insert
+        # todo: debug; delete later
+        total_emitted = sum(
+            len(by_req.optimized_by_requirements)
+            for by_req in matches.responsibilities.values()
+        )
+
+        logger.info(
+            "Editor output for %s | responsibilities=%d | emitted_pairs=%d",
+            url,
+            len(matches.responsibilities),
+            total_emitted,
+        )
+
+        # ----------------------------------------------------------
+        # 5) Post-filter output to exact eligible pairs + fill missing
+        # ----------------------------------------------------------
+        edited_map: dict[tuple[str, str], str] = {}
+
+        # Flatten ONLY eligible pairs emitted by the model
+        for resp_key, by_req in matches.responsibilities.items():
+            rk = str(resp_key)
+            for req_key, optimized_text in by_req.optimized_by_requirements.items():
+                qk = str(req_key)
+                if (rk, qk) not in eligible_set:
+                    continue
+
+                # Create the lookup table
+                # output -> edited_map: {(resp_key, req_key) -> edited_text}
+                edited_map[(rk, qk)] = str(optimized_text.optimized_text)
+
+        # ----------------------------------------------------------
+        # 6) Materialize FULL matrix (all resps × all reqs)
+        #    - Eligible pairs: use edited (fallback to original if missing)
+        #    - Non-eligible pairs: always original
+        # ----------------------------------------------------------
+        final_rows: list[dict[str, Any]] = []
+
+        # Canonical requirement universe for "structure maintains"
+        all_req_keys = list(reqs_dict.keys())  # preserves dict insertion order (Py3.7+)
+
+        # Matrialize entire table
+        for rk, orig_text in resps_dict.items():
+            for qk in all_req_keys:
+                if (rk, qk) in eligible_set:
+                    text = edited_map.get(
+                        (rk, qk), orig_text
+                    )  # edited if present, else original
+                else:
+                    text = orig_text
+
+                final_rows.append(
+                    {
+                        "url": url,
+                        "responsibility_key": rk,
+                        "requirement_key": qk,
+                        "responsibility": text,
+                    }
+                )
+
+        if not final_rows:
+            logger.info("🟨 No rows to insert after post-filter/fill for %s.", url)
+            return True
+
+        # todo: debug; delete later
+        total_pairs = len(final_rows)
+        eligible_total = len(eligible_set)
+        edited_emitted = len(edited_map)
+
+        non_eligible_original = total_pairs - eligible_total
+        eligible_fallback_original = eligible_total - edited_emitted
+
+        logger.info(
+            "Materialized edited_responsibilities for %s | total_pairs=%d | eligible_pairs=%d | "
+            "edited_emitted=%d | non_eligible_original=%d | eligible_fallback_original=%d",
+            url,
+            total_pairs,
+            eligible_total,
+            edited_emitted,
+            non_eligible_original,
+            eligible_fallback_original,
+        )
+
+        # -------------------------
+        # 7) Insert
+        # -------------------------
+        # todo: debug; delete later
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Insert preview for %s: %s",
+                url,
+                final_rows[:3],
+            )
+
         try:
-            # Expected shape: { resp_key: { req_key: "edited text", ... }, ... }
-            rows: List[Dict[str, Any]] = []
-            for resp_key, by_req in matches.responsibilities.items():
-                for req_key, optimized_text in by_req.optimized_by_requirements.items():
-                    rows.append(
-                        {
-                            "url": url,  # 👈 add url here b/c the computation does not include url
-                            "responsibility_key": resp_key,
-                            "requirement_key": req_key,
-                            "responsibility": optimized_text.optimized_text,  # real string, not a dict repr
-                        }
-                    )
-            logger.debug("Edited sample: %s", rows[:2])
+            edited_df = pd.DataFrame(final_rows)
+            logger.debug(
+                "Edited sample: %s", edited_df.head(2).to_dict(orient="records")
+            )
 
-            edited_df = pd.DataFrame(rows)
-            if edited_df.empty:
-                raise ValueError("Editor produced no rows")
-
-            # Single call -> stamping (iteration/LLM), alignment, and
-            # dedup are handled by inserter/YAML
             insert_df_with_config(
                 edited_df,
                 TableName.EDITED_RESPONSIBILITIES,
                 url=url,
-                llm_provider=llm_provider,  # ensures the actual provider is recorded
-                model_id=model_id,  # ensures the actual provider is recorded
-                iteration=iteration,  # pass iteration
+                llm_provider=llm_provider,
+                model_id=model_id,
+                iteration=iteration,
             )
             return True
 

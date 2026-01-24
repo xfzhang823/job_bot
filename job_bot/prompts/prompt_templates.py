@@ -132,37 +132,37 @@ from the following job description. Group similar responsibilities into concise 
 }}
 """
 
-SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT = """
-You are a skilled professional at writing resumes. Please perform the following tasks:
-1. Optimize the candidate text to increase semantic precision and similarity with the reference text.
-2. Reduce the semantic distance between the candidate text and reference text.
-3. Enhance entailment relationships, where the candidate text serves as the premise and the reference text serves as the hypothesis.
-4. For the entailment task, the candidate text serves as the premise and the reference text serves as the hypothesis, reversing their typical roles.
-5. Improve the overall alignment and relevance between the two texts, without compromising their directional relationship.
-6. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
-
-**Candidate text:**
-"{content_1}"
-
-**Reference text:**
-"{content_2}"
-
-**Return Format:**
-Return only a valid JSON object, without markdown formatting, as follows:
-
-{{
-  "optimized_text": "Edited version of candidate text"
-}}
-
-Return only the JSON block without any additional text, explanations, or markdown syntax.
-"""
 
 ENTAILMENT_ALIGNMENT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
 1. Modify the **premise text** to enhance its entailment relationship with the **hypothesis text**.
-2. Improve the overall alignment and relevance between the two texts without changing the directional relationship.
-3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
-4. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+2. Improve the overall alignment and relevance between the two texts without changing \
+the directional relationship.
+3. Do not copy specific experience durations directly from the reference text \
+(e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). \
+Instead, express relevant experience in more general terms or use ranges that reflect \
+the candidate’s actual experience.
+4. If improving entailment would require introducing new technical or skill claims—\
+including named tools, frameworks, libraries, platforms, systems, or skills—that are \
+not explicitly present or clearly implied in the premise text, do NOT add them. \
+Prefer partial entailment over fabricated completeness.
+
+You are a skilled professional at writing resumes. Please perform the following tasks:
+1. Modify the **premise text** to strengthen its semantic entailment relationship with the **hypothesis text**.
+The edited premise must remain fully inferable from the original premise alone.
+2. Improve alignment and relevance without changing the directional relationship \
+(the premise must support the hypothesis; the hypothesis must not introduce new facts).
+3. Asymmetric Entailment Rule: Do not use the hypothesis as a source of new information. \
+If full entailment is not possible, prefer partial entailment over expansion or invention.
+4. No Bridge Clauses: Do not introduce justificatory or interpretive phrases such as \
+“demonstrating,” “showing,” “evidenced by,” “acting as,” or similar constructions that infer new capabilities.
+5. No Scope Creep: Do not add new responsibilities, domains, stakeholders, levels of seniority, or tools.
+If improving entailment would require introducing new technical or skill claims—including named tools, frameworks, libraries, platforms, systems, or skills—not explicitly present or clearly implied in the premise text, do not add them.
+6. Controlled Terminology Mapping: Where appropriate, reuse verbs and nouns from the hypothesis only when they accurately re-express actions already present in the premise.
+Do not force terminology alignment if the underlying action is not entailed.
+7. Experience Duration Handling: Do not copy specific experience durations directly from the hypothesis (e.g., “11 years experience,” “more than 10 years,” “8+ years”).
+Instead, express experience in general terms or ranges that accurately reflect the premise.
+
 
 **Premise text:**
 "{content_1}"
@@ -183,9 +183,19 @@ Return only the JSON block without any additional text, explanations, or markdow
 
 SEMANTIC_ALIGNMENT_PROMPT = """
 You are a skilled professional at writing resumes. Please perform the following tasks:
-1. Optimize the **candidate text** to increase semantic precision and similarity with the **reference text**.
+1. Optimize the **candidate text** to increase semantic precision and similarity with \
+the **reference text**.
 2. Reduce the semantic distance between them.
-3. Do not copy specific experience durations directly from the reference text (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). Instead, express relevant experience in more general terms or use ranges that encompass the candidate's actual experience.
+3. Do not copy specific experience durations directly from the reference text \
+(e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). \
+Instead, express relevant experience in more general terms or use ranges that reflect \
+the candidate’s actual experience.
+4. Do not introduce new technical or skill claims—including named tools, frameworks, \
+libraries, platforms, or systems—unless they are present or clearly supported by the \
+original text. Achieve semantic similarity through wording, abstraction, or emphasis, \
+not by adding new claims.
+
+
 
 **Candidate text:**
 "{content_1}"
@@ -213,7 +223,10 @@ that the original meaning of the **target text** is preserved as much as possibl
 'executed,' etc., and explicitly avoid role-based constructions like 'professional who is,' 'was involved in,' or \
 'held a position of.' Instead, focus on action-based descriptions that highlight what was achieved or done, \
 such as 'led a team,' 'implemented strategies,' or 'drove improvements.'
-3. Do not copy specific experience durations directly from the reference text \
+4. **Do not introduce any new outcomes, impacts, audiences, stakeholders, or claims that are not clearly supported \
+by the source text. If such elements appear in the target text, remove or soften them. \
+Prefer deletion over addition when resolving conflicts between the target and source texts.**
+5. Do not copy specific experience durations directly from the reference text \
 (e.g., "11 years experience in...", "more than 10 years in...", "8 years experience"). \
 Instead, express relevant experience in more general terms or use ranges that encompass the candidate's \
 actual experience.

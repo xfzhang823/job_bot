@@ -1,4 +1,5 @@
-"""Alignment Review pipeline (FSM-driven).
+"""
+Alignment Review pipeline (FSM-driven).
 
 This stage exports the classic Excel crosstab for a URL, using records in
 `similarity_metrics` (prefer version="edited"). It follows the same URL-only,
@@ -61,7 +62,7 @@ from job_bot.db_io.pipeline_enums import (
     Version,
 )
 from job_bot.utils.file_name_utils import _slug, _short_hash, _extract_job_id
-
+from job_bot.utils.resp_key_sorter import resp_key_sorter
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +335,7 @@ def export_alignment_review_excel(xtab: pd.DataFrame, out_path: str | Path) -> P
     #   row 2 = xtab.iloc[0]  (requirement_key header row)
     #   row 3+ = xtab.iloc[1:] (responsibility rows)
     header = xtab.iloc[:1]
-    body = xtab.iloc[1:].sort_values("Resp Key / Req Key")
+    body = xtab.iloc[1:].sort_values("Resp Key / Req Key", key=resp_key_sorter)
     xtab = pd.concat([header, body], ignore_index=True)
 
     with pd.ExcelWriter(out_path, engine="xlsxwriter") as xw:
@@ -384,7 +385,8 @@ def _edited_resps_best_match_map(
         df_edited: Edited responsibilities for the same URL.
 
     Returns:
-        A dictionary mapping responsibility_key → best-match edited responsibility text.
+        A dictionary mapping responsibility_key → best-match edited
+        responsibility text.
 
     Raises:
         ValueError: If either input DataFrame is missing required columns.
@@ -410,9 +412,13 @@ def _edited_resps_best_match_map(
     dfe["requirement_key"] = dfe["requirement_key"].astype(str)
 
     # Best requirement per responsibility by highest composite_score
+    dfm2 = dfm.copy()
+    dfm2["_resp_sort"] = resp_key_sorter(dfm2["responsibility_key"])
+
     best = (
-        dfm.sort_values(
-            ["responsibility_key", "composite_score"], ascending=[True, False]
+        dfm2.sort_values(
+            ["responsibility_key", "composite_score"],
+            ascending=[True, False],
         )
         .groupby("responsibility_key", as_index=False)
         .first()[["responsibility_key", "requirement_key"]]

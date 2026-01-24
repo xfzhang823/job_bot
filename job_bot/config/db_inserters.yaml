@@ -14,6 +14,7 @@ tables:
   job_urls:
     dedup: pk_scoped
     stamp:
+      url: param
       created_at: now_on_insert
       updated_at: now
       iteration: none
@@ -24,6 +25,7 @@ tables:
   job_postings:
     dedup: pk_scoped
     stamp:
+      url: param
       iteration: param
       llm_provider: param
       model_id: param
@@ -31,6 +33,7 @@ tables:
   flattened_responsibilities:
     dedup: pk_scoped
     stamp:
+      url: param
       iteration: param
       llm_provider: param
       model_id: param
@@ -38,6 +41,7 @@ tables:
   edited_responsibilities:
     dedup: pk_scoped
     stamp:
+      url: param
       iteration: param
       llm_provider: param
       model_id: param
@@ -45,6 +49,7 @@ tables:
   extracted_responsibilities:
     dedup: pk_scoped
     stamp:
+      url: param
       iteration: param
       llm_provider: default
       model_id: default
@@ -52,6 +57,7 @@ tables:
   similarity_metrics:
     dedup: pk_scoped
     stamp:
+      url: param
       iteration: param
       resp_llm_provider: param
       resp_model_id: param
@@ -59,6 +65,7 @@ tables:
   pipeline_control:
     dedup: pk_scoped
     stamp:
+      url: param
       iteration: none
 
   url_resume_variant:
@@ -66,6 +73,5 @@ tables:
     inherit:
       iteration: none
     stamp:
+      url: param
       iteration: none
-
-

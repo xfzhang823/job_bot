@@ -16,10 +16,9 @@ from pydantic import ValidationError, BaseModel
 from openai import OpenAI
 from anthropic import Anthropic
 
-from prompts.prompt_templates import (
+from job_bot.prompts.prompt_templates import (
     SEMANTIC_ALIGNMENT_PROMPT,
     ENTAILMENT_ALIGNMENT_PROMPT,
-    SEMANTIC_ENTAILMENT_ALIGNMENT_PROMPT,
     STRUCTURE_TRANSFER_PROMPT,
 )
 from llm_providers.llm_api_utils import (

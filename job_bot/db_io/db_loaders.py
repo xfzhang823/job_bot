@@ -63,7 +63,7 @@ import yaml
 # User defined
 from job_bot.db_io.get_db_connection import get_db_connection
 from job_bot.db_io.db_schema_registry import DUCKDB_SCHEMA_REGISTRY
-from job_bot.db_io.pipeline_enums import TableName, PipelineStatus
+from job_bot.db_io.pipeline_enums import TableName, PipelineStatus, Version
 from job_bot.models.db_loaders_config_models import (
     LoaderConfig,
     TableLoaderConfig,
@@ -80,15 +80,6 @@ _ORDER_HINTS = ["updated_at", "created_at", "iteration"]
 with open(DB_LOADERS_YAML, "r") as f:
     LOADER_CFG = LoaderConfig.model_validate(yaml.safe_load(f))
     logger.info(f"Loaded yaml config ({DB_LOADERS_YAML}) into config model.")
-
-    # todo: debug; delete later
-    logger.debug("LOADER tables: %s", list(LOADER_CFG.tables.keys()))
-    logger.debug(
-        "pipeline_control.filters: %s", LOADER_CFG.tables["pipeline_control"].filters
-    )
-    logger.debug(
-        "pipeline_control.order_by: %s", LOADER_CFG.tables["pipeline_control"].order_by
-    )
 
 
 def load_table(
@@ -138,6 +129,8 @@ def load_table(
     raw = dict(filters)
     if "status" in raw and isinstance(raw["status"], PipelineStatus):
         raw["status"] = raw["status"].value
+    if "version" in raw and isinstance(raw["version"], Version):
+        raw["version"] = raw["version"].value
 
     allowed = _allowed_predicates(table, tbl_loader_config.filters)
     preds = {k: v for k, v in raw.items() if k in allowed and v is not None}
@@ -180,11 +173,6 @@ def _allowed_predicates(table: TableName, cfg_filters: Sequence[str]) -> set[str
     schema = DUCKDB_SCHEMA_REGISTRY[table]
     # union of PK + metadata from registry; intersect with config whitelist
     allowed = set(schema.primary_keys) | set(schema.metadata_fields)
-
-    # todo: debug; delete later
-    logger.debug(f"schema pks: {set(schema.primary_keys)}")
-    logger.debug(f"schema meta fields: {set(schema.metadata_fields)}")
-    logger.debug(f"allowed_fields: {allowed}")
 
     return allowed & set(cfg_filters)
 

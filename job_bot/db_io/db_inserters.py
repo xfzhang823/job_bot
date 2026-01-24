@@ -62,7 +62,8 @@ def insert_df_with_config(
     mode : {"append", "replace"}, default="append"
         Intent marker; actual dedup policy is determined by YAML.
     stamps_kwargs : Any
-        Extra per-row values for stamp:param fields (e.g., resp_llm_provider, resp_model_id).
+        Extra per-row values for stamp:param fields (e.g., resp_llm_provider,
+        resp_model_id).
 
     Raises
     ------
@@ -122,6 +123,23 @@ def insert_df_with_config(
 
     # Align to schema (strict: reorders/keeps only known columns)
     df = align_df_with_schema(df, schema.column_order, strict=False)
+
+    # Enforce PK columns are not Null
+    required_not_null = set(schema.primary_keys or [])
+
+    bad = {
+        c: int(df[c].isna().sum())
+        for c in required_not_null
+        if c in df.columns and df[c].isna().any()
+    }
+    if bad:
+        sample = df.loc[df[list(bad)].isna().any(axis=1), list(required_not_null)].head(
+            5
+        )
+        raise ValueError(
+            f"❌ Refusing to insert into '{tbl.value}': NULLs in required columns {bad}. "
+            f"Sample:\n{sample}"
+        )
 
     # Schema sanity (belt-and-suspenders)
     missing = [c for c in schema.column_order if c not in df.columns]
