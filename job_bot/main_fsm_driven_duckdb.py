@@ -147,11 +147,11 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
     #! Toggle btw scrape and manual upload
     # * Run scraping pipeline first
     # JOB_URLS → JOB_POSTINGS (Webscrape)
-    # await run_job_postings_pipeline_async_fsm(max_concurrent_tasks=3, retry_errors=True)
+    await run_job_postings_pipeline_async_fsm(max_concurrent_tasks=3, retry_errors=True)
 
-    # * Use the fallback one if site doesn't allow scraping
-    # Fallback to import manually from JSON file
-    await run_job_postings_manual_import_async_fsm(max_concurrent_tasks=3)
+    # # * Use the fallback one if site doesn't allow scraping
+    # # Fallback to import manually from JSON file
+    # await run_job_postings_manual_import_async_fsm(max_concurrent_tasks=3)
 
     # JOB_POSTINGS → FLATTENED_REQUIREMENTS
     await run_extract_to_flattened_requirements_pipeline_async_fsm(retry_errors=True)
@@ -173,15 +173,15 @@ async def run_all_fsm(*, append_only_urls: bool = True) -> None:
     # FLATTENED_RESPONSIBILITIES → EDITED_RESPONSIBILITIES
     await run_resume_editing_pipeline_async_fsm(
         no_of_concurrent_workers_for_llm=1, retry_errors=True
-    )  #! set to 1 to debug
+    )  #! set concurrent worker to 1 to debug
 
-    # # run on SIM METRICS - REVAL (based on edited resps)
-    # await run_similarity_metrics_reval_pipeline_async_fsm(
-    #     max_concurrent_tasks=4, retry_errors=True
-    # )
+    # run on SIM METRICS - REVAL (based on edited resps)
+    await run_similarity_metrics_reval_pipeline_async_fsm(
+        max_concurrent_tasks=4, retry_errors=True
+    )
 
-    # # SIM METRICS -> Crosstab for human review
-    # await run_alignment_review_pipeline_async_fsm(retry_errors=True)
+    # SIM METRICS -> Crosstab for human review
+    await run_alignment_review_pipeline_async_fsm(retry_errors=True)
 
 
 if __name__ == "__main__":
