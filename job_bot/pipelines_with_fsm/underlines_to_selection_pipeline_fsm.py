@@ -50,7 +50,9 @@ Notes
 - The tool ignores columns whose headers end with "(Score)" and the column
   named exactly "Original Responsibility".
 - If multiple cells are underlined in a row, the first is taken (a WARNING is logged).
-- If a row has no underlined cell, it is skipped (DEBUG logs will note counts).
+- If a row has no underlined cell, it is still emitted with
+  matching_requirement="delete this row" and selected_text filled from
+  "Original Responsibility".
 
 Dependencies
 ------------
@@ -206,9 +208,10 @@ def extract_underlined_from_xlsx(
     -----
     - If **multiple cells are underlined** in one row, the **first** is taken
       (logged with a WARNING).
-    - If a row has **no underlined cell**, it is skipped.
-      A summary WARNING is logged with the count and sample `responsibility_key`s,
-      since this may indicate human error.
+    - If a row has **no underlined cell**, it is still emitted with
+      matching_requirement="delete this row" and selected_text filled from the
+      "Original Responsibility" column (if present). A summary INFO log is
+      emitted with the count and sample `responsibility_key`s.
     - Columns ending with "(Score)" and the "Original Responsibility" column
       are ignored during scanning.
     - Both "review_grid" and "Alignment Review" sheet names are auto-detected.
@@ -269,6 +272,10 @@ def extract_underlined_from_xlsx(
         i for i, h in enumerate(headers, start=1) if h in {"Original Responsibility"}
     }
     text_cols = [i for i in range(1, ncols + 1) if i not in score_cols | skip_cols]
+    orig_resp_col = next(
+        (i for i, h in enumerate(headers, start=1) if h == "Original Responsibility"),
+        None,
+    )
 
     logger.debug("  Score col idx  : %s", sorted(score_cols))
     logger.debug("  Skip col idx   : %s", sorted(skip_cols))
@@ -307,6 +314,18 @@ def extract_underlined_from_xlsx(
             rows_no_underline += 1
             no_sel_keys.append(resp_key)
             logger.debug("  No underline on row (resp_key=%s)", resp_key)
+            orig_resp = ""
+            if orig_resp_col is not None:
+                orig_val = cells[orig_resp_col - 1].value
+                if orig_val is not None:
+                    orig_resp = str(orig_val).strip()
+            rows_out.append(
+                {
+                    "responsibility_key": resp_key,
+                    "selected_text": orig_resp,
+                    "matching_requirement": "delete this row",
+                }
+            )
             continue
 
         if len(underlined_cells) > 1:
@@ -326,7 +345,7 @@ def extract_underlined_from_xlsx(
             {
                 "responsibility_key": resp_key,
                 "selected_text": text,
-                "column_header": header,
+                "matching_requirement": header,
             }
         )
 
@@ -352,9 +371,9 @@ def extract_underlined_from_xlsx(
     # --- Summary logging for potential human misses ---
     if rows_no_underline > 0:
         sample = ", ".join(no_sel_keys[:10])
-        logger.warning(
-            "⚠️  %d row(s) have no underlined selection. This may indicate human error.\n"
-            "   Sample responsibility_keys: %s%s",
+        logger.info(
+            "%d row(s) have no underlined selection; marking matching_requirement"
+            " as 'delete this row'. Sample responsibility_keys: %s%s",
             rows_no_underline,
             sample,
             " ..." if len(no_sel_keys) > 10 else "",
